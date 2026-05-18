@@ -10,6 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from app.ui_components import render_demo_notice
 from src.audio_classifier import load_audio_model
 from src.audio_preprocessor import audio_arrays_from_bytes, extract_mfcc_from_bytes, spectrogram_db
 from src.explainability import educational_summary
@@ -18,6 +19,11 @@ from src.explainability import educational_summary
 @st.cache_resource(show_spinner=False)
 def _load_audio_classifier(root: str):
     return load_audio_model(Path(root) / "models" / "audio_svm.pkl")
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def _load_uploaded_audio(audio_bytes: bytes, suffix: str) -> tuple[np.ndarray, int]:
+    return audio_arrays_from_bytes(audio_bytes, suffix=suffix)
 
 
 def _probability_chart(probabilities: dict[str, float]) -> go.Figure:
@@ -81,7 +87,8 @@ def _record(history: list[dict[str, object]], result: dict[str, object], filenam
 
 
 def render_audio_tab(root: Path, history: list[dict[str, object]]) -> None:
-    st.header("AI-Generated Speech Detection")
+    render_demo_notice(root)
+    st.subheader("AI-Generated Speech Detection")
 
     uploaded_file = st.file_uploader(
         "Upload a voice recording",
@@ -98,7 +105,7 @@ def render_audio_tab(root: Path, history: list[dict[str, object]]) -> None:
     st.audio(audio_bytes)
 
     try:
-        y, sr = audio_arrays_from_bytes(audio_bytes, suffix=suffix)
+        y, sr = _load_uploaded_audio(audio_bytes, suffix)
         st.subheader("Waveform")
         st.plotly_chart(_waveform_figure(y, sr), use_container_width=True)
 

@@ -1,0 +1,6 @@
+sample_id,text,label,source
+DEMO-EMAIL-001,"Urgent: your university email account will be suspended within 24 hours. Verify your account at https://example-login.invalid.",Suspicious,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
+DEMO-EMAIL-002,"Reminder: your lab session starts at 10 AM. Please review the slides before class.",Legitimate,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
+DEMO-EMAIL-003,"Scholarship selected notice. Kindly pay RM150 processing fee today to release your award.",Suspicious,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
+DEMO-EMAIL-004,"The library book you requested is ready for collection at the front desk.",Legitimate,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
+DEMO-EMAIL-005,"Final warning from finance office: tuition payment failed. Send your bank account details immediately.",Suspicious,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION

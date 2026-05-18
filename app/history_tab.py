@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 
-def render_history_tab(history: list[dict[str, object]]) -> None:
-    st.header("Session Detection History")
+def render_history_tab(root: Path, history: list[dict[str, object]]) -> None:
+    st.subheader("Session Detection History")
 
     if not history:
         st.info("No detections have been run in this session yet.")

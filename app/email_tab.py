@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from app.ui_components import get_demo_data, render_demo_notice
 from src.explainability import (
     educational_summary,
     find_suspicious_phrases,
@@ -129,17 +130,29 @@ def _display_result(result: dict[str, object], text: str, classifier: object | N
 
 
 def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
-    st.header("Email and Message Scam Detection")
+    render_demo_notice(root)
+    st.subheader("Email and Message Scam Detection")
+    demo_emails = get_demo_data()["emails"]
 
     controls, input_area = st.columns([0.28, 0.72])
     with controls:
         model_choice = st.radio("Text model", list(MODEL_FILES.keys()), horizontal=False)
+        demo_choice = st.selectbox(
+            "Try synthetic demo email",
+            ["None"] + demo_emails["sample_id"].tolist(),
+        )
         uploaded_file = st.file_uploader("Upload email text or CSV", type=["txt", "csv"], key="email_upload")
         analyze_button = st.button("Analyze email", type="primary", use_container_width=True)
 
     uploaded = _read_uploaded_text(uploaded_file)
+    if demo_choice != "None":
+        selected = demo_emails.loc[demo_emails["sample_id"] == demo_choice].iloc[0]
+        default_text = str(selected["text"])
+    elif isinstance(uploaded, str):
+        default_text = uploaded
+    else:
+        default_text = ""
     with input_area:
-        default_text = uploaded if isinstance(uploaded, str) else ""
         text = st.text_area(
             "Paste suspicious email or message",
             value=default_text,
