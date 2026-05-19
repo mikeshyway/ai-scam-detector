@@ -69,7 +69,7 @@ def inject_css() -> None:
     st.markdown(
         """
         <style>
-        .block-container { padding-top: 1rem; padding-bottom: 2rem; max-width: 1280px; }
+        .block-container { padding-top: 2rem; padding-bottom: 2.5rem; max-width: 1280px; }
         [data-testid="stSidebar"] { border-right: 1px solid rgba(148, 163, 184, 0.2); }
         .app-header {
             border: 1px solid rgba(148, 163, 184, 0.24);
@@ -79,6 +79,7 @@ def inject_css() -> None:
             background:
               linear-gradient(135deg, rgba(37, 99, 235, 0.15), rgba(20, 184, 166, 0.08)),
               rgba(15, 23, 42, 0.05);
+            animation: soft-rise 260ms ease-out;
         }
         .app-header h1 { margin: 0.15rem 0 0.35rem 0; font-size: 2rem; line-height: 1.15; }
         .app-header p { margin: 0; color: #94a3b8; max-width: 980px; }
@@ -106,8 +107,40 @@ def inject_css() -> None:
             padding: 1rem;
             min-height: 138px;
             background: rgba(15, 23, 42, 0.04);
+            animation: soft-rise 300ms ease-out;
         }
         .feature-card h3 { margin-top: 0; font-size: 1.05rem; }
+        .scenario-panel {
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            border-radius: 14px;
+            padding: 1rem;
+            margin: 0.75rem 0 1rem 0;
+            background: rgba(15, 23, 42, 0.06);
+            animation: soft-rise 300ms ease-out;
+        }
+        .scenario-panel h2 { margin: 0.2rem 0 0.7rem 0; font-size: 1.35rem; }
+        .scenario-panel pre {
+            white-space: pre-wrap;
+            font-family: var(--font);
+            margin-bottom: 0;
+            line-height: 1.55;
+        }
+        .scenario-meta { color: #38bdf8; font-size: 0.82rem; font-weight: 700; }
+        .sim-timer {
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            border-radius: 12px;
+            padding: 0.75rem;
+            background: rgba(15, 23, 42, 0.05);
+            font-family: sans-serif;
+        }
+        .timer-label { color: #94a3b8; font-size: 0.78rem; }
+        .timer-value { font-size: 1.45rem; font-weight: 800; margin: 0.2rem 0; }
+        .timer-track { height: 8px; border-radius: 99px; background: rgba(148, 163, 184, 0.25); overflow: hidden; }
+        .timer-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #22c55e, #f59e0b, #ef4444); transition: width 0.2s linear; }
+        @keyframes soft-rise {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
         mark {
             background: #ffe08a;
             color: #2b2112;

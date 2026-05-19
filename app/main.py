@@ -32,6 +32,12 @@ def _dashboard(root: Path, history: list[dict[str, object]]) -> None:
     render_dashboard_page(root, history)
 
 
+def _simulation(root: Path, history: list[dict[str, object]]) -> None:
+    from app.simulation_lab_page import render_simulation_lab_page
+
+    render_simulation_lab_page(root, history)
+
+
 def _email(root: Path, history: list[dict[str, object]]) -> None:
     from app.email_tab import render_email_tab
 
@@ -82,6 +88,7 @@ def _history(root: Path, history: list[dict[str, object]]) -> None:
 
 PAGES = {
     "🏠 Home": _home,
+    "🎮 Scam Simulation Lab": _simulation,
     "📊 Dashboard": _dashboard,
     "📧 Email Detection": _email,
     "📞 Transcript Detection": _transcript,

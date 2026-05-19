@@ -11,6 +11,7 @@ visual dashboards, and clear feedback for students.
 ## App Pages
 
 - Home: project focus, main feature pillars, and demo-data status.
+- Scam Simulation Lab: turn-based scam encounter, AI investigation, defense practice, countdown, and checkpoint retry.
 - Dashboard: model readiness, temporary demo-data coverage, and session activity.
 - Email Detection: phishing-style email/message analysis.
 - Transcript Detection: scam transcript analysis for calls, Zoom, Teams, and Google Meet.
@@ -77,6 +78,12 @@ streamlit run app/main.py
 
 ## Dataset Placement
 
+Detailed methodology setup instructions are in:
+
+```text
+data/DATASET_SETUP.md
+```
+
 Place official datasets in the following folders before training:
 
 ```text
@@ -128,6 +135,14 @@ telephony integration, explicit user consent, platform permissions, and legal re
 
 The included Phone Risk Demo is only a manual, synthetic reputation checker for educational
 discussion.
+
+## Change Log
+
+Implementation changes and removed/ineligible proposal items are documented in:
+
+```text
+changes.md
+```
 
 ## Ethical Use
 

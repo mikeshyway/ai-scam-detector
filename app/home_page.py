@@ -13,13 +13,14 @@ def render_home_page(root: Path, history: list[dict[str, object]]) -> None:
     render_demo_notice(root)
     st.subheader("Project Focus")
     st.write(
-        "This system teaches students how AI-assisted scams can be detected across text, "
-        "meeting transcripts, and uploaded voice recordings. The main goal is awareness "
-        "and explainability, not replacing commercial caller-ID or cybersecurity products."
+        "This system teaches students how AI-assisted scams work by combining a turn-based "
+        "simulation lab with explainable detection for text, transcripts, phone-risk examples, "
+        "and uploaded voice recordings."
     )
 
-    cols = st.columns(3)
+    cols = st.columns(4)
     cards = [
+        ("🎮 Simulation lab", "Experience scam pressure, make a decision before the timer ends, then investigate and defend."),
         ("📧 Email phishing", "Paste or upload messages and inspect scam language, confidence scores, and highlighted red flags."),
         ("📞 Caller fraud transcripts", "Analyze call, Zoom, Teams, or Google Meet transcripts for urgency, payment, secrecy, and identity cues."),
         ("🎙️ AI speech detection", "Upload .wav or .flac voice recordings to view waveform, spectrogram, MFCC features, and SVM output."),
