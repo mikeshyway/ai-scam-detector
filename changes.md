@@ -2,24 +2,23 @@
 
 This document records project changes made after the original proposal so the implementation stays aligned with the capstone objective.
 
-## Main Direction Change
+## Current Direction
 
-The project now prioritises the **Scam Simulation Lab** as the main student-facing showcase feature.
+The project now presents itself as an **uploaded-evidence scam awareness and detection lab**.
 
-Reason:
+The strongest student-facing feature is the Scam Simulation Lab. It demonstrates how an uploaded meeting/call recording can be split into short chunks, analyzed, and explained.
 
-- A detection-only app can show a confidence score, but the proposal also promises cybersecurity education and student empowerment.
-- The simulation makes students experience scam pressure, investigate attacker motive with AI support, and practice defense steps.
-- The ML models remain important, but they now support a stronger educational workflow.
+## Current Page Structure
 
-## Current Main Feature Priority
+1. Home
+2. Dashboard
+3. Scam Simulation Lab
+4. Detection Center
+5. AI Report Generator
+6. Transparency Hub
+7. Session History
 
-1. Scam Simulation Lab
-2. Email phishing detection
-3. Transcript scam detection
-4. AI-generated speech upload detection
-5. Phone-number risk demo
-6. Dashboard, explainability, model comparison, and quiz support pages
+The old standalone quiz page was removed. Scenario questions now reside inside the turn-based section of the Scam Simulation Lab.
 
 ## Added
 
@@ -27,46 +26,79 @@ Reason:
 - `app/detection_center_page.py`
 - `app/report_page.py`
 - `src/scenarios.py`
-- `src/live_audio_simulation.py`
+- `src/recording_audio_simulation.py`
 - Turn-based simulation state using `st.session_state`
+- Start-session gate before scenario content appears
 - Countdown-style phase timer
 - Retry-from-checkpoint behavior
-- Live-call-style uploaded recording simulation
-- 5-10 second audio chunk analysis
+- Uploaded recording chunk analysis
+- 5-10 second audio chunk processing
 - PDF/DOCX/TXT report generator
+- Malaysia-time report timestamps via `src/time_utils.py`
 - Attacker motive explanations
-- Defense steps and mini-quiz checks
+- Defense steps and mini-quiz checks inside the simulation
 - Simulation entries in session history
 - `data/DATASET_SETUP.md`
 
 ## UI Design Change
 
-The interface now uses a cleaner, Notion-like Streamlit layout with:
+The interface was rebuilt with a cleaner Streamlit layout:
 
-- Sidebar navigation
-- Visible app header
-- Soft cards
-- Rounded panels
-- Light animation
-- Better content spacing
-- CSS-only shadcn-inspired styling
+- Text-only sidebar navigation buttons
+- No radio-button page menu
+- No emoji-heavy page labels
+- System status moved into a collapsible sidebar section
+- Tailwind-inspired spacing, borders, cards, and gradients through custom CSS
+- Increased main-content top padding so Streamlit's top toolbar does not cover content
 
-Direct `shadcn/ui` was not used because it is built for React/Tailwind applications. Streamlit can use custom HTML/CSS and custom components, but importing shadcn directly is outside the normal Streamlit Python workflow. The practical alternative is Streamlit CSS styling inspired by shadcn design.
+Direct `shadcn/ui` was not used because it is built for React/Tailwind applications. Streamlit can use custom HTML/CSS and custom components, but importing shadcn directly is outside the normal Streamlit Python workflow. The practical alternative is Streamlit CSS styling inspired by modern Tailwind/shadcn layouts.
 
-## Page Structure Remodel
+## Real-Time Feature Decision
 
-The app now follows this page structure:
+### Automatic Email/Text/Call Blocking
 
-1. Home Page
-2. Dashboard
-3. Scam Simulation Lab
-4. Detection Center
-5. AI Report Generator
-6. Scenario-Based Scam Awareness Quiz
-7. Transparency & Explainability Hub
-8. Session History
+Not implemented.
 
-## No Longer Eligible or Intentionally Excluded
+Reason:
+
+- Streamlit does not connect to email inboxes, SMS systems, meeting platforms, or telecom systems in this prototype.
+- Real pre-delivery blocking would require mail-server integration, mobile OS permissions, browser/meeting-platform hooks, telecom or VoIP APIs, consent handling, and legal review.
+
+Replacement:
+
+- Uploaded-evidence detection only.
+- Paste email/text.
+- Upload `.txt`, `.csv`, `.wav`, `.flac`, `.mp3`, or `.m4a`.
+
+### Phone Number Integration
+
+Not implemented.
+
+Reason:
+
+- Streamlit does not access telecom identity systems.
+- A true caller-ID system requires a separate mobile app or telecom/VoIP integration.
+
+Replacement:
+
+- Manual Phone Number Risk Checker using educational heuristics and synthetic demo reputation data.
+
+### PC Meeting Platform Integration
+
+Not implemented.
+
+Reason:
+
+- Streamlit does not connect directly to Zoom, Teams, or Google Meet audio streams.
+
+Replacement:
+
+- Upload exported meeting/call recording.
+- Split audio into 5-10 second chunks.
+- Run MFCC extraction and SVM/demo prediction per chunk.
+- Show chunk confidence results as an educational replay-style analysis.
+
+## Other Excluded Items
 
 ### Real-Time Microphone Recording
 
@@ -74,32 +106,7 @@ Excluded because Streamlit microphone support is not reliable across Kali Linux/
 
 Replacement:
 
-- Audio upload only with `.wav` and `.flac`.
-
-### Automatic Phone Call Recording
-
-Excluded because Streamlit cannot intercept real phone calls, access caller ID, or record mobile calls automatically.
-
-Reason:
-
-- Requires Android/iOS telephony APIs, permissions, consent handling, and legal review.
-- Better suited for a separate mobile app or VoIP integration.
-
-Replacement:
-
-- Manual Phone Risk Demo using synthetic reputation data.
-- Phone can access the same Streamlit app through LAN/ngrok during a demo, but this is not telecom integration.
-
-### True Live Video Call Interception
-
-Excluded because Streamlit cannot directly intercept Zoom/Teams/Google Meet calls in real time.
-
-Replacement:
-
-- Upload meeting/call recording.
-- Split audio into 5-10 second chunks.
-- Run MFCC extraction and SVM/demo prediction per chunk.
-- Show rolling confidence results to simulate near-real-time detection.
+- Audio upload only.
 
 ### Suspicious Timestamp Replay in Audio
 
@@ -107,18 +114,19 @@ Excluded because MFCC + SVM classification cannot reliably identify exact suspic
 
 Replacement:
 
+- Chunk-level uploaded-recording analysis.
 - Full audio playback.
 - Waveform.
 - Spectrogram.
-- File-level classification.
 
-### SMTP Live Email Alerts
+### SMTP Email Alerts
 
 Excluded because email-server configuration adds avoidable risk and does not improve the educational objective.
 
 Replacement:
 
-- Streamlit `st.warning()` and `st.error()` banners.
+- Downloadable TXT/PDF/DOCX reports.
+- Streamlit warning and error banners.
 
 ### Persistent SQL History
 
@@ -147,12 +155,11 @@ Replacement:
 
 ## Performance Changes
 
-- `@st.cache_data` added for demo data, dataset/model status, dashboard summaries, transcript demo loading, and uploaded audio parsing.
+- `@st.cache_data` added for demo data, dataset/model status, dashboard summaries, transcript demo loading, uploaded audio parsing, and chunk analysis.
 - `@st.cache_resource` retained for trained model artifacts.
-- Page modules are lazy-loaded in `app/main.py` so heavier imports only run when the selected page needs them.
-- Audio parsing is cached by uploaded bytes and suffix.
+- Page modules are lazy-loaded in `app/main.py`.
 - Detection tools are grouped in a single Detection Center page to reduce sidebar clutter.
-- The old standalone model-comparison page was removed because model comparison now belongs inside the Transparency & Explainability Hub.
+- The old standalone model-comparison page was removed because model comparison now belongs inside the Transparency Hub.
 
 ## Remaining Limitations
 

@@ -20,7 +20,7 @@ from src.explainability import (
 )
 from src.scenarios import ScamScenario, get_scenario, get_scenarios
 from src.text_classifier import load_text_artifacts
-from src.live_audio_simulation import analyze_audio_chunks, load_optional_audio_model, spectrogram_db
+from src.recording_audio_simulation import analyze_audio_chunks, load_optional_audio_model, spectrogram_db
 
 
 PHASES = ("encounter", "investigate", "defend", "complete")
@@ -57,6 +57,7 @@ def _init_simulation_state() -> None:
         "sim_deadline": 0.0,
         "sim_failed": False,
         "sim_feedback": "",
+        "sim_started": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -76,6 +77,7 @@ def _reset_scenario(scenario: ScamScenario) -> None:
     st.session_state.sim_score = 0
     st.session_state.sim_decision = ""
     st.session_state.sim_free_text = ""
+    st.session_state.sim_started = True
     _set_phase("encounter", scenario)
 
 
@@ -88,6 +90,7 @@ def _expired() -> bool:
 
 
 def _countdown(seconds: int) -> None:
+    duration = max(seconds, 1)
     html(
         f"""
         <style>
@@ -101,7 +104,14 @@ def _countdown(seconds: int) -> None:
         .timer-label {{ color: #64748b; font-size: 0.78rem; }}
         .timer-value {{ font-size: 1.45rem; font-weight: 800; margin: 0.2rem 0; }}
         .timer-track {{ height: 8px; border-radius: 99px; background: rgba(148, 163, 184, 0.28); overflow: hidden; }}
-        .timer-fill {{ height: 100%; width: 100%; background: linear-gradient(90deg, #22c55e, #f59e0b, #ef4444); transition: width 0.2s linear; }}
+        .timer-fill {{
+            height: 100%;
+            width: 100%;
+            background: linear-gradient(90deg, #22c55e, #f59e0b, #ef4444);
+            transform-origin: left center;
+            animation: drain {duration}s linear forwards;
+        }}
+        @keyframes drain {{ from {{ transform: scaleX(1); }} to {{ transform: scaleX(0); }} }}
         </style>
         <div class="sim-timer">
           <div class="timer-label">Turn countdown</div>
@@ -109,15 +119,13 @@ def _countdown(seconds: int) -> None:
           <div class="timer-track"><div class="timer-fill" id="timer-fill"></div></div>
         </div>
         <script>
-        const total = {max(seconds, 1)};
+        const total = {duration};
         const started = Date.now();
         const value = document.getElementById("timer-value");
-        const fill = document.getElementById("timer-fill");
         function tick() {{
-          const elapsed = Math.floor((Date.now() - started) / 1000);
+          const elapsed = (Date.now() - started) / 1000;
           const remain = Math.max(total - elapsed, 0);
-          value.textContent = remain + "s";
-          fill.style.width = (remain / total * 100) + "%";
+          value.textContent = remain.toFixed(1) + "s";
           if (remain > 0) window.requestAnimationFrame(tick);
         }}
         tick();
@@ -310,29 +318,29 @@ def _render_complete(scenario: ScamScenario) -> None:
         st.rerun()
 
 
-def _render_live_call_simulation(root: Path, history: list[dict[str, object]]) -> None:
-    st.subheader("Live Video Call AI Scam Voice Detection Simulation")
+def _render_recording_simulation(root: Path, history: list[dict[str, object]]) -> None:
+    st.subheader("Uploaded Recording Scam Voice Detection")
     st.write(
-        "Upload a meeting/call recording and optionally a transcript. The app splits audio into "
-        "5-10 second chunks, extracts MFCC features per chunk, and shows how risk confidence evolves. "
-        "This is a near-real-time educational simulation, not true call interception."
+        "Upload a meeting or call recording and optionally a transcript. The app splits audio into "
+        "5-10 second chunks, extracts MFCC features per chunk, and shows how risk confidence changes "
+        "across the uploaded file."
     )
 
     upload_col, settings_col = st.columns([0.62, 0.38])
     with upload_col:
         uploaded_audio = st.file_uploader(
-            "Upload Zoom/Teams/Google Meet recording audio",
+            "Upload exported Zoom/Teams/Google Meet or phone-call recording audio",
             type=["wav", "flac", "mp3", "m4a"],
-            key="sim_live_audio",
+            key="sim_recording_audio",
         )
         uploaded_transcript = st.file_uploader(
             "Upload meeting transcript file",
             type=["txt", "csv"],
-            key="sim_live_transcript",
+            key="sim_recording_transcript",
         )
     with settings_col:
         chunk_seconds = st.slider("Chunk size", min_value=5, max_value=10, value=5, step=1)
-        st.info("Few-second delay is acceptable. Results update after clicking analyze.")
+        st.info("This uses uploaded-file analysis only.")
 
     transcript_text = ""
     if uploaded_transcript is not None:
@@ -362,7 +370,7 @@ def _render_live_call_simulation(root: Path, history: list[dict[str, object]]) -
             st.warning("No usable chunks were extracted from the recording.")
             return
 
-        st.subheader("Rolling Live Detection Dashboard")
+        st.subheader("Chunk Detection Dashboard")
         metric_cols = st.columns(4)
         metric_cols[0].metric("Chunks", len(results))
         metric_cols[1].metric("Peak confidence", f"{results['confidence'].max():.1f}%")
@@ -398,7 +406,7 @@ def _render_live_call_simulation(root: Path, history: list[dict[str, object]]) -
             {
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "type": "Simulation",
-                "prediction": "Rolling audio analysis",
+                "prediction": "Uploaded recording chunk analysis",
                 "confidence": round(float(results["confidence"].max()), 2),
                 "model": str(results["engine"].iloc[0]),
                 "preview": uploaded_audio.name,
@@ -417,13 +425,31 @@ def _render_decision_simulation(root: Path, history: list[dict[str, object]]) ->
     scenario_titles = {scenario.title: scenario.scenario_id for scenario in scenarios}
     current = get_scenario(st.session_state.sim_scenario_id)
     selected_title = st.selectbox(
-        "Choose scenario",
+        "Choose a case scenario",
         list(scenario_titles.keys()),
         index=list(scenario_titles.values()).index(current.scenario_id),
     )
     selected = get_scenario(scenario_titles[selected_title])
+
+    if not st.session_state.sim_started:
+        st.markdown(
+            f"""
+            <div class="scenario-panel">
+              <div class="scenario-meta">{selected.channel} - {selected.difficulty}</div>
+              <h2>{selected.title}</h2>
+              <p>Select this case and press start. The scenario content, countdown, and quiz only appear after the session begins.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Start session", type="primary", use_container_width=True):
+            _reset_scenario(selected)
+            st.rerun()
+        return
+
     if selected.scenario_id != current.scenario_id:
-        _reset_scenario(selected)
+        st.session_state.sim_scenario_id = selected.scenario_id
+        st.session_state.sim_started = False
         st.rerun()
 
     if st.session_state.sim_deadline <= 0:
@@ -452,8 +478,8 @@ def _render_decision_simulation(root: Path, history: list[dict[str, object]]) ->
 
 def render_simulation_lab_page(root: Path, history: list[dict[str, object]]) -> None:
     st.subheader("Scam Simulation Lab")
-    live_tab, scenario_tab = st.tabs(["Live Call AI Voice Simulation", "Turn-Based Decision Scenario"])
-    with live_tab:
-        _render_live_call_simulation(root, history)
+    recording_tab, scenario_tab = st.tabs(["Uploaded Recording Analysis", "Turn-Based Scenario"])
+    with recording_tab:
+        _render_recording_simulation(root, history)
     with scenario_tab:
         _render_decision_simulation(root, history)

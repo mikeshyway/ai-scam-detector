@@ -5,8 +5,9 @@ __all__ = [
     "audio_preprocessor",
     "demo_data",
     "explainability",
-    "live_audio_simulation",
+    "recording_audio_simulation",
     "scenarios",
     "text_classifier",
     "text_preprocessor",
+    "time_utils",
 ]

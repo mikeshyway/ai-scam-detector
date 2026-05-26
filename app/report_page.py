@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
+from src.time_utils import formatted_now
 
 
 def _report_rows(history: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -18,7 +19,7 @@ def _build_plain_report(rows: list[dict[str, object]], notes: str) -> str:
     lines = [
         "AI-based Spam and Caller Fraud Detection System",
         "Scam Analysis Report",
-        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Generated: {formatted_now()}",
         "",
         "Summary",
         f"Activities included: {len(rows)}",
@@ -53,7 +54,7 @@ def _build_pdf(rows: list[dict[str, object]], notes: str) -> bytes | None:
     story = [
         Paragraph("AI-based Spam and Caller Fraud Detection System", styles["Title"]),
         Paragraph("Scam Analysis Report", styles["Heading2"]),
-        Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]),
+        Paragraph(f"Generated: {formatted_now()}", styles["Normal"]),
         Spacer(1, 12),
     ]
     for row in rows:
@@ -79,7 +80,7 @@ def _build_docx(rows: list[dict[str, object]], notes: str) -> bytes | None:
     document = Document()
     document.add_heading("AI-based Spam and Caller Fraud Detection System", 0)
     document.add_heading("Scam Analysis Report", level=1)
-    document.add_paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    document.add_paragraph(f"Generated: {formatted_now()}")
     for row in rows:
         document.add_heading(f"{row.get('type', '-')}: {row.get('prediction', '-')}", level=2)
         document.add_paragraph(f"Confidence: {row.get('confidence', '-')}")
@@ -112,7 +113,7 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
 
     report_rows = rows or [
         {
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "time": formatted_now(),
             "type": "Demo",
             "prediction": "Synthetic report example",
             "confidence": 0,
@@ -143,7 +144,7 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
         history.insert(
             0,
             {
-                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "time": formatted_now(),
                 "type": "Report",
                 "prediction": "Generated",
                 "confidence": 100,

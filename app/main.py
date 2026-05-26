@@ -56,12 +56,6 @@ def _explainability(root: Path, history: list[dict[str, object]]) -> None:
     render_explainability_page(root, history)
 
 
-def _quiz(root: Path, history: list[dict[str, object]]) -> None:
-    from app.quiz_page import render_quiz_page
-
-    render_quiz_page(root, history)
-
-
 def _history(root: Path, history: list[dict[str, object]]) -> None:
     from app.history_tab import render_history_tab
 
@@ -69,20 +63,27 @@ def _history(root: Path, history: list[dict[str, object]]) -> None:
 
 
 PAGES = {
-    "🏠 Home": _home,
-    "🎮 Scam Simulation Lab": _simulation,
-    "📊 Dashboard": _dashboard,
-    "🛡️ Detection Center": _email,
-    "📄 AI Report Generator": _report,
-    "🎓 Scenario-Based Quiz": _quiz,
-    "🔎 Transparency Hub": _explainability,
-    "🕘 Session History": _history,
+    "Home": _home,
+    "Dashboard": _dashboard,
+    "Scam Simulation Lab": _simulation,
+    "Detection Center": _email,
+    "AI Report Generator": _report,
+    "Transparency Hub": _explainability,
+    "Session History": _history,
 }
 
 
 def _init_state() -> None:
     if "history" not in st.session_state:
         st.session_state.history = []
+    if "active_page" not in st.session_state:
+        st.session_state.active_page = "Home"
+    if st.session_state.active_page not in PAGES:
+        st.session_state.active_page = "Home"
+
+
+def _select_page(page_name: str) -> None:
+    st.session_state.active_page = page_name
 
 
 def main() -> None:
@@ -96,10 +97,19 @@ def main() -> None:
     inject_css()
 
     with st.sidebar:
-        st.title("AI-based Scam System")
-        st.caption("Student-focused fraud awareness prototype")
+        st.title("AI Scam Defense Lab")
+        st.caption("Explainable uploaded-evidence analysis")
         st.divider()
-        selected_page = st.radio("Pages", list(PAGES.keys()), label_visibility="collapsed")
+        for page_name in PAGES:
+            is_active = st.session_state.active_page == page_name
+            if st.button(
+                page_name,
+                key=f"nav_{page_name}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary",
+            ):
+                _select_page(page_name)
+                st.rerun()
         st.divider()
         render_sidebar_status(ROOT)
         st.divider()
@@ -108,6 +118,7 @@ def main() -> None:
             st.rerun()
         st.caption("Use this after inserting official datasets or replacing trained model artifacts.")
 
+    selected_page = st.session_state.active_page
     render_global_header(ROOT, selected_page)
     PAGES[selected_page](ROOT, st.session_state.history)
 

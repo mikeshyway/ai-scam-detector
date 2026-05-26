@@ -60,10 +60,10 @@ def render_home_page(root: Path, history: list[dict[str, object]]) -> None:
 
     cols = st.columns(4)
     cards = [
-        ("🎮 Simulation lab", "Experience scam pressure, make a decision before the timer ends, then investigate and defend."),
-        ("📧 Email phishing", "Paste or upload messages and inspect scam language, confidence scores, and highlighted red flags."),
-        ("📞 Caller fraud transcripts", "Analyze call, Zoom, Teams, or Google Meet transcripts for urgency, payment, secrecy, and identity cues."),
-        ("🎙️ AI speech detection", "Upload .wav or .flac voice recordings to view waveform, spectrogram, MFCC features, and SVM output."),
+        ("Simulation Lab", "Upload recordings for chunk analysis or practice decisions in a timed scenario."),
+        ("Email Phishing", "Paste or upload messages and inspect scam language, confidence scores, and highlighted red flags."),
+        ("Caller Transcripts", "Analyze call, Zoom, Teams, or Google Meet transcripts for urgency, payment, secrecy, and identity cues."),
+        ("AI Voice Detection", "Upload .wav or .flac voice recordings to view waveform, spectrogram, MFCC features, and SVM output."),
     ]
     for col, (title, body) in zip(cols, cards):
         with col:
@@ -75,13 +75,13 @@ def render_home_page(root: Path, history: list[dict[str, object]]) -> None:
         digraph {
           rankdir=LR;
           node [shape=box, style="rounded,filled", fillcolor="#0f172a", fontcolor="white", color="#38bdf8"];
-          Phone [label="Phone / Student Device\\nBrowser opens LAN/ngrok URL"];
-          Streamlit [label="Laptop / Streamlit Host\\napp/main.py"];
-          Simulation [label="Simulation Lab\\nUpload call recording"];
+          Evidence [label="Uploaded Evidence\\nEmail, transcript, audio"];
+          Streamlit [label="Streamlit App\\napp/main.py"];
+          Simulation [label="Simulation Lab\\nRecording chunk analysis"];
           Chunks [label="5-10s Audio Chunks\\nMFCC extraction"];
           Models [label="AI Models / Demo Logic\\nSVM + Text Classifiers"];
           Explain [label="Dashboard + Explanation\\nConfidence, motive, defense"];
-          Phone -> Streamlit -> Simulation -> Chunks -> Models -> Explain;
+          Evidence -> Streamlit -> Simulation -> Chunks -> Models -> Explain;
         }
         """
     )
@@ -92,7 +92,7 @@ def render_home_page(root: Path, history: list[dict[str, object]]) -> None:
     metric_cols[0].metric("Synthetic emails", len(demo["emails"]))
     metric_cols[1].metric("Synthetic transcripts", len(demo["transcripts"]))
     metric_cols[2].metric("Synthetic phone records", len(demo["phones"]))
-    metric_cols[3].metric("Quiz questions", len(demo["quiz"]))
+    metric_cols[3].metric("Scenario checks", len(demo["quiz"]))
 
     st.info(
         "When the official datasets are added and models are trained, keep the app pages but remove "

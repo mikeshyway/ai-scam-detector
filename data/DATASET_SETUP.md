@@ -1,6 +1,6 @@
 # Dataset and Methodology Setup Guide
 
-This guide maps the implementation to the Capstone methodology sections from Chapter 3.
+This guide maps the current implementation to the Chapter 3 methodology.
 
 ## 3.1 Project Flow Overview
 
@@ -20,7 +20,7 @@ Use this workflow:
 Primary user need:
 
 - Help students recognise scam pressure tactics.
-- Explain why a message, transcript, or voice recording is suspicious.
+- Explain why a message, transcript, number, or recording is suspicious.
 - Let students practice safe responses through the Scam Simulation Lab.
 
 System outcomes:
@@ -28,14 +28,16 @@ System outcomes:
 - Detection confidence score.
 - Suspicious phrase highlights.
 - Educational explanation.
+- Uploaded recording chunk-confidence results.
 - Simulation score and session history.
-- Dashboard and model comparison views.
+- Dashboard and transparency views.
 
 Constraints:
 
 - Runs locally with Python and Streamlit.
 - Uses lightweight ML models suitable for capstone timeline.
-- Does not perform live phone-call interception or automatic call recording.
+- Supports uploaded-evidence detection only.
+- Does not perform automatic pre-delivery monitoring.
 
 ## 3.3 Phase 2: Data Collection
 
@@ -103,10 +105,11 @@ Text preprocessing:
 
 Audio preprocessing:
 
-- Load `.wav` or `.flac` files.
+- Load uploaded `.wav`, `.flac`, `.mp3`, or `.m4a` audio where supported.
 - Convert to mono 16 kHz audio.
 - Extract MFCC mean and standard deviation features.
-- Save features once to `.npy` files for faster training.
+- Save training features once to `.npy` files for faster training.
+- Split uploaded recordings into 5-10 second chunks for simulation analysis.
 
 ## 3.4.3 Class Imbalance Handling
 
@@ -171,12 +174,12 @@ The project uses lightweight models because they are:
 
 Streamlit modules:
 
+- `app/home_page.py`
+- `app/dashboard_page.py`
 - `app/simulation_lab_page.py`
 - `app/detection_center_page.py`
 - `app/report_page.py`
-- `app/dashboard_page.py`
 - `app/explainability_page.py`
-- `app/quiz_page.py`
 - `app/history_tab.py`
 
 Response style:
@@ -184,6 +187,7 @@ Response style:
 - Streamlit warning banners.
 - Confidence charts.
 - Keyword highlights.
+- Uploaded recording chunk tables.
 - Attacker motive explanation.
 - Defense steps.
 - Session history.
@@ -225,29 +229,29 @@ Keep `requirements.txt` in the repository root.
 
 ```text
 User input
-  ├── Simulation scenario decisions
-  ├── Uploaded meeting/call recordings
-  ├── Email/message text
-  ├── Transcript text
-  ├── Audio upload
-  └── Manual phone-number check
+  |-- Simulation scenario decisions
+  |-- Uploaded meeting/call recordings
+  |-- Email/message text
+  |-- Transcript text
+  |-- Audio upload
+  `-- Manual phone-number check
 
 Preprocessing
-  ├── Text cleaning + TF-IDF
-  └── Audio loading + MFCC
+  |-- Text cleaning + TF-IDF
+  `-- Audio loading + MFCC
 
 Models / logic
-  ├── Naive Bayes
-  ├── Decision Tree
-  ├── SVM
-  ├── Chunk-by-chunk audio simulation
-  └── Scenario decision rules
+  |-- Naive Bayes
+  |-- Decision Tree
+  |-- SVM
+  |-- Uploaded recording chunk analysis
+  `-- Scenario decision rules
 
 Streamlit explanation layer
-  ├── Confidence
-  ├── Highlighted indicators
-  ├── Attacker motive
-  ├── Defense steps
-  ├── Quiz score
-  └── Session history
+  |-- Confidence
+  |-- Highlighted indicators
+  |-- Attacker motive
+  |-- Defense steps
+  |-- Simulation score
+  `-- Session history
 ```

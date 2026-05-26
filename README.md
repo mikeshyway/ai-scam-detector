@@ -1,22 +1,21 @@
 # AI-based Spam and Caller Fraud Detection System
 
 Educational AI scam detection platform for Capstone Project 2. The system runs locally with
-Python and Streamlit and demonstrates how machine learning can flag suspicious emails,
-scam-style transcripts, suspicious phone-number patterns, and AI-generated speech.
+Python and Streamlit and demonstrates how machine learning can flag suspicious uploaded
+emails, scam-style transcripts, suspicious phone-number patterns, and AI-generated speech.
 
 This project is intentionally scoped as a learning and awareness tool, not as a commercial
-cybersecurity or caller-ID product. It focuses on explainability, confidence scores,
-visual dashboards, and clear feedback for students.
+cybersecurity, caller-ID, or telecom product. It focuses on explainability, confidence scores,
+visual dashboards, and clear student-facing feedback.
 
 ## App Pages
 
-- Home: project focus, main feature pillars, and demo-data status.
-- Dashboard: model readiness, temporary demo-data coverage, and session activity.
+- Home: project focus, statistics, feature overview, and workflow diagram.
+- Dashboard: session metrics, detection counts, confidence summaries, and activity trends.
 - Scam Simulation Lab: uploaded call/meeting recording chunk analysis plus turn-based decision scenarios.
 - Detection Center: email, transcript, AI voice/deepfake, and phone-number risk checkers.
 - AI Report Generator: downloadable TXT/PDF/DOCX evidence summary.
-- Scenario-Based Scam Awareness Quiz: interactive practice questions.
-- Transparency & Explainability Hub: architecture, pipeline, model comparison, and methodology explanation.
+- Transparency Hub: architecture, pipeline, model comparison, and methodology explanation.
 - Session History: temporary browser-session detection log.
 
 ## Temporary Demo Data
@@ -36,13 +35,13 @@ official datasets and trained models are inserted.
 - Email phishing detection using TF-IDF with Naive Bayes and Decision Tree models.
 - Scam transcript detection using TF-IDF with Naive Bayes.
 - AI-generated speech detection using MFCC audio features with an SVM classifier.
-- Uploaded meeting/call recording chunk simulation with 5-10 second rolling confidence results.
+- Uploaded meeting/call recording chunk analysis with 5-10 second confidence results.
 - AI report generation with TXT/PDF/DOCX downloads when dependencies are installed.
 - Confidence scoring and Streamlit warning banners.
 - Suspicious phrase highlighting.
 - Audio playback, waveform visualization, and spectrogram visualization.
 - Session-only history using `st.session_state`.
-- Upload support for `.txt`, `.csv`, `.wav`, and `.flac`.
+- Upload support for `.txt`, `.csv`, `.wav`, `.flac`, `.mp3`, and `.m4a`.
 
 ## Project Structure
 
@@ -126,14 +125,11 @@ app/main.py
 
 Keep `requirements.txt` at the repository root.
 
-## Truecaller-Style Scope Note
+## Detection Scope
 
-This Streamlit app cannot automatically record phone calls, intercept caller ID, or monitor
-live phone conversations. A real Truecaller-style system would need a separate mobile app,
-telephony integration, explicit user consent, platform permissions, and legal review.
-
-The included Phone Risk Demo is only a manual, synthetic reputation checker for educational
-discussion.
+The implemented scope is uploaded-evidence detection: paste text, upload files, upload
+recordings, and review educational explanations. Automatic pre-delivery monitoring is outside
+the current Streamlit prototype.
 
 ## Change Log
 

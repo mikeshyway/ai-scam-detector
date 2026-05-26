@@ -1,4 +1,4 @@
-"""Chunk-based audio analysis for the live-call simulation page."""
+"""Chunk-based audio analysis for uploaded call or meeting recordings."""
 
 from __future__ import annotations
 

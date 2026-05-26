@@ -10,8 +10,8 @@ import streamlit as st
 
 APP_TITLE = "AI-based Spam and Caller Fraud Detection System"
 APP_SUBTITLE = (
-    "Educational platform for phishing emails, scam transcripts, synthetic speech, "
-    "and student scam-awareness practice."
+    "A capstone learning platform for uploaded scam evidence, explainable AI detection, "
+    "and student decision practice."
 )
 
 
@@ -69,63 +69,152 @@ def inject_css() -> None:
     st.markdown(
         """
         <style>
-        .block-container { padding-top: 2rem; padding-bottom: 2.5rem; max-width: 1280px; }
-        [data-testid="stSidebar"] { border-right: 1px solid rgba(148, 163, 184, 0.2); }
-        .app-header {
-            border: 1px solid rgba(148, 163, 184, 0.24);
-            border-radius: 14px;
-            padding: 1.1rem 1.25rem;
-            margin-bottom: 1rem;
-            background:
-              linear-gradient(135deg, rgba(37, 99, 235, 0.15), rgba(20, 184, 166, 0.08)),
-              rgba(15, 23, 42, 0.05);
-            animation: soft-rise 260ms ease-out;
+        :root {
+            --surface: rgba(15, 23, 42, 0.055);
+            --surface-strong: rgba(15, 23, 42, 0.095);
+            --line: rgba(148, 163, 184, 0.24);
+            --muted: #64748b;
+            --accent: #2563eb;
+            --accent-2: #0f766e;
+            --danger: #dc2626;
+            --radius: 16px;
         }
-        .app-header h1 { margin: 0.15rem 0 0.35rem 0; font-size: 2rem; line-height: 1.15; }
-        .app-header p { margin: 0; color: #94a3b8; max-width: 980px; }
-        .eyebrow { color: #38bdf8; font-weight: 700; font-size: 0.78rem; letter-spacing: 0; }
-        .status-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.85rem; }
+        .block-container {
+            padding-top: 5rem;
+            padding-bottom: 3rem;
+            max-width: 1220px;
+        }
+        [data-testid="stSidebar"] {
+            border-right: 1px solid var(--line);
+        }
+        [data-testid="stSidebar"] h1 {
+            font-size: 1.08rem;
+            line-height: 1.25;
+            letter-spacing: 0;
+            margin-bottom: 0.1rem;
+        }
+        [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+            color: var(--muted);
+        }
+        [data-testid="stSidebar"] .stButton > button {
+            justify-content: flex-start;
+            border-radius: 12px;
+            min-height: 2.55rem;
+            border: 1px solid transparent;
+            box-shadow: none;
+            font-weight: 650;
+        }
+        [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+            background: linear-gradient(135deg, #1d4ed8, #0f766e);
+            color: white;
+            border-color: rgba(255,255,255,0.14);
+        }
+        [data-testid="stSidebar"] .stButton > button[kind="secondary"] {
+            background: transparent;
+            color: inherit;
+        }
+        [data-testid="stSidebar"] .stButton > button[kind="secondary"]:hover {
+            background: var(--surface);
+            border-color: var(--line);
+        }
+        .app-shell {
+            animation: fade-up 220ms ease-out;
+        }
+        .app-header {
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            padding: 1.25rem 1.35rem;
+            margin-bottom: 1.15rem;
+            background:
+              linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(15, 118, 110, 0.08)),
+              var(--surface);
+        }
+        .app-header h1 {
+            margin: 0.2rem 0 0.45rem 0;
+            font-size: clamp(1.55rem, 3vw, 2.25rem);
+            line-height: 1.12;
+            letter-spacing: 0;
+        }
+        .app-header p {
+            margin: 0;
+            color: var(--muted);
+            max-width: 880px;
+            font-size: 0.98rem;
+        }
+        .eyebrow {
+            color: var(--accent);
+            font-weight: 800;
+            font-size: 0.76rem;
+            letter-spacing: 0;
+            text-transform: uppercase;
+        }
+        .status-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.9rem;
+        }
         .status-chip {
             display: inline-flex;
             align-items: center;
-            border: 1px solid rgba(148, 163, 184, 0.28);
+            border: 1px solid var(--line);
             border-radius: 999px;
-            padding: 0.24rem 0.62rem;
+            padding: 0.26rem 0.7rem;
             font-size: 0.82rem;
-            background: rgba(15, 23, 42, 0.08);
+            background: rgba(255,255,255,0.04);
+            color: inherit;
         }
         .demo-warning {
+            border: 1px solid rgba(245, 158, 11, 0.32);
             border-left: 4px solid #f59e0b;
-            padding: 0.7rem 0.9rem;
-            border-radius: 8px;
-            background: rgba(245, 158, 11, 0.12);
+            padding: 0.8rem 0.95rem;
+            border-radius: 12px;
+            background: rgba(245, 158, 11, 0.10);
             margin-bottom: 1rem;
+        }
+        .feature-card, .scenario-panel {
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 1rem;
+            background: var(--surface);
+            box-shadow: 0 12px 34px rgba(2, 6, 23, 0.06);
         }
         .feature-card {
-            border: 1px solid rgba(148, 163, 184, 0.24);
-            border-radius: 10px;
-            padding: 1rem;
-            min-height: 138px;
-            background: rgba(15, 23, 42, 0.04);
-            animation: soft-rise 300ms ease-out;
+            min-height: 132px;
         }
-        .feature-card h3 { margin-top: 0; font-size: 1.05rem; }
+        .feature-card h3, .scenario-panel h2 {
+            margin-top: 0;
+            letter-spacing: 0;
+        }
+        .feature-card p {
+            color: var(--muted);
+            margin-bottom: 0;
+        }
         .hero-grid {
             display: grid;
-            grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.5fr);
+            grid-template-columns: minmax(0, 1.55fr) minmax(250px, 0.45fr);
             gap: 1rem;
             align-items: center;
-            border: 1px solid rgba(148, 163, 184, 0.24);
-            border-radius: 18px;
-            padding: 1.2rem;
+            border: 1px solid var(--line);
+            border-radius: 24px;
+            padding: 1.4rem;
             margin-bottom: 1rem;
             background:
-              radial-gradient(circle at top right, rgba(59, 130, 246, 0.22), transparent 34%),
-              rgba(15, 23, 42, 0.06);
-            animation: soft-rise 260ms ease-out;
+              radial-gradient(circle at 80% 10%, rgba(37, 99, 235, 0.20), transparent 28%),
+              radial-gradient(circle at 12% 20%, rgba(20, 184, 166, 0.14), transparent 25%),
+              var(--surface);
         }
-        .hero-grid h2 { font-size: 2rem; line-height: 1.12; margin: 0 0 0.6rem 0; }
-        .hero-grid p { color: #94a3b8; margin: 0; max-width: 760px; }
+        .hero-grid h2 {
+            font-size: clamp(1.65rem, 3.4vw, 2.75rem);
+            line-height: 1.05;
+            margin: 0 0 0.7rem 0;
+            letter-spacing: 0;
+        }
+        .hero-grid p {
+            color: var(--muted);
+            margin: 0;
+            max-width: 740px;
+        }
         .cyber-avatar {
             position: relative;
             min-height: 190px;
@@ -137,51 +226,50 @@ def inject_css() -> None:
             width: 150px;
             height: 150px;
             border-radius: 50%;
-            border: 1px dashed rgba(56, 189, 248, 0.7);
-            animation: slow-spin 12s linear infinite;
+            border: 1px solid rgba(37, 99, 235, 0.28);
+            animation: slow-spin 18s linear infinite;
         }
         .avatar-shield {
             width: 106px;
             height: 126px;
-            border-radius: 28px 28px 42px 42px;
+            border-radius: 30px 30px 42px 42px;
             display: grid;
             place-items: center;
             font-weight: 900;
-            font-size: 2rem;
+            font-size: 1.85rem;
             color: white;
-            background: linear-gradient(160deg, #2563eb, #14b8a6);
-            box-shadow: 0 16px 48px rgba(37, 99, 235, 0.3);
+            background: linear-gradient(160deg, #1d4ed8, #0f766e);
+            box-shadow: 0 18px 50px rgba(37, 99, 235, 0.28);
         }
-        .avatar-caption { position: absolute; bottom: 0; color: #94a3b8; font-size: 0.9rem; }
+        .avatar-caption {
+            position: absolute;
+            bottom: 0;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
         .scenario-panel {
-            border: 1px solid rgba(148, 163, 184, 0.25);
-            border-radius: 14px;
-            padding: 1rem;
             margin: 0.75rem 0 1rem 0;
-            background: rgba(15, 23, 42, 0.06);
-            animation: soft-rise 300ms ease-out;
         }
-        .scenario-panel h2 { margin: 0.2rem 0 0.7rem 0; font-size: 1.35rem; }
         .scenario-panel pre {
             white-space: pre-wrap;
-            font-family: var(--font);
+            font-family: inherit;
             margin-bottom: 0;
             line-height: 1.55;
         }
-        .scenario-meta { color: #38bdf8; font-size: 0.82rem; font-weight: 700; }
-        .sim-timer {
-            border: 1px solid rgba(148, 163, 184, 0.25);
-            border-radius: 12px;
-            padding: 0.75rem;
-            background: rgba(15, 23, 42, 0.05);
-            font-family: sans-serif;
+        .scenario-meta {
+            color: var(--accent);
+            font-size: 0.78rem;
+            font-weight: 800;
+            text-transform: uppercase;
         }
-        .timer-label { color: #94a3b8; font-size: 0.78rem; }
-        .timer-value { font-size: 1.45rem; font-weight: 800; margin: 0.2rem 0; }
-        .timer-track { height: 8px; border-radius: 99px; background: rgba(148, 163, 184, 0.25); overflow: hidden; }
-        .timer-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #22c55e, #f59e0b, #ef4444); transition: width 0.2s linear; }
-        @keyframes soft-rise {
-            from { opacity: 0; transform: translateY(6px); }
+        mark {
+            background: #fde68a;
+            color: #2b2112;
+            padding: 0.05rem 0.2rem;
+            border-radius: 0.2rem;
+        }
+        @keyframes fade-up {
+            from { opacity: 0; transform: translateY(8px); }
             to { opacity: 1; transform: translateY(0); }
         }
         @keyframes slow-spin {
@@ -189,14 +277,9 @@ def inject_css() -> None:
             to { transform: rotate(360deg); }
         }
         @media (max-width: 900px) {
+            .block-container { padding-top: 4.5rem; }
             .hero-grid { grid-template-columns: 1fr; }
             .cyber-avatar { min-height: 150px; }
-        }
-        mark {
-            background: #ffe08a;
-            color: #2b2112;
-            padding: 0.05rem 0.2rem;
-            border-radius: 0.2rem;
         }
         </style>
         """,
@@ -208,18 +291,18 @@ def render_global_header(root: Path, active_page: str) -> None:
     model_status = get_model_status(str(root))
     loaded_count = sum(model_status.values())
     dataset_mode = "Official data detected" if official_data_present(str(root)) else "Synthetic demo data active"
-    source = source_code_url(str(root))
     st.markdown(
         f"""
-        <div class="app-header">
-          <div class="eyebrow">Capstone educational prototype</div>
-          <h1>{APP_TITLE}</h1>
-          <p>{APP_SUBTITLE}</p>
-          <div class="status-row">
-            <span class="status-chip">📍 Page: {active_page}</span>
-            <span class="status-chip">🧪 {dataset_mode}</span>
-            <span class="status-chip">🧠 Models loaded: {loaded_count}/{len(model_status)}</span>
-            <span class="status-chip">🔗 Source: {source}</span>
+        <div class="app-shell">
+          <div class="app-header">
+            <div class="eyebrow">Capstone educational prototype</div>
+            <h1>{APP_TITLE}</h1>
+            <p>{APP_SUBTITLE}</p>
+            <div class="status-row">
+              <span class="status-chip">Page: {active_page}</span>
+              <span class="status-chip">Dataset: {dataset_mode}</span>
+              <span class="status-chip">Models loaded: {loaded_count}/{len(model_status)}</span>
+            </div>
           </div>
         </div>
         """,
@@ -235,7 +318,7 @@ def render_demo_notice(root: Path) -> None:
         f"""
         <div class="demo-warning">
           <strong>Temporary demo dataset active.</strong>
-          The app is using self-forged synthetic examples because official datasets are not inserted yet.
+          The app is using synthetic examples because official datasets are not inserted yet.
           Remove this demo mode after training with official datasets.
           <br><code>{notice}</code>
         </div>
@@ -245,14 +328,14 @@ def render_demo_notice(root: Path) -> None:
 
 
 def render_sidebar_status(root: Path) -> None:
-    st.caption("Model artifacts")
-    for name, exists in get_model_status(str(root)).items():
-        st.write(("✅ " if exists else "⚠️ ") + name)
+    with st.expander("System status", expanded=False):
+        st.caption("Model artifacts")
+        for name, exists in get_model_status(str(root)).items():
+            st.write(("[OK] " if exists else "[Missing] ") + name)
 
-    st.divider()
-    st.caption("Dataset readiness")
-    for name, exists in get_dataset_status(str(root)).items():
-        st.write(("✅ " if exists else "🧪 ") + name)
+        st.caption("Dataset readiness")
+        for name, exists in get_dataset_status(str(root)).items():
+            st.write(("[Ready] " if exists else "[Demo] ") + name)
 
 
 def clear_all_caches() -> None:
