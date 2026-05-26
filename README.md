@@ -11,15 +11,12 @@ visual dashboards, and clear feedback for students.
 ## App Pages
 
 - Home: project focus, main feature pillars, and demo-data status.
-- Scam Simulation Lab: turn-based scam encounter, AI investigation, defense practice, countdown, and checkpoint retry.
 - Dashboard: model readiness, temporary demo-data coverage, and session activity.
-- Email Detection: phishing-style email/message analysis.
-- Transcript Detection: scam transcript analysis for calls, Zoom, Teams, and Google Meet.
-- Audio Detection: uploaded `.wav` and `.flac` analysis with waveform and spectrogram views.
-- Phone Risk Demo: manual phone-number reputation demo using synthetic data.
-- Model Comparison: TF-IDF, Naive Bayes, Decision Tree, MFCC, and SVM comparison.
-- Explainability: pipeline explanation and source-code reference.
-- Student Quiz: interactive scam-awareness practice questions.
+- Scam Simulation Lab: uploaded call/meeting recording chunk analysis plus turn-based decision scenarios.
+- Detection Center: email, transcript, AI voice/deepfake, and phone-number risk checkers.
+- AI Report Generator: downloadable TXT/PDF/DOCX evidence summary.
+- Scenario-Based Scam Awareness Quiz: interactive practice questions.
+- Transparency & Explainability Hub: architecture, pipeline, model comparison, and methodology explanation.
 - Session History: temporary browser-session detection log.
 
 ## Temporary Demo Data
@@ -39,6 +36,8 @@ official datasets and trained models are inserted.
 - Email phishing detection using TF-IDF with Naive Bayes and Decision Tree models.
 - Scam transcript detection using TF-IDF with Naive Bayes.
 - AI-generated speech detection using MFCC audio features with an SVM classifier.
+- Uploaded meeting/call recording chunk simulation with 5-10 second rolling confidence results.
+- AI report generation with TXT/PDF/DOCX downloads when dependencies are installed.
 - Confidence scoring and Streamlit warning banners.
 - Suspicious phrase highlighting.
 - Audio playback, waveform visualization, and spectrogram visualization.

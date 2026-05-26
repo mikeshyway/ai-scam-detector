@@ -110,6 +110,49 @@ def inject_css() -> None:
             animation: soft-rise 300ms ease-out;
         }
         .feature-card h3 { margin-top: 0; font-size: 1.05rem; }
+        .hero-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.5fr);
+            gap: 1rem;
+            align-items: center;
+            border: 1px solid rgba(148, 163, 184, 0.24);
+            border-radius: 18px;
+            padding: 1.2rem;
+            margin-bottom: 1rem;
+            background:
+              radial-gradient(circle at top right, rgba(59, 130, 246, 0.22), transparent 34%),
+              rgba(15, 23, 42, 0.06);
+            animation: soft-rise 260ms ease-out;
+        }
+        .hero-grid h2 { font-size: 2rem; line-height: 1.12; margin: 0 0 0.6rem 0; }
+        .hero-grid p { color: #94a3b8; margin: 0; max-width: 760px; }
+        .cyber-avatar {
+            position: relative;
+            min-height: 190px;
+            display: grid;
+            place-items: center;
+        }
+        .avatar-orbit {
+            position: absolute;
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            border: 1px dashed rgba(56, 189, 248, 0.7);
+            animation: slow-spin 12s linear infinite;
+        }
+        .avatar-shield {
+            width: 106px;
+            height: 126px;
+            border-radius: 28px 28px 42px 42px;
+            display: grid;
+            place-items: center;
+            font-weight: 900;
+            font-size: 2rem;
+            color: white;
+            background: linear-gradient(160deg, #2563eb, #14b8a6);
+            box-shadow: 0 16px 48px rgba(37, 99, 235, 0.3);
+        }
+        .avatar-caption { position: absolute; bottom: 0; color: #94a3b8; font-size: 0.9rem; }
         .scenario-panel {
             border: 1px solid rgba(148, 163, 184, 0.25);
             border-radius: 14px;
@@ -140,6 +183,14 @@ def inject_css() -> None:
         @keyframes soft-rise {
             from { opacity: 0; transform: translateY(6px); }
             to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes slow-spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        @media (max-width: 900px) {
+            .hero-grid { grid-template-columns: 1fr; }
+            .cyber-avatar { min-height: 150px; }
         }
         mark {
             background: #ffe08a;

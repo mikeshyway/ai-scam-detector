@@ -47,6 +47,15 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
         "Streamlit cannot automatically intercept phone calls, record conversations, or access caller ID. "
         "This page is a safe manual demo using synthetic reputation data."
     )
+    st.markdown(
+        """
+        **Phone demo integration options**
+
+        - Same WiFi: open `http://<laptop-ip>:8501` on the phone.
+        - Public demo: expose Streamlit with a temporary HTTPS tunnel such as ngrok.
+        - Real caller ID integration: requires a separate Android/iOS app or telecom/VoIP API.
+        """
+    )
 
     demo_phones = get_demo_data()["phones"]
     number = st.text_input("Enter a phone number to check", placeholder="+60 12 345 6789")

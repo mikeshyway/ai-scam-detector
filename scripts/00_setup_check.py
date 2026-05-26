@@ -16,10 +16,13 @@ REQUIRED_PACKAGES = [
     "sklearn",
     "nltk",
     "librosa",
+    "pydub",
     "soundfile",
     "matplotlib",
     "plotly",
     "joblib",
+    "reportlab",
+    "docx",
 ]
 
 EXPECTED_DIRS = [

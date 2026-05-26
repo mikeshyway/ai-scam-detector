@@ -5,13 +5,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import plotly.express as px
 import streamlit as st
 
-from app.ui_components import source_code_url
+from app.ui_components import get_demo_data, get_model_status, source_code_url
 
 
 def render_explainability_page(root: Path, history: list[dict[str, object]]) -> None:
-    st.subheader("How the Detection Works")
+    st.subheader("Transparency & Explainability Hub")
+    st.write(
+        "This page explains the backend architecture, chosen models, training flow, and why the system "
+        "stays focused on educational scam awareness."
+    )
 
     st.markdown(
         """
@@ -45,6 +50,28 @@ def render_explainability_page(root: Path, history: list[dict[str, object]]) -> 
         }
         """
     )
+
+    st.subheader("Model Comparison")
+    model_table = get_demo_data()["models"]
+    st.dataframe(model_table, hide_index=True, use_container_width=True)
+    status = get_model_status(str(root))
+    status_rows = [{"Artifact": name, "Ready": "Yes" if exists else "No"} for name, exists in status.items()]
+    fig = px.bar(status_rows, x="Artifact", color="Ready", title="Model artifact readiness")
+    fig.update_layout(xaxis_tickangle=-25)
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("Development Timeline")
+    timeline = [
+        {"Phase": "Requirements", "Order": 1},
+        {"Phase": "Data collection", "Order": 2},
+        {"Phase": "Preprocessing", "Order": 3},
+        {"Phase": "EDA", "Order": 4},
+        {"Phase": "Model training", "Order": 5},
+        {"Phase": "Simulation + UI", "Order": 6},
+        {"Phase": "Evaluation", "Order": 7},
+        {"Phase": "Deployment", "Order": 8},
+    ]
+    st.plotly_chart(px.line(timeline, x="Order", y="Phase", markers=True, title="8-phase methodology map"), use_container_width=True)
 
     st.subheader("Open Source Code")
     repo_url = os.environ.get("PROJECT_REPO_URL", "").strip()

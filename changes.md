@@ -24,10 +24,16 @@ Reason:
 ## Added
 
 - `app/simulation_lab_page.py`
+- `app/detection_center_page.py`
+- `app/report_page.py`
 - `src/scenarios.py`
+- `src/live_audio_simulation.py`
 - Turn-based simulation state using `st.session_state`
 - Countdown-style phase timer
 - Retry-from-checkpoint behavior
+- Live-call-style uploaded recording simulation
+- 5-10 second audio chunk analysis
+- PDF/DOCX/TXT report generator
 - Attacker motive explanations
 - Defense steps and mini-quiz checks
 - Simulation entries in session history
@@ -46,6 +52,19 @@ The interface now uses a cleaner, Notion-like Streamlit layout with:
 - CSS-only shadcn-inspired styling
 
 Direct `shadcn/ui` was not used because it is built for React/Tailwind applications. Streamlit can use custom HTML/CSS and custom components, but importing shadcn directly is outside the normal Streamlit Python workflow. The practical alternative is Streamlit CSS styling inspired by shadcn design.
+
+## Page Structure Remodel
+
+The app now follows this page structure:
+
+1. Home Page
+2. Dashboard
+3. Scam Simulation Lab
+4. Detection Center
+5. AI Report Generator
+6. Scenario-Based Scam Awareness Quiz
+7. Transparency & Explainability Hub
+8. Session History
 
 ## No Longer Eligible or Intentionally Excluded
 
@@ -69,6 +88,18 @@ Reason:
 Replacement:
 
 - Manual Phone Risk Demo using synthetic reputation data.
+- Phone can access the same Streamlit app through LAN/ngrok during a demo, but this is not telecom integration.
+
+### True Live Video Call Interception
+
+Excluded because Streamlit cannot directly intercept Zoom/Teams/Google Meet calls in real time.
+
+Replacement:
+
+- Upload meeting/call recording.
+- Split audio into 5-10 second chunks.
+- Run MFCC extraction and SVM/demo prediction per chunk.
+- Show rolling confidence results to simulate near-real-time detection.
 
 ### Suspicious Timestamp Replay in Audio
 
@@ -120,6 +151,8 @@ Replacement:
 - `@st.cache_resource` retained for trained model artifacts.
 - Page modules are lazy-loaded in `app/main.py` so heavier imports only run when the selected page needs them.
 - Audio parsing is cached by uploaded bytes and suffix.
+- Detection tools are grouped in a single Detection Center page to reduce sidebar clutter.
+- The old standalone model-comparison page was removed because model comparison now belongs inside the Transparency & Explainability Hub.
 
 ## Remaining Limitations
 

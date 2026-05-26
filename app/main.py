@@ -39,33 +39,15 @@ def _simulation(root: Path, history: list[dict[str, object]]) -> None:
 
 
 def _email(root: Path, history: list[dict[str, object]]) -> None:
-    from app.email_tab import render_email_tab
+    from app.detection_center_page import render_detection_center_page
 
-    render_email_tab(root, history)
-
-
-def _transcript(root: Path, history: list[dict[str, object]]) -> None:
-    from app.transcript_tab import render_transcript_tab
-
-    render_transcript_tab(root, history)
+    render_detection_center_page(root, history)
 
 
-def _audio(root: Path, history: list[dict[str, object]]) -> None:
-    from app.audio_tab import render_audio_tab
+def _report(root: Path, history: list[dict[str, object]]) -> None:
+    from app.report_page import render_report_page
 
-    render_audio_tab(root, history)
-
-
-def _phone(root: Path, history: list[dict[str, object]]) -> None:
-    from app.phone_risk_page import render_phone_risk_page
-
-    render_phone_risk_page(root, history)
-
-
-def _models(root: Path, history: list[dict[str, object]]) -> None:
-    from app.model_comparison_page import render_model_comparison_page
-
-    render_model_comparison_page(root, history)
+    render_report_page(root, history)
 
 
 def _explainability(root: Path, history: list[dict[str, object]]) -> None:
@@ -90,13 +72,10 @@ PAGES = {
     "🏠 Home": _home,
     "🎮 Scam Simulation Lab": _simulation,
     "📊 Dashboard": _dashboard,
-    "📧 Email Detection": _email,
-    "📞 Transcript Detection": _transcript,
-    "🎙️ Audio Detection": _audio,
-    "☎️ Phone Risk Demo": _phone,
-    "🧠 Model Comparison": _models,
-    "🔎 Explainability": _explainability,
-    "🎓 Student Quiz": _quiz,
+    "🛡️ Detection Center": _email,
+    "📄 AI Report Generator": _report,
+    "🎓 Scenario-Based Quiz": _quiz,
+    "🔎 Transparency Hub": _explainability,
     "🕘 Session History": _history,
 }
 

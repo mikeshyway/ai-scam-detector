@@ -33,10 +33,19 @@ def render_dashboard_page(root: Path, history: list[dict[str, object]]) -> None:
     status = get_model_status(str(root))
     summary = _demo_summary()
     cols = st.columns(4)
-    cols[0].metric("Model artifacts loaded", f"{sum(status.values())}/{len(status)}")
-    cols[1].metric("Dataset mode", "Official" if official_data_present(str(root)) else "Demo")
-    cols[2].metric("Session detections", len(history))
-    cols[3].metric("Demo rows", int(summary["Rows"].sum()))
+    if history:
+        hist = pd.DataFrame(history)
+        scam_count = int(hist["prediction"].astype(str).str.contains("Suspicious|High risk|AI-generated|Completed|Rolling", case=False, regex=True).sum())
+        legit_count = max(0, len(hist) - scam_count)
+        avg_conf = float(pd.to_numeric(hist["confidence"], errors="coerce").fillna(0).mean())
+    else:
+        scam_count = 0
+        legit_count = 0
+        avg_conf = 0.0
+    cols[0].metric("Total scans performed", len(history))
+    cols[1].metric("Scam detections", scam_count)
+    cols[2].metric("Legitimate detections", legit_count)
+    cols[3].metric("Avg confidence", f"{avg_conf:.1f}%")
 
     chart_col, table_col = st.columns([0.56, 0.44])
     with chart_col:
@@ -62,6 +71,10 @@ def render_dashboard_page(root: Path, history: list[dict[str, object]]) -> None:
         hist = pd.DataFrame(history)
         st.dataframe(hist, hide_index=True, use_container_width=True)
         fig = px.histogram(hist, x="confidence", color="type", title="Session confidence distribution")
+        st.plotly_chart(fig, use_container_width=True)
+        trend = hist.iloc[::-1].reset_index(drop=True)
+        trend["scan_number"] = trend.index + 1
+        fig = px.line(trend, x="scan_number", y="confidence", color="type", markers=True, title="Detection trend analytics")
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("No detections have been run in this browser session yet.")

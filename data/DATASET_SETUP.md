@@ -172,13 +172,10 @@ The project uses lightweight models because they are:
 Streamlit modules:
 
 - `app/simulation_lab_page.py`
-- `app/email_tab.py`
-- `app/transcript_tab.py`
-- `app/audio_tab.py`
-- `app/phone_risk_page.py`
+- `app/detection_center_page.py`
+- `app/report_page.py`
 - `app/dashboard_page.py`
 - `app/explainability_page.py`
-- `app/model_comparison_page.py`
 - `app/quiz_page.py`
 - `app/history_tab.py`
 
@@ -229,6 +226,7 @@ Keep `requirements.txt` in the repository root.
 ```text
 User input
   ├── Simulation scenario decisions
+  ├── Uploaded meeting/call recordings
   ├── Email/message text
   ├── Transcript text
   ├── Audio upload
@@ -242,6 +240,7 @@ Models / logic
   ├── Naive Bayes
   ├── Decision Tree
   ├── SVM
+  ├── Chunk-by-chunk audio simulation
   └── Scenario decision rules
 
 Streamlit explanation layer
