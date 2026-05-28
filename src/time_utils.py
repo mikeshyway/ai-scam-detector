@@ -22,6 +22,14 @@ def now_for_app() -> datetime:
     return datetime.now(app_timezone())
 
 
+def timezone_offset_label(value: datetime) -> str:
+    offset = value.strftime("%z")
+    if not offset:
+        return "GMT"
+    return f"GMT{offset[:3]}:{offset[3:]}"
+
+
 def formatted_now() -> str:
     timezone_name = os.environ.get("APP_TIMEZONE", DEFAULT_TIMEZONE)
-    return f"{now_for_app().strftime('%Y-%m-%d %H:%M:%S')} ({timezone_name}, GMT+8)"
+    current = now_for_app()
+    return f"{current.strftime('%Y-%m-%d %H:%M:%S')} ({timezone_name}, {timezone_offset_label(current)})"
