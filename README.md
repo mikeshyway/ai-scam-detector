@@ -1,37 +1,61 @@
-# AI Scam Detector
+# AI-based Spam and Caller Fraud Detection System
 
 Educational AI scam detection platform for Capstone Project 2. The system runs locally with
-Python and Streamlit and demonstrates how machine learning can flag suspicious emails,
-scam-style transcripts, and AI-generated speech.
+Python and Streamlit and demonstrates how machine learning can flag suspicious uploaded
+emails, scam-style transcripts, suspicious phone-number patterns, and AI-generated speech.
 
 This project is intentionally scoped as a learning and awareness tool, not as a commercial
-cybersecurity product. It focuses on explainability, confidence scores, visual dashboards,
-and clear educational feedback for students.
+cybersecurity, caller-ID, or telecom product. It focuses on explainability, confidence scores,
+visual dashboards, and clear student-facing feedback.
+
+## App Pages
+
+- Home: project focus, statistics, feature overview, and workflow diagram.
+- Dashboard: session metrics, detection counts, confidence summaries, and activity trends.
+- Scam Simulation Lab: uploaded call/meeting recording chunk analysis plus turn-based decision scenarios.
+- Detection Center: email, transcript, AI voice/deepfake, and phone-number risk checkers.
+- AI Report Generator: downloadable TXT/PDF/DOCX evidence summary.
+- Transparency Hub: architecture, pipeline, model comparison, and methodology explanation.
+- Session History: temporary browser-session detection log.
+
+## Temporary Demo Data
+
+The app includes self-forged synthetic demo data because official datasets may not be inserted
+yet. Demo data is generated in `src/demo_data.py` and marked with:
+
+```text
+TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
+```
+
+Remove this demo dependency from screenshots, dashboard claims, and demonstrations once the
+official datasets and trained models are inserted.
 
 ## Features
 
 - Email phishing detection using TF-IDF with Naive Bayes and Decision Tree models.
-- Scam transcript detection for call, Zoom, Teams, and Google Meet transcript text.
+- Scam transcript detection using TF-IDF with Naive Bayes.
 - AI-generated speech detection using MFCC audio features with an SVM classifier.
-- Confidence scoring and warning banners for suspicious predictions.
-- Suspicious phrase highlighting to explain why text was flagged.
+- Uploaded meeting/call recording chunk analysis with 5-10 second confidence results.
+- AI report generation with TXT/PDF/DOCX downloads when dependencies are installed.
+- Confidence scoring and Streamlit warning banners.
+- Suspicious phrase highlighting.
 - Audio playback, waveform visualization, and spectrogram visualization.
-- Session-only detection history using `st.session_state`.
-- Upload support for `.txt`, `.csv`, `.wav`, and `.flac` files.
+- Session-only history using `st.session_state`.
+- Upload support for `.txt`, `.csv`, `.wav`, `.flac`, `.mp3`, and `.m4a`.
 
 ## Project Structure
 
 ```text
 ai-scam-detector/
-├── app/                 Streamlit web application
-├── data/                Raw and processed datasets
+├── app/                 Streamlit web application pages
+├── data/                Raw, processed, and demo data notes
 ├── models/              Trained model artifacts
 ├── notebooks/           Jupyter walkthrough notebooks
 ├── scripts/             Dataset preparation and training scripts
-└── src/                 Shared preprocessing, model, and explainability code
+└── src/                 Shared preprocessing, model, demo-data, and explainability code
 ```
 
-## Kali Linux Setup
+## Setup
 
 ```bash
 cd ai-scam-detector
@@ -42,16 +66,23 @@ pip install -r requirements.txt
 python scripts/00_setup_check.py
 ```
 
-If NLTK resources are missing, the code automatically falls back to scikit-learn stopwords.
-For the best preprocessing quality, you can optionally run:
+On Windows PowerShell:
 
-```bash
-python -m nltk.downloader stopwords wordnet omw-1.4
+```powershell
+cd C:\Users\user\Documents\Codex\ai-scam-detector
+pip install -r requirements.txt
+streamlit run app/main.py
 ```
 
 ## Dataset Placement
 
-Place datasets in the following folders before training:
+Detailed methodology setup instructions are in:
+
+```text
+data/DATASET_SETUP.md
+```
+
+Place official datasets in the following folders before training:
 
 ```text
 data/raw/spamassassin/spam/
@@ -66,13 +97,6 @@ Expected audio labels:
 
 - `0`, `real`, `human`, or `bonafide` means real speech.
 - `1`, `fake`, `synthetic`, `spoof`, or `ai` means AI-generated/synthetic speech.
-
-For the transcript CSV, the training script will try to infer sensible text and label columns.
-If your Kaggle file uses unusual column names, pass them explicitly:
-
-```bash
-python scripts/03_train_transcript_model.py --text-column conversation --label-column label
-```
 
 ## Training
 
@@ -93,34 +117,29 @@ Generated artifacts are saved in `models/` and `data/processed/`.
 streamlit run app/main.py
 ```
 
-The app can open before models are trained. Text tabs will run in educational demo mode using
-suspicious phrase rules, while the audio tab will show playback, waveform, and spectrogram
-visuals until `models/audio_svm.pkl` exists.
-
-## Streamlit Cloud Deployment
-
-If this folder is the GitHub repository root, set the Streamlit app path to:
+For Streamlit Cloud, set the main file path to:
 
 ```text
 app/main.py
 ```
 
-Keep `requirements.txt` at the repository root so Streamlit Cloud installs packages such as
-`plotly`, `matplotlib`, `scikit-learn`, and `librosa`.
+Keep `requirements.txt` at the repository root.
 
-## Capstone Scope Notes
+## Detection Scope
 
-The updated version uses:
+The implemented scope is uploaded-evidence detection: paste text, upload files, upload
+recordings, and review educational explanations. Automatic pre-delivery monitoring is outside
+the current Streamlit prototype.
 
-- `teeconnie/scam-and-non-scam-call-conversation-dataset` for binary transcript training.
-- YouTube scam transcripts for educational examples only.
-- A small ASVspoof 2019 LA subset, around 300 real and 300 fake files.
-- Audio upload only, avoiding unreliable real-time microphone support on Kali Linux.
-- Streamlit warnings instead of SMTP alerts.
-- Temporary Streamlit session history instead of a persistent SQL database.
-- Pre-extracted MFCC arrays so audio training and demos remain lightweight.
+## Change Log
+
+Implementation changes and removed/ineligible proposal items are documented in:
+
+```text
+changes.md
+```
 
 ## Ethical Use
 
-This project is for education and awareness. Predictions may be wrong and should not be used
-as the sole basis for security, legal, or financial decisions.
+Predictions may be wrong. Do not use this project as the sole basis for security, legal,
+financial, or disciplinary decisions.

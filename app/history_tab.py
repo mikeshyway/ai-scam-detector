@@ -2,26 +2,32 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 
-def render_history_tab(history: list[dict[str, object]]) -> None:
-    st.header("Session Detection History")
+def render_history_tab(root: Path, history: list[dict[str, object]]) -> None:
+    st.subheader("Session Detection History")
 
     if not history:
         st.info("No detections have been run in this session yet.")
         return
 
-    df = pd.DataFrame(history)
+    df = pd.DataFrame(history[:5])
     top_controls = st.columns([0.75, 0.25])
     with top_controls[1]:
         if st.button("Clear history", use_container_width=True):
             history.clear()
             st.rerun()
 
+    st.caption("Showing the last 5 session activities.")
     st.dataframe(df, hide_index=True, use_container_width=True)
+    st.subheader("Activity Timeline")
+    for row in df.to_dict("records"):
+        st.write(f"**{row.get('time', '-')}** — {row.get('type', '-')} → {row.get('prediction', '-')}")
 
     chart_col, type_col = st.columns(2)
     with chart_col:

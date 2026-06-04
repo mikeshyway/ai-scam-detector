@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from app.ui_components import get_demo_data, render_demo_notice
 from src.explainability import (
     educational_summary,
     find_suspicious_phrases,
@@ -40,10 +41,12 @@ def _read_upload(uploaded_file) -> str | pd.DataFrame | None:
     return None
 
 
-def _load_demo_examples(root: Path) -> pd.DataFrame | None:
-    path = root / "data" / "raw" / "transcripts" / "youtube_scam_transcripts.csv"
+@st.cache_data(show_spinner=False)
+def _load_demo_examples(root: str) -> pd.DataFrame | None:
+    root_path = Path(root)
+    path = root_path / "data" / "raw" / "transcripts" / "youtube_scam_transcripts.csv"
     if not path.exists():
-        return None
+        return get_demo_data()["transcripts"][["sample_id", "transcript", "label"]]
     try:
         return pd.read_csv(path)
     except Exception:
@@ -132,7 +135,8 @@ def _display_result(result: dict[str, object], text: str, classifier: object | N
 
 
 def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
-    st.header("Call and Meeting Transcript Detection")
+    render_demo_notice(root)
+    st.subheader("Call and Meeting Transcript Detection")
 
     controls, input_area = st.columns([0.28, 0.72])
     with controls:
@@ -141,10 +145,10 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
             type=["txt", "csv"],
             key="transcript_upload",
         )
-        examples = _load_demo_examples(root)
+        examples = _load_demo_examples(str(root))
         selected_example = None
         if examples is not None and not examples.empty:
-            example_column = examples.columns[0]
+            example_column = "transcript" if "transcript" in examples.columns else examples.columns[0]
             selected_example = st.selectbox(
                 "Demo transcript",
                 ["None"] + examples[example_column].astype(str).head(20).tolist(),
