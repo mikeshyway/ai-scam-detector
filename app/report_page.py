@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from app.ui_components import render_info_banner, render_section_header
 from src.time_utils import formatted_now
 
 
@@ -93,10 +94,16 @@ def _build_docx(rows: list[dict[str, object]], notes: str) -> bytes | None:
 
 
 def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
-    st.subheader("AI Report Generator")
-    st.write(
+    render_section_header(
+        "AI analysis report generator",
+        "Package recent session evidence into a portable summary for review or presentation.",
+        "Evidence export",
+    )
+    render_info_banner(
         "Generate a lightweight evidence summary from recent session activity. "
-        "SMTP email sending is intentionally skipped because downloadable reports are safer and easier to demonstrate."
+        "Downloadable reports are used instead of SMTP to keep the capstone demonstration reliable.",
+        kind="info",
+        code="REPORT",
     )
 
     rows = _report_rows(history)

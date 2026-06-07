@@ -9,7 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from app.ui_components import get_demo_data, render_demo_notice
+from app.ui_components import get_demo_data, render_demo_notice, render_section_header
 from src.explainability import (
     educational_summary,
     find_suspicious_phrases,
@@ -136,7 +136,11 @@ def _display_result(result: dict[str, object], text: str, classifier: object | N
 
 def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
     render_demo_notice(root)
-    st.subheader("Call and Meeting Transcript Detection")
+    render_section_header(
+        "Scan voice transcript content",
+        "Paste or upload call, Zoom, Teams, or Google Meet transcript text.",
+        "Conversation evidence",
+    )
 
     controls, input_area = st.columns([0.28, 0.72])
     with controls:

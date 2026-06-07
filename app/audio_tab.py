@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from app.ui_components import render_demo_notice
+from app.ui_components import render_demo_notice, render_section_header
 from src.audio_classifier import load_audio_model
 from src.audio_preprocessor import audio_arrays_from_bytes, extract_mfcc_from_bytes, spectrogram_db
 from src.explainability import educational_summary
@@ -88,7 +88,11 @@ def _record(history: list[dict[str, object]], result: dict[str, object], filenam
 
 def render_audio_tab(root: Path, history: list[dict[str, object]]) -> None:
     render_demo_notice(root)
-    st.subheader("AI-Generated Speech Detection")
+    render_section_header(
+        "Inspect an uploaded voice recording",
+        "Review waveform and spectrogram evidence before running the MFCC and SVM classifier.",
+        "Audio evidence",
+    )
 
     uploaded_file = st.file_uploader(
         "Upload a voice recording",

@@ -6,7 +6,6 @@ __all__ = [
     "demo_data",
     "explainability",
     "recording_audio_simulation",
-    "scenarios",
     "text_classifier",
     "text_preprocessor",
     "time_utils",

@@ -6,17 +6,15 @@ emails, scam-style transcripts, suspicious phone-number patterns, and AI-generat
 
 This project is intentionally scoped as a learning and awareness tool, not as a commercial
 cybersecurity, caller-ID, or telecom product. It focuses on explainability, confidence scores,
-visual dashboards, and clear student-facing feedback.
+clean visual feedback, and downloadable evidence summaries.
 
 ## App Pages
 
-- Home: project focus, statistics, feature overview, and workflow diagram.
-- Dashboard: session metrics, detection counts, confidence summaries, and activity trends.
-- Scam Simulation Lab: uploaded call/meeting recording chunk analysis plus turn-based decision scenarios.
+- Scam Simulation Lab: uploaded call/meeting recording chunk analysis.
 - Detection Center: email, transcript, AI voice/deepfake, and phone-number risk checkers.
 - AI Report Generator: downloadable TXT/PDF/DOCX evidence summary.
-- Transparency Hub: architecture, pipeline, model comparison, and methodology explanation.
-- Session History: temporary browser-session detection log.
+
+Removed by request: Home, Dashboard, Turn-Based Scenario, Transparency Hub, and Session History.
 
 ## Temporary Demo Data
 
@@ -27,8 +25,8 @@ yet. Demo data is generated in `src/demo_data.py` and marked with:
 TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
 ```
 
-Remove this demo dependency from screenshots, dashboard claims, and demonstrations once the
-official datasets and trained models are inserted.
+Remove this demo dependency from screenshots and demonstrations once the official datasets and
+trained models are inserted.
 
 ## Features
 
@@ -40,19 +38,18 @@ official datasets and trained models are inserted.
 - Confidence scoring and Streamlit warning banners.
 - Suspicious phrase highlighting.
 - Audio playback, waveform visualization, and spectrogram visualization.
-- Session-only history using `st.session_state`.
 - Upload support for `.txt`, `.csv`, `.wav`, `.flac`, `.mp3`, and `.m4a`.
 
 ## Project Structure
 
 ```text
 ai-scam-detector/
-├── app/                 Streamlit web application pages
-├── data/                Raw, processed, and demo data notes
-├── models/              Trained model artifacts
-├── notebooks/           Jupyter walkthrough notebooks
-├── scripts/             Dataset preparation and training scripts
-└── src/                 Shared preprocessing, model, demo-data, and explainability code
+|-- app/                 Streamlit web application pages
+|-- data/                Raw, processed, and demo data notes
+|-- models/              Trained model artifacts
+|-- notebooks/           Jupyter walkthrough notebooks
+|-- scripts/             Dataset preparation and training scripts
+`-- src/                 Shared preprocessing, model, demo-data, and explainability code
 ```
 
 ## Setup

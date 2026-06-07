@@ -10,7 +10,12 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from app.ui_components import get_demo_data, render_demo_notice
+from app.ui_components import (
+    get_demo_data,
+    render_demo_notice,
+    render_info_banner,
+    render_section_header,
+)
 
 
 def _normalize_phone(value: str) -> str:
@@ -42,10 +47,16 @@ def _risk_from_number(value: str, demo_phones: pd.DataFrame) -> dict[str, object
 
 def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None:
     render_demo_notice(root)
-    st.subheader("Phone Number Risk Demo")
-    st.warning(
+    render_section_header(
+        "Review a caller number",
+        "A lightweight reputation and pattern check designed for educational demonstration.",
+        "Caller identity",
+    )
+    render_info_banner(
         "This is a manual educational checker using synthetic reputation data. "
-        "It does not connect to telecom systems."
+        "It does not connect to telecom systems.",
+        kind="warning",
+        code="SCOPE",
     )
 
     demo_phones = get_demo_data()["phones"]
@@ -73,12 +84,12 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
             },
         )
 
-    st.subheader("Synthetic Reputation Table")
+    render_section_header("Synthetic reputation table", eyebrow="Reference data")
     st.dataframe(demo_phones, hide_index=True, use_container_width=True)
     fig = px.histogram(demo_phones, x="risk_score", nbins=8, title="Demo phone risk distribution")
     st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("Realistic Alternatives")
+    render_section_header("Realistic integration alternatives", eyebrow="Future scope")
     st.write(
         "To build a true caller-ID style system, you would need a separate Android app, VoIP/Twilio call-flow "
         "integration, or a campus-reported scam-number database. Those require explicit consent, platform "

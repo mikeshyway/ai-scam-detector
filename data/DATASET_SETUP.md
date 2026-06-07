@@ -29,8 +29,7 @@ System outcomes:
 - Suspicious phrase highlights.
 - Educational explanation.
 - Uploaded recording chunk-confidence results.
-- Simulation score and session history.
-- Dashboard and transparency views.
+- Downloadable report summary.
 
 Constraints:
 
@@ -70,7 +69,7 @@ Use these datasets:
 
 - SpamAssassin Public Corpus for email spam/ham training.
 - teeconnie scam-and-non-scam call conversation dataset for binary transcript training.
-- YouTube scam transcript dataset for educational scenario examples only.
+- YouTube scam transcript dataset for educational transcript examples only.
 - ASVspoof 2019 LA subset for real/fake speech training.
 
 The YouTube scam transcript dataset should not be used alone for binary classification because it only contains scam samples.
@@ -174,13 +173,9 @@ The project uses lightweight models because they are:
 
 Streamlit modules:
 
-- `app/home_page.py`
-- `app/dashboard_page.py`
 - `app/simulation_lab_page.py`
 - `app/detection_center_page.py`
 - `app/report_page.py`
-- `app/explainability_page.py`
-- `app/history_tab.py`
 
 Response style:
 
@@ -188,9 +183,7 @@ Response style:
 - Confidence charts.
 - Keyword highlights.
 - Uploaded recording chunk tables.
-- Attacker motive explanation.
-- Defense steps.
-- Session history.
+- Downloadable TXT/PDF/DOCX reports.
 
 ## 3.8 Phase 7: Model Evaluation and Tuning
 
@@ -229,7 +222,6 @@ Keep `requirements.txt` in the repository root.
 
 ```text
 User input
-  |-- Simulation scenario decisions
   |-- Uploaded meeting/call recordings
   |-- Email/message text
   |-- Transcript text
@@ -244,14 +236,10 @@ Models / logic
   |-- Naive Bayes
   |-- Decision Tree
   |-- SVM
-  |-- Uploaded recording chunk analysis
-  `-- Scenario decision rules
+  `-- Uploaded recording chunk analysis
 
 Streamlit explanation layer
   |-- Confidence
   |-- Highlighted indicators
-  |-- Attacker motive
-  |-- Defense steps
-  |-- Simulation score
-  `-- Session history
+  `-- Downloadable report summary
 ```

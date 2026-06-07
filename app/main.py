@@ -16,20 +16,9 @@ from app.ui_components import (
     clear_all_caches,
     inject_css,
     render_global_header,
+    render_sidebar_brand,
     render_sidebar_status,
 )
-
-
-def _home(root: Path, history: list[dict[str, object]]) -> None:
-    from app.home_page import render_home_page
-
-    render_home_page(root, history)
-
-
-def _dashboard(root: Path, history: list[dict[str, object]]) -> None:
-    from app.dashboard_page import render_dashboard_page
-
-    render_dashboard_page(root, history)
 
 
 def _simulation(root: Path, history: list[dict[str, object]]) -> None:
@@ -50,26 +39,10 @@ def _report(root: Path, history: list[dict[str, object]]) -> None:
     render_report_page(root, history)
 
 
-def _explainability(root: Path, history: list[dict[str, object]]) -> None:
-    from app.explainability_page import render_explainability_page
-
-    render_explainability_page(root, history)
-
-
-def _history(root: Path, history: list[dict[str, object]]) -> None:
-    from app.history_tab import render_history_tab
-
-    render_history_tab(root, history)
-
-
 PAGES = {
-    "Home": _home,
-    "Dashboard": _dashboard,
     "Scam Simulation Lab": _simulation,
     "Detection Center": _email,
     "AI Report Generator": _report,
-    "Transparency Hub": _explainability,
-    "Session History": _history,
 }
 
 
@@ -77,9 +50,9 @@ def _init_state() -> None:
     if "history" not in st.session_state:
         st.session_state.history = []
     if "active_page" not in st.session_state:
-        st.session_state.active_page = "Home"
+        st.session_state.active_page = next(iter(PAGES))
     if st.session_state.active_page not in PAGES:
-        st.session_state.active_page = "Home"
+        st.session_state.active_page = next(iter(PAGES))
 
 
 def _select_page(page_name: str) -> None:
@@ -97,9 +70,7 @@ def main() -> None:
     inject_css()
 
     with st.sidebar:
-        st.title("AI Scam Defense Lab")
-        st.caption("Explainable uploaded-evidence analysis")
-        st.divider()
+        render_sidebar_brand()
         for page_name in PAGES:
             is_active = st.session_state.active_page == page_name
             if st.button(
@@ -112,11 +83,10 @@ def main() -> None:
                 st.rerun()
         st.divider()
         render_sidebar_status(ROOT)
-        st.divider()
         if st.button("Clear cached data/resources", use_container_width=True):
             clear_all_caches()
             st.rerun()
-        st.caption("Use this after inserting official datasets or replacing trained model artifacts.")
+        st.caption("Refresh cached resources after replacing datasets or trained artifacts.")
 
     selected_page = st.session_state.active_page
     render_global_header(ROOT, selected_page)

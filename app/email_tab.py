@@ -9,7 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from app.ui_components import get_demo_data, render_demo_notice
+from app.ui_components import get_demo_data, render_demo_notice, render_section_header
 from src.explainability import (
     educational_summary,
     find_suspicious_phrases,
@@ -131,7 +131,11 @@ def _display_result(result: dict[str, object], text: str, classifier: object | N
 
 def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
     render_demo_notice(root)
-    st.subheader("Email and Message Scam Detection")
+    render_section_header(
+        "Scan email or message content",
+        "Paste one message, upload a text file, or inspect multiple CSV rows.",
+        "Text evidence",
+    )
     demo_emails = get_demo_data()["emails"]
 
     controls, input_area = st.columns([0.28, 0.72])
