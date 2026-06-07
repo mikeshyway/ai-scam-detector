@@ -47,9 +47,9 @@ PAGES = {
 }
 
 PAGE_ICONS = {
-    "Scam Simulation Lab": "🧪",
-    "Detection Center": "🛡",
-    "AI Report Generator": "📊",
+    "Scam Simulation Lab": "SIM",
+    "Detection Center": "DET",
+    "AI Report Generator": "REP",
 }
 
 
@@ -68,7 +68,7 @@ def _select_page(page_name: str) -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="AI-FDS — Fraud Detection",
+        page_title="AI-FDS - Fraud Detection",
         page_icon=":shield:",
         layout="wide",
         initial_sidebar_state="expanded",
