@@ -16,6 +16,7 @@ from app.ui_components import (
     clear_all_caches,
     inject_css,
     render_global_header,
+    render_kpi_row,
     render_sidebar_brand,
     render_sidebar_status,
 )
@@ -45,6 +46,12 @@ PAGES = {
     "AI Report Generator": _report,
 }
 
+PAGE_ICONS = {
+    "Scam Simulation Lab": "🧪",
+    "Detection Center": "🛡",
+    "AI Report Generator": "📊",
+}
+
 
 def _init_state() -> None:
     if "history" not in st.session_state:
@@ -61,7 +68,7 @@ def _select_page(page_name: str) -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title=APP_TITLE,
+        page_title="AI-FDS — Fraud Detection",
         page_icon=":shield:",
         layout="wide",
         initial_sidebar_state="expanded",
@@ -74,7 +81,7 @@ def main() -> None:
         for page_name in PAGES:
             is_active = st.session_state.active_page == page_name
             if st.button(
-                page_name,
+                f"{PAGE_ICONS.get(page_name, '')} {page_name}",
                 key=f"nav_{page_name}",
                 use_container_width=True,
                 type="primary" if is_active else "secondary",
@@ -90,6 +97,7 @@ def main() -> None:
 
     selected_page = st.session_state.active_page
     render_global_header(ROOT, selected_page)
+    render_kpi_row(st.session_state.history)
     PAGES[selected_page](ROOT, st.session_state.history)
 
 

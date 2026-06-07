@@ -8,7 +8,13 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from app.ui_components import render_info_banner, render_section_header
+from app.ui_components import (
+    render_analysis_ready,
+    render_content_card_close,
+    render_content_card_open,
+    render_info_banner,
+    render_section_header,
+)
 from src.time_utils import formatted_now
 
 
@@ -107,6 +113,7 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
     )
 
     rows = _report_rows(history)
+    render_content_card_open("violet")
     if rows:
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
     else:
@@ -117,6 +124,7 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
         value="Verify through official channels, do not share OTP/passwords, preserve evidence, and report suspicious activity to campus IT/security.",
         height=130,
     )
+    render_content_card_close()
 
     report_rows = rows or [
         {
@@ -128,6 +136,7 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
         }
     ]
     plain = _build_plain_report(report_rows, notes)
+    render_content_card_open("green")
     st.download_button("Download TXT report", plain, "scam_analysis_report.txt", "text/plain")
 
     pdf = _build_pdf(report_rows, notes)
@@ -146,6 +155,7 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
         )
     else:
         st.warning("DOCX generation requires python-docx. Install requirements.txt to enable it.")
+    render_content_card_close()
 
     if st.button("Add report generation to session history", use_container_width=True):
         history.insert(
@@ -159,4 +169,4 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
                 "preview": f"{len(report_rows)} evidence item(s)",
             },
         )
-        st.success("Report generation recorded in session history.")
+        render_analysis_ready("Report generation recorded in session history")

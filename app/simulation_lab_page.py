@@ -9,7 +9,15 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from app.ui_components import render_info_banner, render_section_header
+from app.ui_components import (
+    apply_chart_theme,
+    render_analysis_ready,
+    render_content_card_close,
+    render_content_card_open,
+    render_info_banner,
+    render_result_card,
+    render_section_header,
+)
 from src.explainability import find_suspicious_phrases, highlighted_html
 from src.recording_audio_simulation import (
     analyze_audio_chunks,
@@ -46,7 +54,7 @@ def _waveform_figure(y: np.ndarray, sr: int) -> go.Figure:
         xaxis_title="Time (seconds)",
         yaxis_title="Amplitude",
     )
-    return fig
+    return apply_chart_theme(fig)
 
 
 def _spectrogram_figure(y: np.ndarray, sr: int) -> go.Figure:
@@ -66,7 +74,7 @@ def _spectrogram_figure(y: np.ndarray, sr: int) -> go.Figure:
         xaxis_title="Time (seconds)",
         yaxis_title="Frequency (Hz)",
     )
-    return fig
+    return apply_chart_theme(fig)
 
 
 def _read_transcript(uploaded_transcript) -> str:
@@ -92,6 +100,7 @@ def render_simulation_lab_page(root: Path, history: list[dict[str, object]]) -> 
         code="SCOPE",
     )
 
+    render_content_card_open("violet")
     upload_col, settings_col = st.columns([0.62, 0.38])
     with upload_col:
         uploaded_audio = st.file_uploader(
@@ -119,6 +128,7 @@ def render_simulation_lab_page(root: Path, history: list[dict[str, object]]) -> 
         height=140,
         placeholder="Optional: paste a call or meeting transcript to highlight suspicious language.",
     )
+    render_content_card_close()
 
     if uploaded_audio is None:
         st.info("Upload an audio recording to run chunk-by-chunk analysis.")
@@ -142,7 +152,15 @@ def render_simulation_lab_page(root: Path, history: list[dict[str, object]]) -> 
         st.warning("No usable chunks were extracted from the recording.")
         return
 
+    render_analysis_ready(f"Analysis complete - {len(results)} chunks processed")
     render_section_header("Rolling detection dashboard", eyebrow="Chunk analysis")
+    render_result_card(
+        "Uploaded recording risk summary",
+        float(results["confidence"].max()),
+        f"Peak chunk confidence reached {results['confidence'].max():.1f}% using {results['engine'].iloc[0]}.",
+    )
+
+    render_content_card_open("red")
     metric_cols = st.columns(4)
     metric_cols[0].metric("Chunks", len(results))
     metric_cols[1].metric("Peak confidence", f"{results['confidence'].max():.1f}%")
@@ -154,9 +172,20 @@ def render_simulation_lab_page(root: Path, history: list[dict[str, object]]) -> 
             x=results["end_sec"],
             y=results["confidence"],
             mode="lines+markers",
-            line=dict(color="#ef5b5b", width=2),
+            line=dict(color="#6366F1", width=3),
+            marker=dict(
+                size=8,
+                color=results["confidence"],
+                colorscale=[[0, "#10B981"], [0.55, "#F59E0B"], [1, "#EF4444"]],
+                cmin=0,
+                cmax=100,
+            ),
+            fill="tozeroy",
+            fillcolor="rgba(99,102,241,0.10)",
         )
     )
+    line.add_hline(y=50, line_dash="dash", line_color="#F59E0B", annotation_text="Watch")
+    line.add_hline(y=80, line_dash="dash", line_color="#EF4444", annotation_text="High risk")
     line.update_layout(
         height=280,
         margin=dict(l=10, r=10, t=20, b=35),
@@ -164,18 +193,24 @@ def render_simulation_lab_page(root: Path, history: list[dict[str, object]]) -> 
         yaxis_title="Risk confidence (%)",
         yaxis=dict(range=[0, 100]),
     )
-    st.plotly_chart(line, use_container_width=True)
+    st.plotly_chart(apply_chart_theme(line), use_container_width=True)
     st.dataframe(results, hide_index=True, use_container_width=True)
+    render_content_card_close()
 
     render_section_header("Waveform", eyebrow="Audio shape")
+    render_content_card_open("violet")
     st.plotly_chart(_waveform_figure(y, sr), use_container_width=True)
+    render_content_card_close()
 
     render_section_header("Spectrogram", eyebrow="Frequency view")
+    render_content_card_open("violet")
     st.plotly_chart(_spectrogram_figure(y, sr), use_container_width=True)
+    render_content_card_close()
 
     if transcript_text.strip():
         findings = find_suspicious_phrases(transcript_text)
         render_section_header("Transcript warning indicators", eyebrow="Text context")
+        render_content_card_open("green")
         st.markdown(highlighted_html(transcript_text, findings), unsafe_allow_html=True)
         if findings:
             st.dataframe(
@@ -183,6 +218,7 @@ def render_simulation_lab_page(root: Path, history: list[dict[str, object]]) -> 
                 hide_index=True,
                 use_container_width=True,
             )
+        render_content_card_close()
 
     history.insert(
         0,
@@ -193,5 +229,6 @@ def render_simulation_lab_page(root: Path, history: list[dict[str, object]]) -> 
             "confidence": round(float(results["confidence"].max()), 2),
             "model": str(results["engine"].iloc[0]),
             "preview": uploaded_audio.name,
+            "chunks": int(len(results)),
         },
     )

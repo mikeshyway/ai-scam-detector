@@ -9,7 +9,16 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from app.ui_components import get_demo_data, render_demo_notice, render_section_header
+from app.ui_components import (
+    apply_chart_theme,
+    get_demo_data,
+    render_analysis_ready,
+    render_content_card_close,
+    render_content_card_open,
+    render_demo_notice,
+    render_result_card,
+    render_section_header,
+)
 from src.explainability import (
     educational_summary,
     find_suspicious_phrases,
@@ -81,7 +90,7 @@ def _confidence_chart(probabilities: dict[str, float]) -> go.Figure:
         yaxis_title="",
         xaxis=dict(range=[0, 100]),
     )
-    return fig
+    return apply_chart_theme(fig)
 
 
 def _record(history: list[dict[str, object]], result: dict[str, object], text: str) -> None:
@@ -103,30 +112,39 @@ def _display_result(result: dict[str, object], text: str, classifier: object | N
     label = str(result["label_name"])
     findings = list(result.get("findings", []))
 
-    if int(result["label"]) == 1:
-        st.error(f"{label} - {confidence * 100:.1f}% confidence")
-    else:
-        st.success(f"{label} - {confidence * 100:.1f}% confidence")
+    probabilities = dict(result["probabilities"])
+    risk_score = float(probabilities.get("Suspicious", confidence if int(result["label"]) == 1 else 1 - confidence)) * 100
+    render_analysis_ready("Email analysis complete - results ready below")
+    render_result_card(
+        f"{label} email/message result",
+        risk_score,
+        educational_summary(label, confidence, findings),
+    )
 
-    st.write(educational_summary(label, confidence, findings))
+    render_content_card_open("violet")
     st.plotly_chart(_confidence_chart(result["probabilities"]), use_container_width=True)
+    render_content_card_close()
 
     if findings:
-        st.subheader("Highlighted warning signs")
+        render_section_header("Highlighted warning signs", eyebrow="Explainability")
+        render_content_card_open("red")
         st.markdown(highlighted_html(text, findings), unsafe_allow_html=True)
         st.dataframe(
             pd.DataFrame(findings)[["phrase", "category", "reason"]],
             hide_index=True,
             use_container_width=True,
         )
+        render_content_card_close()
     else:
         st.info("No suspicious phrase rules were triggered.")
 
     if classifier is not None:
         terms = top_model_terms(text, classifier.vectorizer, classifier.model)
         if terms:
-            st.subheader("Model-influential terms")
+            render_section_header("Model-influential terms", eyebrow="Classifier signal")
+            render_content_card_open("green")
             st.dataframe(pd.DataFrame(terms), hide_index=True, use_container_width=True)
+            render_content_card_close()
 
 
 def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
@@ -138,6 +156,7 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
     )
     demo_emails = get_demo_data()["emails"]
 
+    render_content_card_open("violet")
     controls, input_area = st.columns([0.28, 0.72])
     with controls:
         model_choice = st.radio("Text model", list(MODEL_FILES.keys()), horizontal=False)
@@ -163,9 +182,11 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
             height=260,
             placeholder="Paste an email, campus message, scholarship offer, or job/internship message here.",
         )
+    render_content_card_close()
 
     if isinstance(uploaded, pd.DataFrame):
-        st.subheader("Batch CSV analysis")
+        render_section_header("Batch CSV analysis", eyebrow="Multiple rows")
+        render_content_card_open("green")
         text_column = st.selectbox("Text column", uploaded.columns)
         if st.button("Analyze CSV rows", use_container_width=True):
             texts = uploaded[text_column].fillna("").astype(str).tolist()
@@ -186,6 +207,7 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
                 results = pd.DataFrame(rows)
                 st.warning("Email model artifacts were not found, so batch results use educational demo rules.")
             st.dataframe(results, hide_index=True, use_container_width=True)
+        render_content_card_close()
 
     if analyze_button:
         if not text.strip():

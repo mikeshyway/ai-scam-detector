@@ -11,9 +11,14 @@ import plotly.express as px
 import streamlit as st
 
 from app.ui_components import (
+    apply_chart_theme,
     get_demo_data,
+    render_analysis_ready,
+    render_content_card_close,
+    render_content_card_open,
     render_demo_notice,
     render_info_banner,
+    render_result_card,
     render_section_header,
 )
 
@@ -60,18 +65,17 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
     )
 
     demo_phones = get_demo_data()["phones"]
+    render_content_card_open("violet")
     number = st.text_input("Enter a phone number to check", placeholder="+60 12 345 6789")
     if st.button("Check number", type="primary"):
         result = _risk_from_number(number, demo_phones)
         score = int(result["risk_score"])
-        if score >= 70:
-            st.error(f"High risk score: {score}/100")
-        elif score >= 40:
-            st.warning(f"Medium risk score: {score}/100")
-        else:
-            st.success(f"Lower risk score: {score}/100")
-        st.write(f"Tag: **{result['tag']}**")
-        st.write(f"Reports in demo data: **{int(result['reports'])}**")
+        render_analysis_ready("Phone risk check complete - results ready below")
+        render_result_card(
+            "Caller ID risk result",
+            score,
+            f"Tag: {result['tag']}. Reports in demo data: {int(result['reports'])}.",
+        )
         history.insert(
             0,
             {
@@ -83,15 +87,20 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
                 "preview": number,
             },
         )
+    render_content_card_close()
 
     render_section_header("Synthetic reputation table", eyebrow="Reference data")
+    render_content_card_open("green")
     st.dataframe(demo_phones, hide_index=True, use_container_width=True)
     fig = px.histogram(demo_phones, x="risk_score", nbins=8, title="Demo phone risk distribution")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(apply_chart_theme(fig), use_container_width=True)
+    render_content_card_close()
 
     render_section_header("Realistic integration alternatives", eyebrow="Future scope")
-    st.write(
+    render_info_banner(
         "To build a true caller-ID style system, you would need a separate Android app, VoIP/Twilio call-flow "
         "integration, or a campus-reported scam-number database. Those require explicit consent, platform "
-        "permissions, and legal review."
+        "permissions, and legal review.",
+        kind="info",
+        code="NEXT",
     )

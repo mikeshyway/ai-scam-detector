@@ -10,7 +10,15 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from app.ui_components import render_demo_notice, render_section_header
+from app.ui_components import (
+    apply_chart_theme,
+    render_analysis_ready,
+    render_content_card_close,
+    render_content_card_open,
+    render_demo_notice,
+    render_result_card,
+    render_section_header,
+)
 from src.audio_classifier import load_audio_model
 from src.audio_preprocessor import audio_arrays_from_bytes, extract_mfcc_from_bytes, spectrogram_db
 from src.explainability import educational_summary
@@ -37,7 +45,7 @@ def _probability_chart(probabilities: dict[str, float]) -> go.Figure:
         yaxis_title="",
         xaxis=dict(range=[0, 100]),
     )
-    return fig
+    return apply_chart_theme(fig)
 
 
 def _waveform_figure(y: np.ndarray, sr: int) -> go.Figure:
@@ -49,7 +57,7 @@ def _waveform_figure(y: np.ndarray, sr: int) -> go.Figure:
         xaxis_title="Time (seconds)",
         yaxis_title="Amplitude",
     )
-    return fig
+    return apply_chart_theme(fig)
 
 
 def _spectrogram_figure(y: np.ndarray, sr: int) -> go.Figure:
@@ -69,7 +77,7 @@ def _spectrogram_figure(y: np.ndarray, sr: int) -> go.Figure:
         xaxis_title="Time (seconds)",
         yaxis_title="Frequency (Hz)",
     )
-    return fig
+    return apply_chart_theme(fig)
 
 
 def _record(history: list[dict[str, object]], result: dict[str, object], filename: str) -> None:
@@ -94,11 +102,13 @@ def render_audio_tab(root: Path, history: list[dict[str, object]]) -> None:
         "Audio evidence",
     )
 
+    render_content_card_open("violet")
     uploaded_file = st.file_uploader(
         "Upload a voice recording",
         type=["wav", "flac"],
         key="audio_upload",
     )
+    render_content_card_close()
 
     if uploaded_file is None:
         st.info("Upload a .wav or .flac file to view waveform and spectrogram analysis.")
@@ -110,12 +120,16 @@ def render_audio_tab(root: Path, history: list[dict[str, object]]) -> None:
 
     try:
         y, sr = _load_uploaded_audio(audio_bytes, suffix)
-        st.subheader("Waveform")
+        render_section_header("Waveform", eyebrow="Audio shape")
+        render_content_card_open("violet")
         st.plotly_chart(_waveform_figure(y, sr), use_container_width=True)
+        render_content_card_close()
 
-        st.subheader("Spectrogram")
+        render_section_header("Spectrogram", eyebrow="Frequency view")
+        render_content_card_open("violet")
         fig = _spectrogram_figure(y, sr)
         st.plotly_chart(fig, use_container_width=True)
+        render_content_card_close()
     except Exception as exc:
         st.error(f"Audio visualization failed: {exc}")
         return
@@ -139,13 +153,22 @@ def render_audio_tab(root: Path, history: list[dict[str, object]]) -> None:
             return
 
         confidence = float(result["confidence"])
-        if int(result["label"]) == 1:
-            st.error(f"{result['label_name']} - {confidence * 100:.1f}% confidence")
-        else:
-            st.success(f"{result['label_name']} - {confidence * 100:.1f}% confidence")
+        risk_score = float(
+            result["probabilities"].get(
+                "Possible AI-generated speech",
+                confidence if int(result["label"]) == 1 else 1 - confidence,
+            )
+        ) * 100
+        render_analysis_ready("Audio analysis complete - results ready below")
+        render_result_card(
+            str(result["label_name"]),
+            risk_score,
+            educational_summary(str(result["label_name"]), confidence, []),
+        )
 
-        st.write(educational_summary(str(result["label_name"]), confidence, []))
+        render_content_card_open("violet")
         st.plotly_chart(_probability_chart(result["probabilities"]), use_container_width=True)
+        render_content_card_close()
 
         feature_df = pd.DataFrame(
             {
@@ -153,6 +176,8 @@ def render_audio_tab(root: Path, history: list[dict[str, object]]) -> None:
                 "mfcc_value": features,
             }
         )
-        st.subheader("MFCC feature summary")
+        render_section_header("MFCC feature summary", eyebrow="Audio features")
+        render_content_card_open("green")
         st.dataframe(feature_df.describe().T, use_container_width=True)
+        render_content_card_close()
         _record(history, result, uploaded_file.name)
