@@ -77,6 +77,79 @@ def _risk_counts(rows: list[dict[str, object]]) -> Counter:
     return Counter(_risk_bucket(row) for row in rows)
 
 
+def _prediction_color(prediction: object) -> str:
+    text = _text(prediction, "").lower()
+    if any(term in text for term in ("lower risk", "legitimate", "real human", "safe")):
+        return "#0891B2"
+    if any(term in text for term in ("suspicious", "scam", "phishing", "ai-generated", "high risk", "chunk")):
+        return "#DC2626"
+    return "#D97706"
+
+
+def _confidence_chart_png(rows: list[dict[str, object]]) -> bytes | None:
+    """Render the report confidence overview as PNG for PDF/DOCX exports."""
+
+    if not rows:
+        return None
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+        from matplotlib.patches import Patch
+    except Exception:
+        return None
+
+    labels = [f"{_text(row.get('scan_type'), 'Scan')} #{index}" for index, row in enumerate(rows, 1)]
+    values = [_percent(row.get("confidence")) for row in rows]
+    predictions = [_text(row.get("prediction"), "Unknown") for row in rows]
+    colors = [_prediction_color(prediction) for prediction in predictions]
+
+    fig_width = max(7.2, min(12.0, 0.72 * len(rows) + 4.2))
+    fig, ax = plt.subplots(figsize=(fig_width, 3.4), dpi=160)
+    fig.patch.set_facecolor("#FFFFFF")
+    ax.set_facecolor("#FFFFFF")
+    ax.bar(range(len(rows)), values, color=colors, width=0.58)
+    ax.set_title("Selected evidence confidence overview", fontsize=12, fontweight="bold", color="#0F172A", pad=12)
+    ax.set_ylabel("Confidence (%)", fontsize=9, color="#334155")
+    ax.set_xlabel("Scan evidence", fontsize=9, color="#334155")
+    ax.set_ylim(0, 100)
+    ax.set_xticks(range(len(rows)))
+    ax.set_xticklabels(labels, rotation=32, ha="right", fontsize=7.5, color="#334155")
+    ax.tick_params(axis="y", labelsize=8, colors="#334155")
+    ax.grid(axis="y", color="#CBD5E1", linewidth=0.7, alpha=0.7)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#CBD5E1")
+    ax.spines["bottom"].set_color("#CBD5E1")
+
+    legend_items: list[Patch] = []
+    seen: set[str] = set()
+    for prediction in predictions:
+        if prediction in seen:
+            continue
+        seen.add(prediction)
+        legend_items.append(Patch(facecolor=_prediction_color(prediction), label=prediction))
+    if legend_items:
+        ax.legend(handles=legend_items, loc="upper right", fontsize=7.5, frameon=False)
+
+    buffer = io.BytesIO()
+    fig.tight_layout()
+    fig.savefig(buffer, format="png", bbox_inches="tight")
+    plt.close(fig)
+    return buffer.getvalue()
+
+
+def _confidence_chart_lines(rows: list[dict[str, object]]) -> list[str]:
+    lines = ["Confidence Overview"]
+    for index, row in enumerate(rows, 1):
+        lines.append(
+            f"- {index}. {_text(row.get('scan_type'))}: {_text(row.get('prediction'))} "
+            f"({_percent(row.get('confidence')):.1f}%)"
+        )
+    return lines
+
+
 def _filename(extension: str) -> str:
     stamp = now_for_app().strftime("%Y%m%d_%H%M%S")
     return f"AIFDS_Report_{stamp}.{extension.lower()}"
@@ -109,6 +182,9 @@ def build_preview(rows: list[dict[str, object]], report_note: str, sections: dic
                 f"{_text(row.get('scan_type'))} | {_text(row.get('prediction'))} | "
                 f"{_percent(row.get('confidence')):.1f}%"
             )
+        lines.append("")
+    if sections.get("risk", True):
+        lines.extend(_confidence_chart_lines(rows))
         lines.append("")
     if sections.get("recommendations", True):
         lines.extend(["Recommendations", report_note.strip() or DEFAULT_RECOMMENDATION, ""])
@@ -151,7 +227,7 @@ def build_pdf(rows: list[dict[str, object]], report_note: str, sections: dict[st
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import cm
-    from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -269,7 +345,11 @@ def build_pdf(rows: list[dict[str, object]], report_note: str, sections: dict[st
             story.append(Spacer(1, 8))
 
     if sections.get("risk", True):
-        story.append(Paragraph("4. Risk Interpretation", styles["Heading2"]))
+        story.append(Paragraph("4. Confidence Overview and Risk Interpretation", styles["Heading2"]))
+        chart = _confidence_chart_png(rows)
+        if chart:
+            story.append(Image(io.BytesIO(chart), width=15.2 * cm, height=6.2 * cm))
+            story.append(Spacer(1, 8))
         story.append(
             Paragraph(
                 "High confidence does not prove fraud by itself. It means the prototype found patterns similar to its training or rule examples. "
@@ -324,7 +404,7 @@ def build_pdf(rows: list[dict[str, object]], report_note: str, sections: dict[st
 def build_docx(rows: list[dict[str, object]], report_note: str, sections: dict[str, bool]) -> tuple[bytes, str]:
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Pt, RGBColor
+    from docx.shared import Inches, Pt, RGBColor
 
     document = Document()
     title = document.add_heading("AI-based Spam and Caller Fraud Detection System", 0)
@@ -392,7 +472,10 @@ def build_docx(rows: list[dict[str, object]], report_note: str, sections: dict[s
                 body(f"Evidence preview: {preview[:350]}")
 
     if sections.get("risk", True):
-        heading("4. Risk Interpretation")
+        heading("4. Confidence Overview and Risk Interpretation")
+        chart = _confidence_chart_png(rows)
+        if chart:
+            document.add_picture(io.BytesIO(chart), width=Inches(6.4))
         body(
             "Model confidence is a prototype decision signal, not absolute proof. "
             "High-risk or unclear items should be reviewed by a person through official channels."

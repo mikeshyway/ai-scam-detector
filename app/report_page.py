@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -112,6 +113,43 @@ def _remove_deleted_from_session(history: list[dict[str, object]], deleted_rows:
     ]
 
 
+def _no_result_message(
+    *,
+    all_rows: list[dict[str, object]],
+    date_from: date,
+    date_to: date,
+    selected_types: list[str],
+    selected_predictions: list[str],
+) -> str:
+    if date_from > date_to:
+        return "No result: the start date is after the end date. Choose a valid date range."
+    if not all_rows:
+        return "No result: no scan evidence has been saved yet. Run a scan first, then return to this page."
+    if not selected_types:
+        return "No result: no scan type is selected."
+    if not selected_predictions:
+        return "No result: no prediction type is selected."
+
+    date_rows = query_history(
+        session_id=DEFAULT_SESSION_ID,
+        date_from=str(date_from),
+        date_to=str(date_to),
+    )
+    if not date_rows:
+        return f"No result: no saved scans were found from {date_from} to {date_to}."
+
+    type_rows = query_history(
+        session_id=DEFAULT_SESSION_ID,
+        date_from=str(date_from),
+        date_to=str(date_to),
+        scan_types=selected_types,
+    )
+    if not type_rows:
+        return "No result: the selected scan type has no saved scans in this date range."
+
+    return "No result: the selected prediction type has no saved scans for the current date range and scan type."
+
+
 def _render_risk_chart(rows: list[dict[str, object]]) -> None:
     if not rows:
         return
@@ -135,6 +173,66 @@ def _render_risk_chart(rows: list[dict[str, object]]) -> None:
     st.plotly_chart(apply_chart_theme(fig), use_container_width=True)
 
 
+def _report_rows_json(rows: list[dict[str, object]]) -> str:
+    return json.dumps(rows, sort_keys=True, default=str, ensure_ascii=True)
+
+
+def _sections_json(sections: dict[str, bool]) -> str:
+    return json.dumps(sections, sort_keys=True, ensure_ascii=True)
+
+
+@st.cache_data(show_spinner=False)
+def _build_live_report(
+    report_format: str,
+    rows_json: str,
+    report_note: str,
+    sections_json: str,
+) -> tuple[bytes, str, str]:
+    rows = json.loads(rows_json)
+    sections = json.loads(sections_json)
+    return build_report(report_format, rows, report_note, sections)
+
+
+def _clear_all_evidence(history: list[dict[str, object]]) -> None:
+    deleted_count = delete_all_history(DEFAULT_SESSION_ID)
+    history.clear()
+    st.session_state["report_notice"] = f"Cleared {deleted_count} evidence record(s)."
+    st.session_state["show_clear_all_dialog"] = False
+    st.rerun()
+
+
+def _render_clear_all_confirmation(history: list[dict[str, object]]) -> None:
+    dialog_factory = getattr(st, "dialog", None) or getattr(st, "experimental_dialog", None)
+    if dialog_factory:
+        @dialog_factory("Clear all evidence?")
+        def confirm_clear_all() -> None:
+            st.warning(
+                "This will permanently remove every saved scan evidence record from the local report history."
+            )
+            cancel_col, delete_col = st.columns(2)
+            with cancel_col:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state["show_clear_all_dialog"] = False
+                    st.rerun()
+            with delete_col:
+                if st.button("Delete all evidence", type="primary", use_container_width=True):
+                    _clear_all_evidence(history)
+
+        confirm_clear_all()
+        return
+
+    with st.container(border=True):
+        st.warning("Confirm clear all: this will permanently remove every saved scan evidence record.")
+        cancel_col, delete_col = st.columns(2)
+        with cancel_col:
+            if st.button("Cancel clear all", use_container_width=True):
+                st.session_state["show_clear_all_dialog"] = False
+                st.rerun()
+        with delete_col:
+            if st.button("Confirm delete all evidence", type="primary", use_container_width=True):
+                _clear_all_evidence(history)
+
+
 def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
     del root
     init_db()
@@ -153,25 +251,26 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
     )
     if synced:
         render_analysis_ready(f"{synced} new scan record(s) synced into report history")
+    notice = st.session_state.pop("report_notice", None)
+    if notice:
+        render_analysis_ready(str(notice))
 
     all_rows = query_history(session_id=DEFAULT_SESSION_ID)
     render_metric_row(_summary_metrics(all_rows))
 
     with st.container(border=True):
         st.subheader("Evidence filters")
-        col_a, col_b, col_c = st.columns([0.28, 0.36, 0.36])
         dates = [_parse_date(row.get("scanned_at")) for row in all_rows]
         dates = [item for item in dates if item]
         current_date = now_for_app().date()
         default_from = min(dates) if dates else current_date - timedelta(days=30)
         default_to = max(dates) if dates else current_date
 
+        col_a, col_b = st.columns(2)
         with col_a:
-            use_date_filter = st.toggle("Use date range", value=False)
+            date_from = st.date_input("From", value=default_from)
         with col_b:
-            date_from = st.date_input("From", value=default_from, disabled=not use_date_filter)
-        with col_c:
-            date_to = st.date_input("To", value=default_to, disabled=not use_date_filter)
+            date_to = st.date_input("To", value=default_to)
 
         type_options = _unique(all_rows, "scan_type")
         prediction_options = _unique(all_rows, "prediction")
@@ -181,13 +280,16 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
         with col_e:
             selected_predictions = st.multiselect("Predictions", prediction_options, default=prediction_options)
 
-    filtered_rows = query_history(
-        session_id=DEFAULT_SESSION_ID,
-        date_from=str(date_from) if use_date_filter else None,
-        date_to=str(date_to) if use_date_filter else None,
-        scan_types=selected_types if selected_types else None,
-        predictions=selected_predictions if selected_predictions else None,
-    )
+    if date_from <= date_to and selected_types and selected_predictions:
+        filtered_rows = query_history(
+            session_id=DEFAULT_SESSION_ID,
+            date_from=str(date_from),
+            date_to=str(date_to),
+            scan_types=selected_types,
+            predictions=selected_predictions,
+        )
+    else:
+        filtered_rows = []
 
     render_section_header(
         "Saved scan evidence",
@@ -196,7 +298,17 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
     )
 
     if not filtered_rows:
-        st.info("No scan evidence is available yet. Run the Detection Center or Scam Simulation Lab first, then return here.")
+        render_info_banner(
+            _no_result_message(
+                all_rows=all_rows,
+                date_from=date_from,
+                date_to=date_to,
+                selected_types=selected_types,
+                selected_predictions=selected_predictions,
+            ),
+            kind="warning",
+            code="NO RESULT",
+        )
         return
 
     with st.container(border=True):
@@ -216,7 +328,7 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
         selected_rows = _rows_by_id(filtered_rows, selected_ids)
         report_rows = selected_rows or filtered_rows
 
-        action_a, action_b, action_c = st.columns([0.34, 0.33, 0.33])
+        action_a, action_b, action_c = st.columns([0.42, 0.29, 0.29])
         with action_a:
             st.caption(f"{len(report_rows)} record(s) will be included.")
         with action_b:
@@ -227,12 +339,11 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
                 st.success(f"Deleted {deleted_count} selected evidence record(s).")
                 st.rerun()
         with action_c:
-            confirm_clear = st.checkbox("Confirm clear all", key="confirm_report_history_clear")
-            if st.button("Clear all evidence", disabled=not confirm_clear, use_container_width=True):
-                deleted_count = delete_all_history(DEFAULT_SESSION_ID)
-                history.clear()
-                st.success(f"Cleared {deleted_count} evidence record(s).")
-                st.rerun()
+            if st.button("Clear all evidence", use_container_width=True):
+                st.session_state["show_clear_all_dialog"] = True
+
+    if st.session_state.get("show_clear_all_dialog"):
+        _render_clear_all_confirmation(history)
 
     with st.expander("Inspect selected evidence details", expanded=False):
         for index, row in enumerate(report_rows, 1):
@@ -278,19 +389,41 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
             )
 
     preview = build_preview(report_rows, report_note, section_values)
+    rows_json = _report_rows_json(report_rows)
+    sections_json = _sections_json(section_values)
     with st.container(border=True):
         st.subheader("Report preview")
+        try:
+            payload, filename, mime_type = _build_live_report(
+                str(report_format),
+                rows_json,
+                report_note,
+                sections_json,
+            )
+        except Exception as exc:
+            payload = b""
+            filename = ""
+            mime_type = "application/octet-stream"
+            st.error(f"Live report update failed: {exc}")
+        else:
+            st.caption(
+                f"Live {report_format} export ready: {filename}. "
+                "Changing format, sections, selected evidence, or notes updates this file automatically."
+            )
+
         st.text_area("Preview text", value=preview, height=250, disabled=True, label_visibility="collapsed")
 
-        generate_col, download_col = st.columns([0.35, 0.65])
-        with generate_col:
-            generate = st.button("Generate report", type="primary", use_container_width=True)
-        if generate:
-            try:
-                payload, filename, mime_type = build_report(str(report_format), report_rows, report_note, section_values)
-            except Exception as exc:
-                st.error(f"Report generation failed: {exc}")
-            else:
+        if payload:
+            downloaded = st.download_button(
+                f"Download {report_format} report now ({len(report_rows)} record(s))",
+                data=payload,
+                file_name=filename,
+                mime=mime_type,
+                type="primary",
+                use_container_width=True,
+            )
+            download_token = f"{filename}:{len(payload)}:{rows_json}:{sections_json}:{report_note}"
+            if downloaded and st.session_state.get("last_report_download_token") != download_token:
                 scan_ids = [int(row.get("id", 0)) for row in report_rows]
                 log_export(
                     report_format=str(report_format),
@@ -298,24 +431,5 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
                     filename=filename,
                     session_id=DEFAULT_SESSION_ID,
                 )
-                st.session_state["generated_report"] = {
-                    "payload": payload,
-                    "filename": filename,
-                    "mime_type": mime_type,
-                    "format": str(report_format),
-                    "records": len(report_rows),
-                }
-                render_analysis_ready(f"{report_format} report generated")
-
-        generated = st.session_state.get("generated_report")
-        with download_col:
-            if generated:
-                st.download_button(
-                    f"Download {generated['format']} report ({generated['records']} record(s))",
-                    data=generated["payload"],
-                    file_name=generated["filename"],
-                    mime=generated["mime_type"],
-                    use_container_width=True,
-                )
-            else:
-                st.caption("Generate a report first, then the download button will appear here.")
+                st.session_state["last_report_download_token"] = download_token
+                render_analysis_ready(f"{report_format} report download recorded")
