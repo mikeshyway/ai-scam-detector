@@ -16,6 +16,7 @@ data/raw/spamassassin/ham/*
 data/raw/asvspoof_subset/*.flac
 data/raw/asvspoof_subset/*.wav
 data/processed/*.npy
+data/*.db*
 !data/raw/spamassassin/spam/.gitkeep
 !data/raw/spamassassin/ham/.gitkeep
 !data/raw/asvspoof_subset/.gitkeep
