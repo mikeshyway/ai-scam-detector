@@ -109,6 +109,8 @@ Implemented as an optional browser-microphone demonstration using `streamlit-web
 
 Implemented scope:
 
+- Default reliable recorder mode using Streamlit's built-in microphone widget. This avoids
+  WebRTC connection negotiation and analyses the recording immediately after it is stopped.
 - Analyse the microphone selected by the browser in configurable 3-10 second chunks.
 - Extract MFCC and acoustic features for the existing SVM or educational heuristic.
 - Optionally run local Whisper speech-to-text, then score the transcript with the existing

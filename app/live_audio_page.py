@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from src.live_audio_analysis import (
     AudioChunkBuffer,
     analyse_live_chunk,
     transcribe_with_whisper,
+    wav_bytes_to_audio,
 )
 from src.text_classifier import load_text_artifacts
 from src.time_utils import formatted_now
@@ -134,6 +136,7 @@ def _init_live_state() -> None:
         "live_audio_buffer": AudioChunkBuffer(),
         "live_audio_error": "",
         "live_audio_saved_signature": "",
+        "live_recording_signature": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -147,6 +150,7 @@ def _clear_live_state() -> None:
     st.session_state["live_audio_results"] = []
     st.session_state["live_audio_error"] = ""
     st.session_state["live_audio_saved_signature"] = ""
+    st.session_state["live_recording_signature"] = ""
 
 
 def _timeline_figure(results: list[dict[str, object]], threshold: int) -> go.Figure:
@@ -255,6 +259,48 @@ def _cumulative_transcript(results: list[dict[str, object]]) -> str:
         if transcript:
             lines.append(f"[{result.get('time', '--:--:--')}] {transcript}")
     return "\n".join(lines)
+
+
+def _recording_chunks(audio: np.ndarray, sample_rate: int, chunk_seconds: int) -> list[np.ndarray]:
+    chunk_size = max(1, int(sample_rate * chunk_seconds))
+    chunks = []
+    for start in range(0, audio.size, chunk_size):
+        chunk = audio[start : start + chunk_size]
+        if chunk.size >= int(sample_rate * 0.75):
+            chunks.append(chunk.astype(np.float32))
+    return chunks or [audio.astype(np.float32)]
+
+
+def _process_recording(
+    audio_bytes: bytes,
+    *,
+    chunk_seconds: int,
+    transcript_source: str,
+    manual_transcript: str,
+    whisper_model: Any | None,
+    audio_classifier: Any | None,
+    text_classifier: Any | None,
+) -> list[dict[str, object]]:
+    audio, sample_rate = wav_bytes_to_audio(audio_bytes, target_sample_rate=16_000)
+    processed = []
+    chunks = _recording_chunks(audio, sample_rate, chunk_seconds)
+    for index, chunk in enumerate(chunks):
+        if transcript_source == "Local Whisper":
+            transcript = transcribe_with_whisper(chunk, whisper_model)
+        elif transcript_source == "Manual demo text" and index == 0:
+            transcript = manual_transcript
+        else:
+            transcript = ""
+        processed.append(
+            analyse_live_chunk(
+                chunk,
+                transcript=transcript,
+                audio_classifier=audio_classifier,
+                text_classifier=text_classifier,
+                sample_rate=sample_rate,
+            )
+        )
+    return processed
 
 
 def _result_table(results: list[dict[str, object]]) -> pd.DataFrame:
@@ -386,6 +432,7 @@ def _save_session(
     history: list[dict[str, object]],
     results: list[dict[str, object]],
     transcript_source: str,
+    capture_mode: str,
 ) -> None:
     if not results:
         return
@@ -421,7 +468,7 @@ def _save_session(
     )
     entry: dict[str, object] = {
         "time": timestamp,
-        "type": "Live Audio",
+        "type": "Microphone Audio",
         "prediction": str(peak_result.get("risk_level", "Needs review")),
         "confidence": round(peak_risk, 2),
         "model": " + ".join(engines),
@@ -429,7 +476,7 @@ def _save_session(
         "chunks": len(results),
         "flags": flags,
         "explanation": (
-            f"Live browser microphone demonstration using {transcript_source}. "
+            f"Browser microphone demonstration using {capture_mode} and {transcript_source}. "
             f"Peak combined risk {peak_risk:.1f}% across {len(results)} chunk(s)."
         ),
         "raw_input": "\n".join(transcripts),
@@ -440,8 +487,8 @@ def _save_session(
     insert_scan(
         session_id=DEFAULT_SESSION_ID,
         scanned_at=timestamp,
-        scan_type="Live Audio",
-        source_name=f"Live microphone session ({len(results)} chunks)",
+        scan_type="Microphone Audio",
+        source_name=f"Microphone session ({len(results)} chunks)",
         prediction=str(entry["prediction"]),
         confidence=float(entry["confidence"]),
         model_name=str(entry["model"]),
@@ -492,24 +539,17 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
             {"label": "Local Whisper", "value": "Ready" if WHISPER_AVAILABLE else "Optional install", "color": "#2563EB" if WHISPER_AVAILABLE else "#6B7280"},
         ]
     )
-    if rtc_error:
-        render_info_banner(rtc_error, kind="danger", code="TURN ERROR")
-    elif rtc_mode == "STUN only":
-        render_info_banner(
-            "STUN-only mode is active. This commonly stalls on Streamlit Community Cloud, university Wi-Fi, VPNs, "
-            "corporate firewalls, and carrier-grade NAT. Configure TURN secrets before relying on the live demonstration.",
-            kind="warning",
-            code="TURN NEEDED",
-        )
-    else:
-        render_info_banner(
-            "TURN relay credentials are configured. Hosted WebRTC can relay microphone media when direct ICE paths fail.",
-            kind="success",
-            code="TURN READY",
-        )
-
     with st.container(border=True):
         st.subheader("Live session settings")
+        capture_mode = st.radio(
+            "Microphone capture method",
+            ["Reliable recorder", "Live WebRTC (advanced)"],
+            horizontal=True,
+            help=(
+                "Reliable recorder uses Streamlit's built-in microphone widget and does not require STUN/TURN. "
+                "Live WebRTC updates continuously but hosted deployments normally require TURN."
+            ),
+        )
         setting_a, setting_b, setting_c = st.columns(3)
         with setting_a:
             chunk_seconds = st.slider("Analysis chunk", min_value=3, max_value=10, value=4, step=1)
@@ -545,15 +585,6 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
 
     buffer.configure(chunk_seconds)
 
-    if not WEBRTC_AVAILABLE:
-        render_info_banner(
-            "Live microphone transport is unavailable. Install requirements.txt, then restart Streamlit. "
-            f"Import detail: {WEBRTC_IMPORT_ERROR or 'dependency missing'}",
-            kind="danger",
-            code="SETUP",
-        )
-        return
-
     whisper_model = None
     if transcript_source == "Local Whisper":
         with st.spinner(f"Loading local Whisper {whisper_size} model..."):
@@ -563,29 +594,104 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
                 st.error(f"Whisper could not be loaded: {exc}")
                 transcript_source = "Audio only"
 
-    render_section_header(
-        "Microphone stream",
-        "Select Start below and grant browser microphone permission. The first result appears after one complete chunk.",
-        "WebRTC input",
-    )
+    webrtc_context = None
+    if capture_mode == "Reliable recorder":
+        render_section_header(
+            "Reliable microphone recorder",
+            "Record a short sample, stop the recording, and the app will immediately analyse it in chunks without WebRTC.",
+            "Recommended input",
+        )
+        render_info_banner(
+            "This mode avoids ICE, STUN, and TURN negotiation. It is the recommended capstone demonstration path on Streamlit Cloud.",
+            kind="success",
+            code="RELIABLE",
+        )
+        if not hasattr(st, "audio_input"):
+            render_info_banner(
+                "Reliable recorder requires Streamlit 1.48 or newer. Reinstall requirements.txt and restart the app.",
+                kind="danger",
+                code="UPGRADE",
+            )
+            recorded_audio = None
+        else:
+            recorded_audio = st.audio_input(
+                "Record microphone audio",
+                key="aifds_reliable_microphone",
+                help="Stop the recording when finished. Analysis starts automatically.",
+            )
+        if recorded_audio is not None:
+            recorded_bytes = recorded_audio.getvalue()
+            settings_signature = json.dumps(
+                [chunk_seconds, transcript_source, whisper_size, manual_transcript],
+                ensure_ascii=True,
+            ).encode("utf-8")
+            recording_signature = hashlib.sha256(recorded_bytes + settings_signature).hexdigest()
+            if recording_signature != st.session_state.get("live_recording_signature"):
+                with st.spinner("Analysing recorded microphone audio..."):
+                    try:
+                        processed = _process_recording(
+                            recorded_bytes,
+                            chunk_seconds=chunk_seconds,
+                            transcript_source=transcript_source,
+                            manual_transcript=manual_transcript,
+                            whisper_model=whisper_model,
+                            audio_classifier=audio_classifier,
+                            text_classifier=text_classifier,
+                        )
+                    except Exception as exc:
+                        st.session_state["live_audio_error"] = str(exc)
+                        st.error(f"Recorded microphone analysis failed: {exc}")
+                    else:
+                        results[:] = processed[-60:]
+                        st.session_state["live_recording_signature"] = recording_signature
+                        st.session_state["live_audio_saved_signature"] = ""
+                        st.session_state["live_audio_error"] = ""
+                        render_analysis_ready(f"Recorded audio analysed in {len(results)} chunk(s)")
+    else:
+        render_section_header(
+            "Live microphone stream",
+            "Select Start and grant microphone permission. This advanced mode requires a working WebRTC network path.",
+            "TURN-dependent input",
+        )
+        if not WEBRTC_AVAILABLE:
+            render_info_banner(
+                "Live WebRTC transport is unavailable. Install requirements.txt and restart Streamlit, or use Reliable recorder.",
+                kind="danger",
+                code="SETUP",
+            )
+        else:
+            if rtc_error:
+                render_info_banner(rtc_error, kind="danger", code="TURN ERROR")
+            elif rtc_mode == "STUN only":
+                render_info_banner(
+                    "No TURN relay is configured. If Start immediately switches off, use Reliable recorder or configure real TURN credentials.",
+                    kind="danger",
+                    code="CONNECTION",
+                )
+            else:
+                render_info_banner(
+                    "TURN relay credentials are configured. Hosted WebRTC can relay microphone media when direct ICE paths fail.",
+                    kind="success",
+                    code="TURN READY",
+                )
 
-    def audio_frame_callback(frame):
-        return buffer.push_frame(frame)
+            def audio_frame_callback(frame):
+                return buffer.push_frame(frame)
 
-    webrtc_context = webrtc_streamer(
-        key="aifds-live-audio",
-        mode=WebRtcMode.SENDONLY,
-        audio_frame_callback=audio_frame_callback,
-        media_stream_constraints={
-            "audio": {
-                "echoCancellation": True,
-                "noiseSuppression": True,
-                "channelCount": 1,
-            },
-            "video": False,
-        },
-        rtc_configuration=rtc_configuration,
-    )
+            webrtc_context = webrtc_streamer(
+                key="aifds-live-audio",
+                mode=WebRtcMode.SENDONLY,
+                audio_frame_callback=audio_frame_callback,
+                media_stream_constraints={
+                    "audio": {
+                        "echoCancellation": True,
+                        "noiseSuppression": True,
+                        "channelCount": 1,
+                    },
+                    "video": False,
+                },
+                rtc_configuration=rtc_configuration,
+            )
 
     status_placeholder = st.empty()
     metrics_placeholder = st.empty()
@@ -616,7 +722,7 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
         features_placeholder=features_placeholder,
     )
 
-    if webrtc_context.state.playing:
+    if webrtc_context is not None and webrtc_context.state.playing:
         status_placeholder.success(
             f"Microphone active. Processing approximately every {chunk_seconds} seconds."
         )
@@ -661,8 +767,10 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
                 frequency_placeholder=frequency_placeholder,
                 features_placeholder=features_placeholder,
             )
-    else:
+    elif capture_mode == "Live WebRTC (advanced)":
         status_placeholder.info("Microphone is stopped. Start the stream to continue analysis.")
+    else:
+        status_placeholder.info("Record and stop a microphone sample above to update the analysis.")
 
     if st.session_state.get("live_audio_error"):
         st.warning(f"Most recent processing issue: {st.session_state['live_audio_error']}")
@@ -688,6 +796,6 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
             use_container_width=True,
             disabled=already_saved,
         ):
-            _save_session(history, results, transcript_source)
+            _save_session(history, results, transcript_source, capture_mode)
         if already_saved:
             st.caption("This live-session state has already been saved. Process another chunk to create a new version.")

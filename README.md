@@ -37,6 +37,7 @@ trained models are inserted.
 - AI-generated speech detection using MFCC audio features with an SVM classifier.
 - Uploaded meeting/call recording chunk analysis with 5-10 second confidence results.
 - Browser microphone analysis using configurable 3-10 second chunks.
+- Reliable built-in microphone recording that avoids WebRTC/STUN/TURN negotiation.
 - Optional local Whisper speech-to-text for combining spoken content and voice signals.
 - AI report generation with TXT/PDF/DOCX downloads when dependencies are installed.
 - Confidence scoring and Streamlit warning banners.
@@ -81,6 +82,14 @@ a clearly labelled manual transcript demonstration mode.
 
 Browser microphone access works on `localhost`. Remote deployments require HTTPS, and some
 restricted networks or cloud hosts also require a configured TURN server for WebRTC.
+
+The Live Audio Detection page defaults to **Reliable recorder**, which uses Streamlit's
+built-in `st.audio_input`. Record a sample and stop it; the app automatically divides the
+recording into chunks and updates the transcript, frequency spectrum, MFCC, and risk panels.
+This mode does not use WebRTC and is recommended for Streamlit Cloud demonstrations.
+
+**Live WebRTC (advanced)** remains available for continuous chunk updates. It requires a
+working TURN relay on many hosted or restricted networks.
 
 ### TURN Setup for Hosted Live Audio
 
