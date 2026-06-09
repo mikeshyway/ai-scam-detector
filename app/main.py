@@ -34,6 +34,12 @@ def _email(root: Path, history: list[dict[str, object]]) -> None:
     render_detection_center_page(root, history)
 
 
+def _live_audio(root: Path, history: list[dict[str, object]]) -> None:
+    from app.live_audio_page import render_live_audio_page
+
+    render_live_audio_page(root, history)
+
+
 def _report(root: Path, history: list[dict[str, object]]) -> None:
     from app.report_page import render_report_page
 
@@ -42,12 +48,14 @@ def _report(root: Path, history: list[dict[str, object]]) -> None:
 
 PAGES = {
     "Scam Simulation Lab": _simulation,
+    "Live Audio Detection": _live_audio,
     "Detection Center": _email,
     "AI Report Generator": _report,
 }
 
 PAGE_ICONS = {
     "Scam Simulation Lab": "SIM",
+    "Live Audio Detection": "LIVE",
     "Detection Center": "DET",
     "AI Report Generator": "REP",
 }

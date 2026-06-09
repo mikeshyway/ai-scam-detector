@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# Optional local speech-to-text for the Live Audio Detection page.
+# This downloads a Whisper model on first use and is substantially heavier
+# than the core capstone requirements.
+openai-whisper

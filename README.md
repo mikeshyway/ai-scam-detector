@@ -11,6 +11,8 @@ clean visual feedback, and downloadable evidence summaries.
 ## App Pages
 
 - Scam Simulation Lab: uploaded call/meeting recording chunk analysis.
+- Live Audio Detection: browser-microphone chunk analysis with optional local Whisper
+  transcription, transcript scam scoring, MFCC/SVM voice scoring, and report-history saving.
 - Detection Center: email, transcript, AI voice/deepfake, and phone-number risk checkers.
 - AI Report Generator: downloadable TXT/PDF/DOCX evidence summary.
 
@@ -34,6 +36,8 @@ trained models are inserted.
 - Scam transcript detection using TF-IDF with Naive Bayes.
 - AI-generated speech detection using MFCC audio features with an SVM classifier.
 - Uploaded meeting/call recording chunk analysis with 5-10 second confidence results.
+- Browser microphone analysis using configurable 3-10 second chunks.
+- Optional local Whisper speech-to-text for combining spoken content and voice signals.
 - AI report generation with TXT/PDF/DOCX downloads when dependencies are installed.
 - Confidence scoring and Streamlit warning banners.
 - Suspicious phrase highlighting.
@@ -62,6 +66,21 @@ pip install --upgrade pip
 pip install -r requirements.txt
 python scripts/00_setup_check.py
 ```
+
+For optional local Whisper transcription on the Live Audio Detection page:
+
+```bash
+sudo apt update
+sudo apt install ffmpeg
+pip install -r requirements-live.txt
+```
+
+The first Whisper session downloads the selected model. The `tiny` model is recommended for
+CPU demonstrations. Without Whisper, the page still supports audio-only MFCC/SVM analysis and
+a clearly labelled manual transcript demonstration mode.
+
+Browser microphone access works on `localhost`. Remote deployments require HTTPS, and some
+restricted networks or cloud hosts also require a configured TURN server for WebRTC.
 
 On Windows PowerShell:
 
@@ -124,9 +143,11 @@ Keep `requirements.txt` at the repository root.
 
 ## Detection Scope
 
-The implemented scope is uploaded-evidence detection: paste text, upload files, upload
-recordings, and review educational explanations. Automatic pre-delivery monitoring is outside
-the current Streamlit prototype.
+The system supports uploaded evidence and an educational browser-microphone demonstration.
+The live page analyses only the microphone selected by the browser. It does not automatically
+intercept phone calls, meeting platforms, system audio, emails, or messages. Capturing another
+speaker requires speaker playback into the microphone or a separately configured virtual audio
+cable. Automatic pre-delivery monitoring remains outside the Streamlit prototype.
 
 ## Change Log
 

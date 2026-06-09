@@ -67,7 +67,8 @@ Reason:
 
 Replacement:
 
-- Uploaded-evidence detection only.
+- Uploaded-evidence detection.
+- Browser-microphone educational analysis through WebRTC.
 - Paste email/text.
 - Upload `.txt`, `.csv`, `.wav`, `.flac`, `.mp3`, or `.m4a`.
 
@@ -104,12 +105,24 @@ Replacement:
 
 ### Real-Time Microphone Recording
 
-Excluded because Streamlit microphone support is not reliable across Kali Linux/local
-deployment without extra components and permissions.
+Implemented as an optional browser-microphone demonstration using `streamlit-webrtc`.
 
-Replacement:
+Implemented scope:
 
-- Audio upload only.
+- Analyse the microphone selected by the browser in configurable 3-10 second chunks.
+- Extract MFCC and acoustic features for the existing SVM or educational heuristic.
+- Optionally run local Whisper speech-to-text, then score the transcript with the existing
+  transcript model and suspicious-phrase explanations.
+- Save a session summary into the AI Report Generator history.
+
+Limitations:
+
+- Requires browser microphone permission and the additional WebRTC dependencies.
+- Does not intercept phone calls, Zoom, Teams, Google Meet, or operating-system audio.
+- Capturing another participant requires speaker playback or a separately configured virtual
+  audio cable.
+- Whisper is optional because its model download and CPU cost are too heavy for the default
+  capstone installation.
 
 ### Suspicious Timestamp Replay In Audio
 

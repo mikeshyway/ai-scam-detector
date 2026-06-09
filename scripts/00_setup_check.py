@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_PACKAGES = [
     "streamlit",
+    "streamlit_webrtc",
+    "av",
     "pandas",
     "numpy",
     "sklearn",
@@ -23,6 +25,10 @@ REQUIRED_PACKAGES = [
     "joblib",
     "reportlab",
     "docx",
+]
+
+OPTIONAL_PACKAGES = [
+    ("whisper", "Install requirements-live.txt for local live transcription."),
 ]
 
 EXPECTED_DIRS = [
@@ -49,6 +55,11 @@ def main() -> int:
         print(f"{'OK' if available else 'MISSING':7} {package}")
         if not available:
             missing_packages.append(package)
+
+    print("\nOptional packages")
+    for package, note in OPTIONAL_PACKAGES:
+        available = importlib.util.find_spec(package) is not None
+        print(f"{'OK' if available else 'OPTIONAL':7} {package} - {note}")
 
     print("\nFolders")
     for relative in EXPECTED_DIRS:
