@@ -21,6 +21,36 @@ from src.time_utils import now_for_app
 TARGET_SAMPLE_RATE = 16_000
 
 
+def _spectrum_summary(
+    audio: np.ndarray,
+    sample_rate: int,
+    *,
+    points: int = 160,
+) -> tuple[list[float], list[float], float]:
+    windowed = np.asarray(audio, dtype=np.float32) * np.hanning(audio.size)
+    magnitudes = np.abs(np.fft.rfft(windowed))
+    frequencies = np.fft.rfftfreq(windowed.size, d=1.0 / sample_rate)
+    if magnitudes.size == 0 or float(np.max(magnitudes)) <= 0:
+        return [], [], 0.0
+
+    decibels = 20.0 * np.log10(np.maximum(magnitudes, 1e-12) / np.max(magnitudes))
+    max_frequency = min(sample_rate / 2.0, 8_000.0)
+    usable = frequencies <= max_frequency
+    frequencies = frequencies[usable]
+    decibels = decibels[usable]
+    dominant_frequency = float(frequencies[int(np.argmax(decibels))]) if frequencies.size else 0.0
+
+    if frequencies.size > points:
+        indices = np.linspace(0, frequencies.size - 1, num=points, dtype=int)
+        frequencies = frequencies[indices]
+        decibels = decibels[indices]
+    return (
+        np.round(frequencies, 2).astype(float).tolist(),
+        np.round(decibels, 2).astype(float).tolist(),
+        dominant_frequency,
+    )
+
+
 def _normalise_frame(frame: Any, target_sample_rate: int = TARGET_SAMPLE_RATE) -> np.ndarray:
     """Convert a PyAV audio frame into mono float32 audio."""
 
@@ -104,6 +134,7 @@ def extract_live_features(audio: np.ndarray, sample_rate: int = TARGET_SAMPLE_RA
     audio = np.asarray(audio, dtype=np.float32)
     if audio.size < 512:
         raise ValueError("Audio chunk is too short for feature extraction.")
+    spectrum_frequencies, spectrum_db, dominant_frequency = _spectrum_summary(audio, sample_rate)
 
     try:
         import librosa
@@ -124,6 +155,9 @@ def extract_live_features(audio: np.ndarray, sample_rate: int = TARGET_SAMPLE_RA
             "pitch_variance": 20.0,
             "spectral_rolloff": 0.0,
             "mfcc_available": False,
+            "spectrum_frequencies": spectrum_frequencies,
+            "spectrum_db": spectrum_db,
+            "dominant_frequency": dominant_frequency,
         }
 
     mfcc_full = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=40)
@@ -155,6 +189,9 @@ def extract_live_features(audio: np.ndarray, sample_rate: int = TARGET_SAMPLE_RA
         "pitch_variance": pitch_variance,
         "spectral_rolloff": rolloff,
         "mfcc_available": True,
+        "spectrum_frequencies": spectrum_frequencies,
+        "spectrum_db": spectrum_db,
+        "dominant_frequency": dominant_frequency,
     }
 
 

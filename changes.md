@@ -123,6 +123,9 @@ Limitations:
   audio cable.
 - Whisper is optional because its model download and CPU cost are too heavy for the default
   capstone installation.
+- Hosted deployments use STUN by default but support static TURN credentials or short-lived
+  Twilio Network Traversal Service tokens through Streamlit secrets. TURN is required on many
+  cloud, university, VPN, firewall, and carrier-grade NAT networks.
 
 ### Suspicious Timestamp Replay In Audio
 

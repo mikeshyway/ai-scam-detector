@@ -10,6 +10,7 @@ venv/
 env/
 
 .ipynb_checkpoints/
+.streamlit/secrets.toml
 
 data/raw/spamassassin/spam/*
 data/raw/spamassassin/ham/*

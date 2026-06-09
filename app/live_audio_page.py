@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,11 @@ from src.live_audio_analysis import (
 )
 from src.text_classifier import load_text_artifacts
 from src.time_utils import formatted_now
+from src.webrtc_config import (
+    build_rtc_configuration,
+    fetch_twilio_ice_servers,
+    static_turn_servers,
+)
 
 
 try:
@@ -75,6 +81,51 @@ def _load_whisper_model(model_size: str):
     if not WHISPER_AVAILABLE or _whisper is None:
         return None
     return _whisper.load_model(model_size)
+
+
+def _secret_value(name: str, *, section: str = "webrtc") -> object:
+    environment_value = os.environ.get(name)
+    if environment_value is not None:
+        return environment_value
+    try:
+        section_values = st.secrets.get(section, {})
+        if name in section_values:
+            return section_values[name]
+        return st.secrets.get(name, "")
+    except Exception:
+        return ""
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def _twilio_turn_servers(account_sid: str, auth_token: str) -> list[dict[str, object]]:
+    return fetch_twilio_ice_servers(account_sid, auth_token)
+
+
+def _rtc_settings() -> tuple[dict[str, object], str, str]:
+    turn_servers = static_turn_servers(
+        urls=_secret_value("AIFDS_TURN_URLS") or _secret_value("turn_urls"),
+        username=str(_secret_value("AIFDS_TURN_USERNAME") or _secret_value("turn_username")),
+        credential=str(_secret_value("AIFDS_TURN_CREDENTIAL") or _secret_value("turn_credential")),
+    )
+    provider_error = ""
+
+    if not turn_servers:
+        account_sid = str(
+            _secret_value("TWILIO_ACCOUNT_SID")
+            or _secret_value("twilio_account_sid")
+        )
+        auth_token = str(
+            _secret_value("TWILIO_AUTH_TOKEN")
+            or _secret_value("twilio_auth_token")
+        )
+        if account_sid and auth_token:
+            try:
+                turn_servers = _twilio_turn_servers(account_sid, auth_token)
+            except Exception as exc:
+                provider_error = f"Twilio TURN token request failed: {exc}"
+
+    configuration, mode = build_rtc_configuration(turn_servers=turn_servers)
+    return configuration, mode, provider_error
 
 
 def _init_live_state() -> None:
@@ -165,6 +216,47 @@ def _mfcc_figure(results: list[dict[str, object]]) -> go.Figure | None:
     return apply_chart_theme(fig)
 
 
+def _frequency_figure(result: dict[str, object] | None) -> go.Figure | None:
+    if not result:
+        return None
+    features = result.get("features")
+    if not isinstance(features, dict):
+        return None
+    frequencies = features.get("spectrum_frequencies")
+    decibels = features.get("spectrum_db")
+    if not isinstance(frequencies, list) or not isinstance(decibels, list) or not frequencies:
+        return None
+
+    fig = go.Figure(
+        go.Scatter(
+            x=frequencies,
+            y=decibels,
+            mode="lines",
+            line=dict(color="#0891B2", width=2),
+            fill="tozeroy",
+            fillcolor="rgba(8,145,178,0.10)",
+            hovertemplate="%{x:.0f} Hz<br>%{y:.1f} dB<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        height=250,
+        margin=dict(l=10, r=10, t=20, b=35),
+        xaxis_title="Frequency (Hz)",
+        yaxis_title="Relative level (dB)",
+        yaxis=dict(range=[-80, 5]),
+    )
+    return apply_chart_theme(fig)
+
+
+def _cumulative_transcript(results: list[dict[str, object]]) -> str:
+    lines = []
+    for result in results:
+        transcript = str(result.get("transcript", "")).strip()
+        if transcript:
+            lines.append(f"[{result.get('time', '--:--:--')}] {transcript}")
+    return "\n".join(lines)
+
+
 def _result_table(results: list[dict[str, object]]) -> pd.DataFrame:
     rows = []
     for index, result in enumerate(reversed(results[-20:]), 1):
@@ -192,6 +284,7 @@ def _render_live_dashboard(
     timeline_placeholder,
     transcript_placeholder,
     mfcc_placeholder,
+    frequency_placeholder,
     features_placeholder,
 ) -> None:
     latest = results[-1] if results else None
@@ -233,12 +326,25 @@ def _render_live_dashboard(
 
     with transcript_placeholder.container():
         if results:
+            transcript_text = _cumulative_transcript(results)
+            st.text_area(
+                "Live transcript",
+                value=transcript_text or "No speech text yet. Select Local Whisper for automatic transcription.",
+                height=145,
+                disabled=True,
+            )
             st.dataframe(_result_table(results), hide_index=True, use_container_width=True)
             transcript = str(latest.get("transcript", "")).strip() if latest else ""
             findings = latest.get("findings", []) if latest else []
             if transcript and isinstance(findings, list):
                 st.markdown(highlighted_html(transcript, findings), unsafe_allow_html=True)
         else:
+            st.text_area(
+                "Live transcript",
+                value="Start the microphone stream. Local Whisper converts completed chunks into text.",
+                height=145,
+                disabled=True,
+            )
             st.caption("No transcript or audio chunk results yet.")
 
     with mfcc_placeholder.container():
@@ -247,6 +353,13 @@ def _render_live_dashboard(
             st.plotly_chart(figure, use_container_width=True)
         else:
             st.caption("MFCC heatmap appears after the first processed chunk.")
+
+    with frequency_placeholder.container():
+        frequency_figure = _frequency_figure(latest)
+        if frequency_figure is not None:
+            st.plotly_chart(frequency_figure, use_container_width=True)
+        else:
+            st.caption("Frequency spectrum appears after the first processed chunk.")
 
     with features_placeholder.container():
         if not latest:
@@ -261,6 +374,7 @@ def _render_live_dashboard(
                     {"Feature": "Transcript scam risk", "Value": f"{float(latest.get('transcript_risk', 0)):.2f}%"},
                     {"Feature": "Pitch variance", "Value": f"{float(features.get('pitch_variance', 0)):.2f} Hz"},
                     {"Feature": "Spectral centroid", "Value": f"{float(features.get('spectral_centroid', 0)) / 1000:.2f} kHz"},
+                    {"Feature": "Dominant frequency", "Value": f"{float(features.get('dominant_frequency', 0)):.1f} Hz"},
                     {"Feature": "Zero crossing rate", "Value": f"{float(features.get('zero_crossing_rate', 0)):.4f}"},
                     {"Feature": "RMS energy", "Value": f"{float(features.get('rms_energy', 0)):.4f}"},
                 ]
@@ -368,14 +482,31 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
 
     audio_classifier = _load_audio_classifier(str(root))
     text_classifier = _load_transcript_classifier(str(root))
+    rtc_configuration, rtc_mode, rtc_error = _rtc_settings()
     render_metric_row(
         [
             {"label": "WebRTC", "value": "Ready" if WEBRTC_AVAILABLE else "Missing", "color": "#059669" if WEBRTC_AVAILABLE else "#DC2626"},
+            {"label": "ICE Relay", "value": "TURN" if rtc_mode.startswith("TURN") else "STUN only", "color": "#059669" if rtc_mode.startswith("TURN") else "#D97706"},
             {"label": "Audio SVM", "value": "Ready" if audio_classifier else "Heuristic", "color": "#059669" if audio_classifier else "#D97706"},
             {"label": "Transcript Model", "value": "Ready" if text_classifier else "Rule Demo", "color": "#059669" if text_classifier else "#D97706"},
             {"label": "Local Whisper", "value": "Ready" if WHISPER_AVAILABLE else "Optional install", "color": "#2563EB" if WHISPER_AVAILABLE else "#6B7280"},
         ]
     )
+    if rtc_error:
+        render_info_banner(rtc_error, kind="danger", code="TURN ERROR")
+    elif rtc_mode == "STUN only":
+        render_info_banner(
+            "STUN-only mode is active. This commonly stalls on Streamlit Community Cloud, university Wi-Fi, VPNs, "
+            "corporate firewalls, and carrier-grade NAT. Configure TURN secrets before relying on the live demonstration.",
+            kind="warning",
+            code="TURN NEEDED",
+        )
+    else:
+        render_info_banner(
+            "TURN relay credentials are configured. Hosted WebRTC can relay microphone media when direct ICE paths fail.",
+            kind="success",
+            code="TURN READY",
+        )
 
     with st.container(border=True):
         st.subheader("Live session settings")
@@ -453,9 +584,7 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
             },
             "video": False,
         },
-        rtc_configuration={
-            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}],
-        },
+        rtc_configuration=rtc_configuration,
     )
 
     status_placeholder = st.empty()
@@ -470,6 +599,8 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
         render_section_header("MFCC feature heatmap", eyebrow="Audio pattern")
         mfcc_placeholder = st.empty()
     with display_b:
+        render_section_header("Live frequency spectrum", eyebrow="Audio frequency")
+        frequency_placeholder = st.empty()
         render_section_header("Latest acoustic features", eyebrow="Voice indicators")
         features_placeholder = st.empty()
 
@@ -481,6 +612,7 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
         timeline_placeholder=timeline_placeholder,
         transcript_placeholder=transcript_placeholder,
         mfcc_placeholder=mfcc_placeholder,
+        frequency_placeholder=frequency_placeholder,
         features_placeholder=features_placeholder,
     )
 
@@ -526,6 +658,7 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
                 timeline_placeholder=timeline_placeholder,
                 transcript_placeholder=transcript_placeholder,
                 mfcc_placeholder=mfcc_placeholder,
+                frequency_placeholder=frequency_placeholder,
                 features_placeholder=features_placeholder,
             )
     else:

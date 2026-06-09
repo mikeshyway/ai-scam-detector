@@ -82,6 +82,39 @@ a clearly labelled manual transcript demonstration mode.
 Browser microphone access works on `localhost`. Remote deployments require HTTPS, and some
 restricted networks or cloud hosts also require a configured TURN server for WebRTC.
 
+### TURN Setup for Hosted Live Audio
+
+The default STUN-only connection may stall on Streamlit Community Cloud, university Wi-Fi,
+VPNs, corporate firewalls, or carrier-grade NAT. For a hosted demonstration, configure TURN
+credentials in Streamlit Cloud under **Settings > Secrets**.
+
+Recommended Twilio Network Traversal Service configuration:
+
+```toml
+[webrtc]
+twilio_account_sid = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+twilio_auth_token = "replace-with-real-token"
+```
+
+The app uses Twilio's Tokens API to request short-lived ICE servers and refreshes the cached
+configuration hourly. No Twilio credentials are sent to the browser.
+
+A static TURN provider or self-hosted `coturn` server is also supported:
+
+```toml
+[webrtc]
+turn_urls = [
+  "turn:turn.example.com:3478?transport=udp",
+  "turn:turn.example.com:3478?transport=tcp",
+  "turns:turn.example.com:443?transport=tcp",
+]
+turn_username = "replace-with-turn-username"
+turn_credential = "replace-with-turn-password"
+```
+
+See `.streamlit/secrets.toml.example`. Never commit the real `.streamlit/secrets.toml` file.
+For local use through `http://localhost`, TURN is normally unnecessary.
+
 On Windows PowerShell:
 
 ```powershell
