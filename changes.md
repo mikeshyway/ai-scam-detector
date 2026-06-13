@@ -116,6 +116,10 @@ Limitations:
 Implemented as continuous local capture with rolling analysis chunks. This replaces the
 earlier browser-microphone and WebRTC approaches.
 
+The browser Voice Recorder remains available as a separate default feature. Device-audio
+capture is optional and uses `requirements-device-audio.txt`, so missing desktop audio
+dependencies do not disable browser recording.
+
 Implemented scope:
 
 - Enumerate loopback, monitor, virtual-cable, and microphone input devices.

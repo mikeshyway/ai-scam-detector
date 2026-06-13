@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,6 @@ import streamlit as st
 from app.ui_components import (
     apply_chart_theme,
     render_analysis_ready,
-    render_info_banner,
     render_metric_row,
     render_result_card,
     render_section_header,
@@ -25,6 +25,7 @@ from src.history_db import DEFAULT_SESSION_ID, history_fingerprint, insert_scan
 from src.live_audio_analysis import (
     analyse_live_chunk,
     transcribe_with_whisper,
+    wav_bytes_to_audio,
 )
 from src.system_audio_capture import (
     CaptureDevice,
@@ -73,10 +74,17 @@ def _load_whisper_model(model_size: str):
 
 def _init_live_state() -> None:
     defaults: dict[str, Any] = {
-        "live_audio_results": [],
+        "live_audio_mode": "Voice recorder",
+        "live_recorder_results": [],
+        "live_recorder_signatures": [],
+        "live_recorder_clip_count": 0,
+        "live_recorder_generation": 0,
+        "live_recorder_error": "",
+        "live_recorder_saved_signature": "",
+        "live_monitor_results": [],
         "live_system_monitor": LocalSystemAudioMonitor(),
-        "live_audio_error": "",
-        "live_audio_saved_signature": "",
+        "live_monitor_error": "",
+        "live_monitor_saved_signature": "",
         "live_monitor_chunk_index": 0,
         "live_monitor_source": "",
     }
@@ -85,16 +93,72 @@ def _init_live_state() -> None:
             st.session_state[key] = value
 
 
-def _clear_live_state() -> None:
+def _clear_recorder_state() -> None:
+    st.session_state["live_recorder_results"] = []
+    st.session_state["live_recorder_signatures"] = []
+    st.session_state["live_recorder_clip_count"] = 0
+    st.session_state["live_recorder_error"] = ""
+    st.session_state["live_recorder_saved_signature"] = ""
+    st.session_state["live_recorder_generation"] = (
+        int(st.session_state.get("live_recorder_generation", 0)) + 1
+    )
+
+
+def _clear_monitor_state() -> None:
     monitor = st.session_state.get("live_system_monitor")
     if isinstance(monitor, LocalSystemAudioMonitor):
         monitor.stop()
         monitor.clear()
-    st.session_state["live_audio_results"] = []
-    st.session_state["live_audio_error"] = ""
-    st.session_state["live_audio_saved_signature"] = ""
+    st.session_state["live_monitor_results"] = []
+    st.session_state["live_monitor_error"] = ""
+    st.session_state["live_monitor_saved_signature"] = ""
     st.session_state["live_monitor_chunk_index"] = 0
     st.session_state["live_monitor_source"] = ""
+
+
+def _recording_chunks(
+    audio: np.ndarray,
+    sample_rate: int,
+    chunk_seconds: int,
+) -> list[np.ndarray]:
+    chunk_size = max(1, int(sample_rate * chunk_seconds))
+    chunks = []
+    for start in range(0, audio.size, chunk_size):
+        chunk = audio[start : start + chunk_size]
+        if chunk.size >= int(sample_rate * 0.75):
+            chunks.append(chunk.astype(np.float32))
+    return chunks or [audio.astype(np.float32)]
+
+
+def _process_recording(
+    audio_bytes: bytes,
+    *,
+    chunk_seconds: int,
+    transcript_source: str,
+    manual_transcript: str,
+    whisper_model: Any | None,
+    audio_classifier: Any | None,
+    text_classifier: Any | None,
+) -> list[dict[str, object]]:
+    audio, sample_rate = wav_bytes_to_audio(audio_bytes, target_sample_rate=16_000)
+    processed = []
+    for index, chunk in enumerate(_recording_chunks(audio, sample_rate, chunk_seconds)):
+        if transcript_source == "Local Whisper":
+            transcript = transcribe_with_whisper(chunk, whisper_model)
+        elif transcript_source == "Manual transcript" and index == 0:
+            transcript = manual_transcript
+        else:
+            transcript = ""
+        processed.append(
+            analyse_live_chunk(
+                chunk,
+                transcript=transcript,
+                audio_classifier=audio_classifier,
+                text_classifier=text_classifier,
+                sample_rate=sample_rate,
+            )
+        )
+    return processed
 
 
 def _timeline_figure(results: list[dict[str, object]], threshold: int) -> go.Figure:
@@ -237,6 +301,8 @@ def _render_live_dashboard(
     results: list[dict[str, object]],
     threshold: int,
     *,
+    latest_title: str,
+    empty_message: str,
     metrics_placeholder,
     result_placeholder,
     timeline_placeholder,
@@ -268,7 +334,7 @@ def _render_live_dashboard(
     with result_placeholder.container():
         if latest:
             render_result_card(
-                f"Latest system-audio chunk {latest.get('clip_chunk', 1)}",
+                latest_title.format(chunk=latest.get("clip_chunk", 1)),
                 float(latest.get("risk", 0)),
                 str(latest.get("explanation", "")),
             )
@@ -277,7 +343,7 @@ def _render_live_dashboard(
                     f"Alert threshold reached. This chunk scored {float(latest.get('risk', 0)):.1f}% combined risk."
                 )
         else:
-            st.info("Start the local meeting monitor. Results appear after the first complete audio chunk.")
+            st.info(empty_message)
 
     with timeline_placeholder.container():
         st.plotly_chart(_timeline_figure(results, threshold), use_container_width=True)
@@ -299,7 +365,7 @@ def _render_live_dashboard(
         else:
             st.text_area(
                 "Live transcript",
-                value="Start monitoring. Local Whisper converts completed system-audio chunks into text.",
+                value=empty_message,
                 height=145,
                 disabled=True,
             )
@@ -345,6 +411,10 @@ def _save_session(
     results: list[dict[str, object]],
     transcript_source: str,
     capture_mode: str,
+    *,
+    scan_type: str,
+    source_name: str,
+    saved_signature_key: str,
 ) -> None:
     if not results:
         return
@@ -365,7 +435,7 @@ def _save_session(
         }
     )
     timestamp = formatted_now()
-    preview = " ".join(transcripts)[:800] or f"Audio-only local meeting monitor session with {len(results)} chunk(s)."
+    preview = " ".join(transcripts)[:800] or f"Audio-only {source_name.lower()} with {len(results)} chunk(s)."
     engines = sorted(
         {
             str(item.get("audio_engine", ""))
@@ -380,7 +450,7 @@ def _save_session(
     )
     entry: dict[str, object] = {
         "time": timestamp,
-        "type": "System Audio",
+        "type": scan_type,
         "prediction": str(peak_result.get("risk_level", "Needs review")),
         "confidence": round(peak_risk, 2),
         "model": " + ".join(engines),
@@ -388,7 +458,7 @@ def _save_session(
         "chunks": len(results),
         "flags": flags,
         "explanation": (
-            f"Local meeting monitor using {capture_mode} and {transcript_source}. "
+            f"{capture_mode} using {transcript_source}. "
             f"Peak combined risk {peak_risk:.1f}% across {len(results)} chunk(s)."
         ),
         "raw_input": "\n".join(transcripts),
@@ -399,8 +469,8 @@ def _save_session(
     insert_scan(
         session_id=DEFAULT_SESSION_ID,
         scanned_at=timestamp,
-        scan_type="System Audio",
-        source_name=f"Local meeting monitor ({len(results)} chunks)",
+        scan_type=scan_type,
+        source_name=f"{source_name} ({len(results)} chunks)",
         prediction=str(entry["prediction"]),
         confidence=float(entry["confidence"]),
         model_name=str(entry["model"]),
@@ -410,11 +480,245 @@ def _save_session(
         raw_input=str(entry["raw_input"]),
         source_fingerprint=fingerprint,
     )
-    st.session_state["live_audio_saved_signature"] = json.dumps(
+    st.session_state[saved_signature_key] = json.dumps(
         [len(results), results[-1].get("time"), peak_risk],
         ensure_ascii=True,
     )
-    render_analysis_ready("Local meeting-monitor session saved for the AI Report Generator")
+    render_analysis_ready(f"{source_name} saved for the AI Report Generator")
+
+
+def _render_dashboard_section(
+    results: list[dict[str, object]],
+    risk_threshold: int,
+    *,
+    transcript_heading: str,
+    frequency_heading: str,
+    latest_title: str,
+) -> None:
+    if not results:
+        return
+
+    metrics_placeholder = st.empty()
+    result_placeholder = st.empty()
+    timeline_placeholder = st.empty()
+    display_a, display_b = st.columns([0.62, 0.38])
+    with display_a:
+        render_section_header(transcript_heading, eyebrow="Analysis evidence")
+        transcript_placeholder = st.empty()
+        render_section_header("MFCC feature heatmap", eyebrow="Audio pattern")
+        mfcc_placeholder = st.empty()
+    with display_b:
+        render_section_header(frequency_heading, eyebrow="Frequency analysis")
+        frequency_placeholder = st.empty()
+        render_section_header("Latest acoustic features", eyebrow="Voice indicators")
+        features_placeholder = st.empty()
+
+    _render_live_dashboard(
+        results,
+        risk_threshold,
+        latest_title=latest_title,
+        empty_message="No processed audio yet.",
+        metrics_placeholder=metrics_placeholder,
+        result_placeholder=result_placeholder,
+        timeline_placeholder=timeline_placeholder,
+        transcript_placeholder=transcript_placeholder,
+        mfcc_placeholder=mfcc_placeholder,
+        frequency_placeholder=frequency_placeholder,
+        features_placeholder=features_placeholder,
+    )
+
+
+def _session_signature(results: list[dict[str, object]]) -> str:
+    return json.dumps(
+        [
+            len(results),
+            results[-1].get("time"),
+            max(float(item.get("risk", 0)) for item in results),
+        ],
+        ensure_ascii=True,
+    )
+
+
+def _render_save_action(
+    history: list[dict[str, object]],
+    results: list[dict[str, object]],
+    transcript_source: str,
+    capture_mode: str,
+    *,
+    scan_type: str,
+    source_name: str,
+    saved_signature_key: str,
+    button_label: str,
+) -> None:
+    if not results:
+        return
+    already_saved = _session_signature(results) == st.session_state.get(
+        saved_signature_key
+    )
+    if st.button(
+        button_label,
+        type="primary",
+        use_container_width=True,
+        disabled=already_saved,
+    ):
+        _save_session(
+            history,
+            results,
+            transcript_source,
+            capture_mode,
+            scan_type=scan_type,
+            source_name=source_name,
+            saved_signature_key=saved_signature_key,
+        )
+    if already_saved:
+        st.caption("This session version is already saved.")
+
+
+def _render_voice_recorder(
+    root: Path,
+    history: list[dict[str, object]],
+) -> None:
+    results: list[dict[str, object]] = st.session_state["live_recorder_results"]
+    audio_classifier = _load_audio_classifier(str(root))
+    text_classifier = _load_transcript_classifier(str(root))
+
+    render_section_header(
+        "Voice recorder",
+        "Record a short voice sample in the browser, stop recording, and analyse it immediately.",
+        "Browser recording",
+    )
+    with st.container(border=True):
+        setting_a, setting_b, setting_c = st.columns(3)
+        with setting_a:
+            chunk_seconds = st.slider(
+                "Analysis chunk",
+                min_value=3,
+                max_value=10,
+                value=5,
+                key="recorder_chunk_seconds",
+            )
+        with setting_b:
+            risk_threshold = st.slider(
+                "Alert threshold",
+                min_value=40,
+                max_value=90,
+                value=70,
+                step=5,
+                key="recorder_risk_threshold",
+            )
+        with setting_c:
+            transcript_options = ["Manual transcript", "Audio only"]
+            if WHISPER_AVAILABLE:
+                transcript_options.insert(0, "Local Whisper")
+            transcript_source = st.selectbox(
+                "Transcript analysis",
+                transcript_options,
+                key="recorder_transcript_source",
+            )
+
+        whisper_size = "tiny"
+        manual_transcript = ""
+        if transcript_source == "Local Whisper":
+            whisper_size = st.selectbox(
+                "Whisper model",
+                ["tiny", "base"],
+                key="recorder_whisper_size",
+            )
+        elif transcript_source == "Manual transcript":
+            manual_transcript = st.text_area(
+                "Spoken words",
+                placeholder="Optional: type what was said so transcript scam analysis can run.",
+                height=80,
+                key="recorder_manual_transcript",
+            )
+
+        recorded_audio = st.audio_input(
+            "Record voice sample",
+            sample_rate=16_000,
+            key=f"voice_recorder_{int(st.session_state['live_recorder_generation'])}",
+        )
+        action_a, action_b = st.columns(2)
+        with action_a:
+            if recorded_audio is not None and st.button(
+                "Record another sample",
+                use_container_width=True,
+            ):
+                st.session_state["live_recorder_generation"] += 1
+                st.rerun()
+        with action_b:
+            if st.button("Clear recorder session", use_container_width=True):
+                _clear_recorder_state()
+                st.rerun()
+
+    if not WHISPER_AVAILABLE:
+        st.caption(
+            "Automatic transcription is optional. Manual transcript and audio-only analysis remain available."
+        )
+
+    if recorded_audio is not None:
+        recorded_bytes = recorded_audio.getvalue()
+        settings = json.dumps(
+            [chunk_seconds, transcript_source, whisper_size, manual_transcript],
+            ensure_ascii=True,
+        ).encode("utf-8")
+        signature = hashlib.sha256(recorded_bytes + settings).hexdigest()
+        signatures = list(st.session_state["live_recorder_signatures"])
+        if signature not in signatures:
+            with st.spinner("Analysing voice recording..."):
+                try:
+                    whisper_model = None
+                    if transcript_source == "Local Whisper":
+                        whisper_model = _load_whisper_model(whisper_size)
+                        if whisper_model is None:
+                            raise RuntimeError("Local Whisper could not be loaded.")
+                    processed = _process_recording(
+                        recorded_bytes,
+                        chunk_seconds=chunk_seconds,
+                        transcript_source=transcript_source,
+                        manual_transcript=manual_transcript,
+                        whisper_model=whisper_model,
+                        audio_classifier=audio_classifier,
+                        text_classifier=text_classifier,
+                    )
+                except Exception as exc:
+                    st.session_state["live_recorder_error"] = str(exc)
+                else:
+                    clip = int(st.session_state["live_recorder_clip_count"]) + 1
+                    for chunk_index, result in enumerate(processed, 1):
+                        result["clip"] = clip
+                        result["clip_chunk"] = chunk_index
+                        result["capture_mode"] = "Browser voice recorder"
+                    results.extend(processed)
+                    del results[:-60]
+                    signatures.append(signature)
+                    st.session_state["live_recorder_signatures"] = signatures[-60:]
+                    st.session_state["live_recorder_clip_count"] = clip
+                    st.session_state["live_recorder_saved_signature"] = ""
+                    st.session_state["live_recorder_error"] = ""
+                    render_analysis_ready(f"Voice sample {clip} analysed")
+
+    if st.session_state.get("live_recorder_error"):
+        st.error(f"Recording analysis failed: {st.session_state['live_recorder_error']}")
+    elif not results:
+        st.caption("Your transcript, confidence scores, and audio visualisations will appear after recording.")
+
+    _render_dashboard_section(
+        results,
+        risk_threshold,
+        transcript_heading="Recorded transcript and chunks",
+        frequency_heading="Latest frequency spectrum",
+        latest_title="Latest recorded chunk {chunk}",
+    )
+    _render_save_action(
+        history,
+        results,
+        transcript_source,
+        "Browser voice recorder",
+        scan_type="Microphone Audio",
+        source_name="Voice recorder session",
+        saved_signature_key="live_recorder_saved_signature",
+        button_label="Save recorder session to report history",
+    )
 
 
 @st.fragment(run_every=1.0)
@@ -425,245 +729,158 @@ def _render_monitor_fragment(
     transcript_source: str,
     whisper_size: str,
 ) -> None:
-    """Drain local capture chunks, analyse them, and refresh only this panel."""
-
     monitor: LocalSystemAudioMonitor = st.session_state["live_system_monitor"]
-    results: list[dict[str, object]] = st.session_state["live_audio_results"]
+    results: list[dict[str, object]] = st.session_state["live_monitor_results"]
+    chunks = monitor.drain_chunks(limit=2)
     audio_classifier = _load_audio_classifier(str(root))
     text_classifier = _load_transcript_classifier(str(root))
-    chunks = monitor.drain_chunks(limit=2)
 
     whisper_model = None
     if chunks and transcript_source == "Local Whisper":
         try:
             whisper_model = _load_whisper_model(whisper_size)
-            if whisper_model is None:
-                raise RuntimeError(
-                    "Local Whisper is unavailable. Install requirements-live.txt."
-                )
         except Exception as exc:
-            st.session_state["live_audio_error"] = str(exc)
+            st.session_state["live_monitor_error"] = str(exc)
 
     for chunk in chunks:
         try:
             energy = float(np.sqrt(np.mean(np.square(chunk))))
             transcript = ""
-            if transcript_source == "Local Whisper" and whisper_model is not None:
-                if energy >= 0.002:
-                    transcript = transcribe_with_whisper(chunk, whisper_model)
-
+            if whisper_model is not None and energy >= 0.002:
+                transcript = transcribe_with_whisper(chunk, whisper_model)
             result = analyse_live_chunk(
                 chunk,
                 transcript=transcript,
                 audio_classifier=audio_classifier,
                 text_classifier=text_classifier,
             )
-            chunk_index = int(st.session_state.get("live_monitor_chunk_index", 0)) + 1
+            index = int(st.session_state["live_monitor_chunk_index"]) + 1
             result["clip"] = 1
-            result["clip_chunk"] = chunk_index
-            result["capture_mode"] = "Local system-audio capture"
+            result["clip_chunk"] = index
+            result["capture_mode"] = "Local device-audio monitor"
             result["source_device"] = monitor.device_name
-            st.session_state["live_monitor_chunk_index"] = chunk_index
-            st.session_state["live_audio_saved_signature"] = ""
-            st.session_state["live_audio_error"] = ""
+            st.session_state["live_monitor_chunk_index"] = index
+            st.session_state["live_monitor_saved_signature"] = ""
+            st.session_state["live_monitor_error"] = ""
             results.append(result)
-            if len(results) > 60:
-                del results[:-60]
+            del results[:-60]
         except Exception as exc:
-            st.session_state["live_audio_error"] = str(exc)
+            st.session_state["live_monitor_error"] = str(exc)
 
     stats = monitor.stats()
     if monitor.error:
-        st.error(f"Local audio capture stopped: {monitor.error}")
+        st.error(f"Device capture stopped: {monitor.error}")
+    elif st.session_state.get("live_monitor_error"):
+        st.error(f"Audio analysis failed: {st.session_state['live_monitor_error']}")
     elif monitor.running:
-        st.success(
-            f"Monitoring {monitor.device_name}. "
-            f"Captured {stats['captured_chunks']} chunk(s); "
-            f"{stats['queued_chunks']} waiting for analysis."
+        st.caption(
+            f"Monitoring {monitor.device_name} | "
+            f"{stats['captured_chunks']} captured | {stats['queued_chunks']} queued"
         )
     elif results:
-        st.info("Monitoring is stopped. The captured session remains available below.")
+        st.caption("Monitor stopped. The captured analysis remains available.")
     else:
-        st.info("Select a local system-output or virtual-cable device and start monitoring.")
+        st.caption("Results will appear after the first completed audio chunk.")
 
     if int(stats["dropped_chunks"]) > 0:
-        st.warning(
-            f"{stats['dropped_chunks']} audio chunk(s) were dropped because transcription "
-            "could not keep pace. Select the tiny Whisper model or increase chunk duration."
+        st.caption(
+            f"{stats['dropped_chunks']} chunk(s) were dropped. Use tiny Whisper or a longer chunk."
         )
 
-    if st.session_state.get("live_audio_error"):
-        st.warning(f"Most recent processing issue: {st.session_state['live_audio_error']}")
-
-    metrics_placeholder = st.empty()
-    result_placeholder = st.empty()
-    timeline_placeholder = st.empty()
-
-    display_a, display_b = st.columns([0.62, 0.38])
-    with display_a:
-        render_section_header("Meeting transcript and chunks", eyebrow="Local evidence")
-        transcript_placeholder = st.empty()
-        render_section_header("MFCC feature heatmap", eyebrow="Audio pattern")
-        mfcc_placeholder = st.empty()
-    with display_b:
-        render_section_header("Latest frequency spectrum", eyebrow="System audio")
-        frequency_placeholder = st.empty()
-        render_section_header("Latest acoustic features", eyebrow="Voice indicators")
-        features_placeholder = st.empty()
-
-    _render_live_dashboard(
+    _render_dashboard_section(
         results,
         risk_threshold,
-        metrics_placeholder=metrics_placeholder,
-        result_placeholder=result_placeholder,
-        timeline_placeholder=timeline_placeholder,
-        transcript_placeholder=transcript_placeholder,
-        mfcc_placeholder=mfcc_placeholder,
-        frequency_placeholder=frequency_placeholder,
-        features_placeholder=features_placeholder,
+        transcript_heading="Meeting transcript and chunks",
+        frequency_heading="Latest system-audio spectrum",
+        latest_title="Latest device-audio chunk {chunk}",
     )
-
-    if results:
-        render_section_header(
-            "Save session evidence",
-            "Store the current local meeting-monitor summary in the AI Report Generator.",
-            "Report integration",
-        )
-        current_signature = json.dumps(
-            [
-                len(results),
-                results[-1].get("time"),
-                max(float(item.get("risk", 0)) for item in results),
-            ],
-            ensure_ascii=True,
-        )
-        already_saved = current_signature == st.session_state.get(
-            "live_audio_saved_signature"
-        )
-        capture_mode = (
-            f"Local system-audio capture from "
-            f"{st.session_state.get('live_monitor_source', monitor.device_name)}"
-        )
-        if st.button(
-            "Save meeting-monitor session to report history",
-            type="primary",
-            use_container_width=True,
-            disabled=already_saved,
-        ):
-            _save_session(history, results, transcript_source, capture_mode)
-        if already_saved:
-            st.caption(
-                "This session version is already saved. Capture another chunk to create a new version."
-            )
+    _render_save_action(
+        history,
+        results,
+        transcript_source,
+        f"Local device-audio monitor from {st.session_state.get('live_monitor_source', monitor.device_name)}",
+        scan_type="System Audio",
+        source_name="Device audio monitor",
+        saved_signature_key="live_monitor_saved_signature",
+        button_label="Save device-audio session to report history",
+    )
 
 
 def _discover_devices() -> tuple[list[CaptureDevice], str]:
     if not soundcard_available():
-        return [], "The SoundCard package is not installed."
+        return [], (
+            "For local device capture, install requirements-device-audio.txt "
+            "and restart Streamlit."
+        )
     try:
         return list_capture_devices(), ""
     except Exception as exc:
         return [], str(exc)
 
 
-def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None:
-    _init_live_state()
+def _render_device_audio_monitor(
+    root: Path,
+    history: list[dict[str, object]],
+) -> None:
     monitor: LocalSystemAudioMonitor = st.session_state["live_system_monitor"]
-    audio_classifier = _load_audio_classifier(str(root))
-    text_classifier = _load_transcript_classifier(str(root))
     devices, device_error = _discover_devices()
-
-    render_section_header(
-        "Live audio detection",
-        "Capture Zoom, Google Meet, Teams, or other speaker output on this computer and analyse it in short transcript and voice-feature chunks.",
-        "Local meeting monitor",
-    )
-    render_info_banner(
-        "This feature captures audio on the computer running Streamlit. It must be launched locally; "
-        "a hosted Streamlit server cannot hear your laptop's meeting audio.",
-        kind="warning",
-        code="LOCAL ONLY",
-    )
-    render_info_banner(
-        "Use a Windows WASAPI loopback device, Linux monitor source, or virtual cable. "
-        "Audio stays on the local computer and no meeting-platform API is required.",
-        kind="success",
-        code="SYSTEM AUDIO",
-    )
-
-    recommended_devices = [
+    devices = [
         device for device in devices if device.kind in {"System output", "Virtual cable"}
     ]
-    render_metric_row(
-        [
-            {"label": "Local Capture", "value": "Ready" if recommended_devices else "Unavailable", "color": "#059669" if recommended_devices else "#DC2626"},
-            {"label": "System/Cable Inputs", "value": len(recommended_devices), "color": "#2563EB"},
-            {"label": "Audio SVM", "value": "Ready" if audio_classifier else "Heuristic", "color": "#059669" if audio_classifier else "#D97706"},
-            {"label": "Transcript Model", "value": "Ready" if text_classifier else "Rule Demo", "color": "#059669" if text_classifier else "#D97706"},
-            {"label": "Local Whisper", "value": "Ready" if WHISPER_AVAILABLE else "Install required", "color": "#059669" if WHISPER_AVAILABLE else "#DC2626"},
-        ]
+
+    render_section_header(
+        "Device audio monitor",
+        "Analyse Zoom, Google Meet, Teams, or other audio playing on the same computer.",
+        "Local system audio",
+    )
+    st.caption(
+        "This optional mode runs only on a local Streamlit installation and does not affect the Voice Recorder."
     )
 
     if device_error:
-        render_info_banner(
-            f"Audio device discovery failed: {device_error}",
-            kind="danger",
-            code="DEVICE ERROR",
+        st.info(f"Device audio is not available here. {device_error}")
+        with st.expander("Local setup instructions"):
+            st.markdown(
+                """
+Install the project requirements on the computer running Streamlit. On Windows, select a
+WASAPI system-output device or route meeting audio through VB-Cable/VoiceMeeter. On Linux,
+select a PulseAudio/PipeWire monitor source. On macOS, use BlackHole.
+"""
+            )
+        return
+    if not devices:
+        st.info(
+            "No system-output or virtual-cable input was found. Enable a loopback/monitor source or install a virtual audio cable."
         )
-    elif not devices:
-        render_info_banner(
-            "No local audio inputs were found. Run the app on your own computer and install or enable "
-            "a loopback/monitor source such as VB-Cable, VoiceMeeter, PulseAudio Monitor, or BlackHole.",
-            kind="danger",
-            code="NO DEVICE",
-        )
-    elif not recommended_devices:
-        render_info_banner(
-            "Only physical microphone inputs were found, and they are intentionally excluded. "
-            "Enable a system-output loopback/monitor source or install a virtual audio cable.",
-            kind="danger",
-            code="NO SYSTEM AUDIO",
-        )
-    if not WHISPER_AVAILABLE:
-        render_info_banner(
-            "Automatic transcript analysis is not installed. Run "
-            "pip install -r requirements-live.txt locally, then restart Streamlit.",
-            kind="warning",
-            code="TRANSCRIPT SETUP",
-        )
+        return
 
     with st.container(border=True):
-        st.subheader("Local meeting monitor setup")
-        device_column, chunk_column, risk_column = st.columns([1.5, 0.75, 0.75])
-        with device_column:
-            selected_device = st.selectbox(
-                "System-audio input",
-                recommended_devices,
-                format_func=lambda device: device.label,
-                disabled=monitor.running or not recommended_devices,
-                placeholder="No local capture device available",
-                help="Choose System output first. Use Virtual cable when the meeting app is routed through VB-Cable, VoiceMeeter, or BlackHole.",
-            )
-        with chunk_column:
+        selected_device = st.selectbox(
+            "Device audio source",
+            devices,
+            format_func=lambda device: device.label,
+            disabled=monitor.running,
+        )
+        setting_a, setting_b, setting_c = st.columns(3)
+        with setting_a:
             chunk_seconds = st.slider(
                 "Chunk duration",
                 min_value=3,
                 max_value=10,
                 value=5,
-                step=1,
                 disabled=monitor.running,
+                key="monitor_chunk_seconds",
             )
-        with risk_column:
+        with setting_b:
             risk_threshold = st.slider(
                 "Alert threshold",
                 min_value=40,
                 max_value=90,
                 value=70,
                 step=5,
+                key="monitor_risk_threshold",
             )
-
-        transcript_column, model_column = st.columns(2)
-        with transcript_column:
+        with setting_c:
             transcript_options = ["Audio only"]
             if WHISPER_AVAILABLE:
                 transcript_options.insert(0, "Local Whisper")
@@ -671,46 +888,39 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
                 "Transcript analysis",
                 transcript_options,
                 disabled=monitor.running,
-                help="Install requirements-live.txt to enable automatic local transcription.",
+                key="monitor_transcript_source",
             )
-        with model_column:
-            whisper_size = st.selectbox(
-                "Whisper model",
-                ["tiny", "base"],
-                index=0,
-                disabled=monitor.running or transcript_source != "Local Whisper",
-                help="Tiny is recommended for keeping up with rolling chunks on CPU.",
-            )
-
+        whisper_size = st.selectbox(
+            "Whisper model",
+            ["tiny", "base"],
+            disabled=monitor.running or transcript_source != "Local Whisper",
+            key="monitor_whisper_size",
+        )
         consent = st.checkbox(
             "I have permission from meeting participants to record and analyse this audio.",
-            value=False,
             disabled=monitor.running,
+            key="monitor_consent",
         )
 
         start_column, stop_column, clear_column = st.columns(3)
         with start_column:
             if st.button(
-                "Start local monitor",
+                "Start monitor",
                 type="primary",
                 use_container_width=True,
-                disabled=monitor.running or selected_device is None or not consent,
+                disabled=monitor.running or not consent,
             ):
                 model_ready = True
                 if transcript_source == "Local Whisper":
-                    with st.spinner(
-                        f"Preparing local Whisper {whisper_size} before capture..."
-                    ):
-                        try:
-                            model_ready = _load_whisper_model(whisper_size) is not None
-                        except Exception as exc:
-                            model_ready = False
-                            st.session_state["live_audio_error"] = str(exc)
-                            st.error(f"Whisper setup failed: {exc}")
+                    try:
+                        model_ready = _load_whisper_model(whisper_size) is not None
+                    except Exception as exc:
+                        model_ready = False
+                        st.session_state["live_monitor_error"] = str(exc)
                 if model_ready:
                     monitor.start(selected_device, chunk_seconds=chunk_seconds)
                     st.session_state["live_monitor_source"] = selected_device.label
-                    st.session_state["live_audio_error"] = ""
+                    st.session_state["live_monitor_error"] = ""
                     st.rerun()
         with stop_column:
             if st.button(
@@ -721,28 +931,20 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
                 monitor.stop()
                 st.rerun()
         with clear_column:
-            if st.button("Clear monitor session", use_container_width=True):
-                _clear_live_state()
+            if st.button("Clear session", use_container_width=True):
+                _clear_monitor_state()
                 st.rerun()
 
-        st.caption(
-            "The Python process captures locally at 48 kHz and resamples completed chunks to "
-            "16 kHz for Whisper. Raw chunks stay in memory and are discarded after analysis; "
-            "only summaries are saved when you choose Save."
-        )
-
-    with st.expander("Operating-system audio routing", expanded=False):
+    if not WHISPER_AVAILABLE:
+        st.caption("Install requirements-live.txt locally to add automatic transcription.")
+    with st.expander("Audio routing help"):
         st.markdown(
             """
-**Windows:** Choose a device labelled **System output** for WASAPI loopback. If none appears,
-install VB-Cable or VoiceMeeter, route Zoom/Meet/Teams output to the cable input, then select
-the matching cable output here.
+**Windows:** choose a System output device, or route the meeting through VB-Cable/VoiceMeeter.
 
-**Linux/Kali:** Select the PulseAudio/PipeWire source ending in **monitor**. If it is missing,
-enable the monitor source in `pavucontrol` or your PipeWire audio controls.
+**Linux/Kali:** choose the PulseAudio/PipeWire source ending in `monitor`.
 
-**macOS:** CoreAudio does not provide native loopback capture. Install BlackHole, create an
-appropriate multi-output device, route meeting audio through it, and select BlackHole here.
+**macOS:** route audio through BlackHole and select that virtual device here.
 """
         )
 
@@ -753,3 +955,25 @@ appropriate multi-output device, route meeting audio through it, and select Blac
         transcript_source,
         whisper_size,
     )
+
+
+def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None:
+    _init_live_state()
+    render_section_header(
+        "Live audio detection",
+        "Choose a browser voice recording or monitor audio playing on the local computer.",
+        "Audio analysis",
+    )
+    mode = st.segmented_control(
+        "Audio source",
+        ["Voice recorder", "Device audio monitor"],
+        key="live_audio_mode",
+        label_visibility="collapsed",
+    )
+    if mode == "Device audio monitor":
+        _render_device_audio_monitor(root, history)
+    else:
+        monitor = st.session_state.get("live_system_monitor")
+        if isinstance(monitor, LocalSystemAudioMonitor) and monitor.running:
+            monitor.stop()
+        _render_voice_recorder(root, history)

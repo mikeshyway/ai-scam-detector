@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import wave
 from typing import Any
 
 import numpy as np
@@ -11,6 +13,45 @@ from src.time_utils import now_for_app
 
 
 TARGET_SAMPLE_RATE = 16_000
+
+
+def wav_bytes_to_audio(
+    data: bytes,
+    *,
+    target_sample_rate: int = TARGET_SAMPLE_RATE,
+) -> tuple[np.ndarray, int]:
+    """Decode the PCM WAV returned by Streamlit's voice recorder."""
+
+    with wave.open(io.BytesIO(data), "rb") as wav_file:
+        channels = wav_file.getnchannels()
+        sample_width = wav_file.getsampwidth()
+        source_rate = wav_file.getframerate()
+        raw = wav_file.readframes(wav_file.getnframes())
+
+    dtype_map = {1: np.uint8, 2: np.int16, 4: np.int32}
+    if sample_width not in dtype_map:
+        raise ValueError(f"Unsupported WAV sample width: {sample_width * 8}-bit.")
+
+    samples = np.frombuffer(raw, dtype=dtype_map[sample_width])
+    if sample_width == 1:
+        audio = (samples.astype(np.float32) - 128.0) / 128.0
+    else:
+        info = np.iinfo(dtype_map[sample_width])
+        audio = samples.astype(np.float32) / float(max(abs(info.min), info.max))
+
+    if channels > 1:
+        audio = audio.reshape(-1, channels).mean(axis=1)
+    if audio.size == 0:
+        raise ValueError("The recording contained no audio samples.")
+
+    if source_rate != target_sample_rate and audio.size > 1:
+        target_size = max(1, int(round(audio.size * target_sample_rate / source_rate)))
+        source_positions = np.linspace(0.0, 1.0, num=audio.size, endpoint=False)
+        target_positions = np.linspace(0.0, 1.0, num=target_size, endpoint=False)
+        audio = np.interp(target_positions, source_positions, audio).astype(np.float32)
+        source_rate = target_sample_rate
+
+    return np.clip(audio, -1.0, 1.0).astype(np.float32), int(source_rate)
 
 
 def _spectrum_summary(
@@ -270,4 +311,5 @@ __all__ = [
     "analyse_live_chunk",
     "extract_live_features",
     "transcribe_with_whisper",
+    "wav_bytes_to_audio",
 ]

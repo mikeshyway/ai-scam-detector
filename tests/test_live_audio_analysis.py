@@ -2,14 +2,34 @@
 
 from __future__ import annotations
 
+import io
 import unittest
+import wave
 
 import numpy as np
 
-from src.live_audio_analysis import analyse_live_chunk
+from src.live_audio_analysis import analyse_live_chunk, wav_bytes_to_audio
 
 
 class LiveAudioAnalysisTests(unittest.TestCase):
+    def test_streamlit_wav_is_decoded_and_resampled(self) -> None:
+        sample_rate = 8_000
+        time_axis = np.arange(sample_rate, dtype=np.float32) / sample_rate
+        samples = (0.2 * np.sin(2 * np.pi * 220 * time_axis) * 32_767).astype(
+            np.int16
+        )
+        output = io.BytesIO()
+        with wave.open(output, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(samples.tobytes())
+
+        audio, decoded_rate = wav_bytes_to_audio(output.getvalue())
+
+        self.assertEqual(decoded_rate, 16_000)
+        self.assertEqual(audio.shape, (16_000,))
+
     def test_analysis_combines_voice_and_transcript_indicators(self) -> None:
         sample_rate = 16_000
         time_axis = np.arange(sample_rate * 2, dtype=np.float32) / sample_rate

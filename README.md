@@ -11,8 +11,8 @@ clean visual feedback, and downloadable evidence summaries.
 ## App Pages
 
 - Scam Simulation Lab: uploaded call/meeting recording chunk analysis.
-- Live Audio Detection: local Zoom/Meet/Teams system-output capture with rolling Whisper
-  transcription, transcript scam scoring, MFCC/SVM voice scoring, and report-history saving.
+- Live Audio Detection: separate browser Voice Recorder and optional local Zoom/Meet/Teams
+  Device Audio Monitor, both with transcript/voice scoring and report-history saving.
 - Detection Center: email, transcript, AI voice/deepfake, and phone-number risk checkers.
 - AI Report Generator: downloadable TXT/PDF/DOCX evidence summary.
 
@@ -36,7 +36,8 @@ trained models are inserted.
 - Scam transcript detection using TF-IDF with Naive Bayes.
 - AI-generated speech detection using MFCC audio features with an SVM classifier.
 - Uploaded meeting/call recording chunk analysis with 5-10 second confidence results.
-- Local system-output analysis using configurable 3-10 second chunks.
+- Browser voice recording using Streamlit's built-in microphone recorder.
+- Optional local system-output analysis using configurable 3-10 second chunks.
 - Windows WASAPI loopback, Linux monitor-source, and virtual-audio-cable input support.
 - Optional local Whisper speech-to-text for combining spoken content and voice signals.
 - AI report generation with TXT/PDF/DOCX downloads when dependencies are installed.
@@ -76,12 +77,21 @@ sudo apt install ffmpeg
 pip install -r requirements-live.txt
 ```
 
-The first monitored chunk downloads the selected Whisper model. The model is then cached and
-reused for later chunks. The `tiny` model is recommended for CPU demonstrations. Without
-Whisper, the page can still display and score MFCC/acoustic voice features, but it cannot
-produce automatic transcript scam analysis.
+For local system-output capture as well as Whisper transcription:
 
-The Live Audio Detection page must run on the same computer that is playing the meeting audio.
+```bash
+pip install -r requirements-device-audio.txt
+```
+
+The Live Audio Detection page opens in **Voice Recorder** mode. This uses Streamlit's browser
+recorder and remains available on local and hosted deployments without the SoundCard package.
+Automatic Whisper transcription is optional; manual transcript and audio-only analysis remain
+available.
+
+**Device Audio Monitor** is a separate local-only mode. Its SoundCard dependency is kept out of
+the core requirements so a missing desktop audio backend cannot break the Voice Recorder.
+
+The Device Audio Monitor must run on the same computer that is playing the meeting audio.
 It records locally through the operating system's audio backend and does not use browser
 media streaming. A Streamlit Cloud deployment cannot capture audio from the user's laptop
 because its Python process runs on a remote server.

@@ -1,0 +1,5 @@
+-r requirements-live.txt
+
+# Optional local desktop capture for Zoom/Meet/Teams system audio.
+# This is not needed by the browser Voice Recorder or Streamlit Cloud.
+soundcard>=0.4.3
