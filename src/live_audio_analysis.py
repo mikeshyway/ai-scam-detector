@@ -1,8 +1,8 @@
-"""Near-real-time microphone chunk analysis for the AI-FDS live page.
+"""Near-real-time microphone clip analysis for the AI-FDS live page.
 
-The browser microphone transport is handled by ``streamlit-webrtc`` in the
-Streamlit page. This module contains the thread-safe audio buffer and the
-testable analysis logic used for each completed chunk.
+The primary path decodes WAV recordings returned by Streamlit's built-in
+microphone widget. The optional ``AudioChunkBuffer`` remains available for
+advanced local WebRTC experiments. Analysis logic is shared by both paths.
 """
 
 from __future__ import annotations

@@ -103,31 +103,38 @@ Replacement:
 
 ## Other Excluded Items
 
-### Real-Time Microphone Recording
+### Near-Real-Time Microphone Recording
 
-Implemented as an optional browser-microphone demonstration using `streamlit-webrtc`.
+Implemented as short browser-microphone recordings using Streamlit's built-in
+`st.audio_input`. This is intentionally near-real-time rather than continuous call
+interception.
 
 Implemented scope:
 
-- Default reliable recorder mode using Streamlit's built-in microphone widget. This avoids
-  WebRTC connection negotiation and analyses the recording immediately after it is stopped.
-- Analyse the microphone selected by the browser in configurable 3-10 second chunks.
+- Record a 5-10 second microphone clip, stop, and analyse it immediately without WebRTC
+  connection negotiation.
+- Append repeated clips to one rolling conversation session instead of replacing the previous
+  result.
+- Label transcript and risk results by clip and analysis chunk.
 - Extract MFCC and acoustic features for the existing SVM or educational heuristic.
 - Optionally run local Whisper speech-to-text, then score the transcript with the existing
   transcript model and suspicious-phrase explanations.
+- Load and cache Whisper only when the first clip is submitted.
 - Save a session summary into the AI Report Generator history.
+- Keep continuous `streamlit-webrtc` controls collapsed and disabled as an advanced local
+  experiment.
 
 Limitations:
 
-- Requires browser microphone permission and the additional WebRTC dependencies.
+- Requires browser microphone permission.
 - Does not intercept phone calls, Zoom, Teams, Google Meet, or operating-system audio.
 - Capturing another participant requires speaker playback or a separately configured virtual
   audio cable.
 - Whisper is optional because its model download and CPU cost are too heavy for the default
   capstone installation.
-- Hosted deployments use STUN by default but support static TURN credentials or short-lived
-  Twilio Network Traversal Service tokens through Streamlit secrets. TURN is required on many
-  cloud, university, VPN, firewall, and carrier-grade NAT networks.
+- The optional advanced WebRTC experiment supports static TURN credentials or short-lived
+  Twilio Network Traversal Service tokens. TURN is required on many cloud, university, VPN,
+  firewall, and carrier-grade NAT networks, so WebRTC is not the supported presentation path.
 
 ### Suspicious Timestamp Replay In Audio
 

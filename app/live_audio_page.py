@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
-import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -136,7 +136,9 @@ def _init_live_state() -> None:
         "live_audio_buffer": AudioChunkBuffer(),
         "live_audio_error": "",
         "live_audio_saved_signature": "",
-        "live_recording_signature": "",
+        "live_recording_signatures": [],
+        "live_clip_count": 0,
+        "live_recorder_generation": 0,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -150,13 +152,23 @@ def _clear_live_state() -> None:
     st.session_state["live_audio_results"] = []
     st.session_state["live_audio_error"] = ""
     st.session_state["live_audio_saved_signature"] = ""
-    st.session_state["live_recording_signature"] = ""
+    st.session_state["live_recording_signatures"] = []
+    st.session_state["live_clip_count"] = 0
+    st.session_state["live_recorder_generation"] = (
+        int(st.session_state.get("live_recorder_generation", 0)) + 1
+    )
 
 
 def _timeline_figure(results: list[dict[str, object]], threshold: int) -> go.Figure:
     x_values = list(range(1, len(results) + 1))
     risks = [float(item.get("risk", 0)) for item in results]
-    labels = [str(item.get("risk_level", "")) for item in results]
+    labels = [
+        (
+            f"Clip {item.get('clip', 1)}, chunk {item.get('clip_chunk', index + 1)}"
+            f"<br>{item.get('risk_level', '')}"
+        )
+        for index, item in enumerate(results)
+    ]
     colors = [
         "#DC2626" if value >= threshold else "#D97706" if value >= 40 else "#0891B2"
         for value in risks
@@ -167,7 +179,7 @@ def _timeline_figure(results: list[dict[str, object]], threshold: int) -> go.Fig
             y=risks,
             mode="lines+markers",
             text=labels,
-            hovertemplate="Chunk %{x}<br>Risk %{y:.1f}%<br>%{text}<extra></extra>",
+            hovertemplate="Session point %{x}<br>Risk %{y:.1f}%<br>%{text}<extra></extra>",
             line=dict(color="#2563EB", width=2),
             marker=dict(size=8, color=colors),
             fill="tozeroy",
@@ -257,7 +269,10 @@ def _cumulative_transcript(results: list[dict[str, object]]) -> str:
     for result in results:
         transcript = str(result.get("transcript", "")).strip()
         if transcript:
-            lines.append(f"[{result.get('time', '--:--:--')}] {transcript}")
+            lines.append(
+                f"[Clip {result.get('clip', 1)} | {result.get('time', '--:--:--')}] "
+                f"{transcript}"
+            )
     return "\n".join(lines)
 
 
@@ -287,7 +302,7 @@ def _process_recording(
     for index, chunk in enumerate(chunks):
         if transcript_source == "Local Whisper":
             transcript = transcribe_with_whisper(chunk, whisper_model)
-        elif transcript_source == "Manual demo text" and index == 0:
+        elif transcript_source == "Manual transcript" and index == 0:
             transcript = manual_transcript
         else:
             transcript = ""
@@ -305,11 +320,12 @@ def _process_recording(
 
 def _result_table(results: list[dict[str, object]]) -> pd.DataFrame:
     rows = []
-    for index, result in enumerate(reversed(results[-20:]), 1):
+    for result in reversed(results[-20:]):
         transcript = str(result.get("transcript", "")).strip()
         rows.append(
             {
-                "Chunk": len(results) - index + 1,
+                "Clip": int(result.get("clip", 1)),
+                "Chunk": int(result.get("clip_chunk", 1)),
                 "Time": result.get("time", "-"),
                 "Risk": f"{float(result.get('risk', 0)):.1f}%",
                 "Voice": f"{float(result.get('voice_risk', 0)):.1f}%",
@@ -334,21 +350,17 @@ def _render_live_dashboard(
     features_placeholder,
 ) -> None:
     latest = results[-1] if results else None
+    clip_count = max((int(item.get("clip", 0)) for item in results), default=0)
     peak = max((float(item.get("risk", 0)) for item in results), default=0.0)
-    average = (
-        sum(float(item.get("risk", 0)) for item in results) / len(results)
-        if results
-        else 0.0
-    )
     alert_count = sum(1 for item in results if float(item.get("risk", 0)) >= threshold)
 
     with metrics_placeholder.container():
         render_metric_row(
             [
-                {"label": "Chunks Processed", "value": len(results), "color": "#2563EB"},
+                {"label": "Clips Recorded", "value": clip_count, "color": "#2563EB"},
+                {"label": "Chunks Processed", "value": len(results), "color": "#0891B2"},
                 {"label": "Current Risk", "value": f"{float(latest.get('risk', 0)):.0f}%" if latest else "0%", "color": "#D97706"},
                 {"label": "Peak Risk", "value": f"{peak:.0f}%", "color": "#DC2626"},
-                {"label": "Average Risk", "value": f"{average:.0f}%", "color": "#0891B2"},
                 {"label": "Alerts", "value": alert_count, "color": "#DC2626"},
             ]
         )
@@ -356,7 +368,7 @@ def _render_live_dashboard(
     with result_placeholder.container():
         if latest:
             render_result_card(
-                "Latest microphone chunk",
+                f"Latest result: clip {latest.get('clip', 1)}, chunk {latest.get('clip_chunk', 1)}",
                 float(latest.get("risk", 0)),
                 str(latest.get("explanation", "")),
             )
@@ -365,7 +377,7 @@ def _render_live_dashboard(
                     f"Alert threshold reached. This chunk scored {float(latest.get('risk', 0)):.1f}% combined risk."
                 )
         else:
-            st.info("Start the microphone stream. Results appear after the first complete audio chunk.")
+            st.info("Record a short clip and stop the recorder. Analysis begins automatically.")
 
     with timeline_placeholder.container():
         st.plotly_chart(_timeline_figure(results, threshold), use_container_width=True)
@@ -387,7 +399,7 @@ def _render_live_dashboard(
         else:
             st.text_area(
                 "Live transcript",
-                value="Start the microphone stream. Local Whisper converts completed chunks into text.",
+                value="Record and stop a clip. Local Whisper converts the completed recording into text.",
                 height=145,
                 disabled=True,
             )
@@ -512,51 +524,55 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
 
     render_section_header(
         "Live audio detection",
-        "Analyse browser microphone audio in short chunks using voice features, optional local transcription, and explainable scam-language indicators.",
-        "Microphone demonstration",
+        "Record short microphone clips, convert speech to text, and combine transcript scam indicators with explainable voice features.",
+        "Near-real-time clip analysis",
     )
     render_info_banner(
-        "This educational page captures only the microphone selected in the browser. It does not intercept phone calls, "
-        "Zoom, Teams, Google Meet, or system audio. A speaker or virtual audio cable is required to include other participants.",
+        "This page records only the microphone selected in the browser. It does not intercept phone calls, "
+        "Zoom, Teams, Google Meet, or protected system audio.",
         kind="warning",
         code="SCOPE",
     )
     render_info_banner(
-        "Microphone access works on localhost. Remote deployments require HTTPS, and restrictive networks may also require a TURN server.",
-        kind="info",
-        code="WEBRTC",
+        "Recommended flow: record 5-10 seconds, stop, review the transcript and risk result, then record the next clip. "
+        "The session builds without WebRTC, STUN, or TURN.",
+        kind="success",
+        code="RELIABLE",
     )
 
     audio_classifier = _load_audio_classifier(str(root))
     text_classifier = _load_transcript_classifier(str(root))
-    rtc_configuration, rtc_mode, rtc_error = _rtc_settings()
     render_metric_row(
         [
-            {"label": "WebRTC", "value": "Ready" if WEBRTC_AVAILABLE else "Missing", "color": "#059669" if WEBRTC_AVAILABLE else "#DC2626"},
-            {"label": "ICE Relay", "value": "TURN" if rtc_mode.startswith("TURN") else "STUN only", "color": "#059669" if rtc_mode.startswith("TURN") else "#D97706"},
+            {"label": "Microphone Recorder", "value": "Ready" if hasattr(st, "audio_input") else "Upgrade required", "color": "#059669" if hasattr(st, "audio_input") else "#DC2626"},
             {"label": "Audio SVM", "value": "Ready" if audio_classifier else "Heuristic", "color": "#059669" if audio_classifier else "#D97706"},
             {"label": "Transcript Model", "value": "Ready" if text_classifier else "Rule Demo", "color": "#059669" if text_classifier else "#D97706"},
             {"label": "Local Whisper", "value": "Ready" if WHISPER_AVAILABLE else "Optional install", "color": "#2563EB" if WHISPER_AVAILABLE else "#6B7280"},
         ]
     )
+
     with st.container(border=True):
-        st.subheader("Live session settings")
-        capture_mode = st.radio(
-            "Microphone capture method",
-            ["Reliable recorder", "Live WebRTC (advanced)"],
-            horizontal=True,
-            help=(
-                "Reliable recorder uses Streamlit's built-in microphone widget and does not require STUN/TURN. "
-                "Live WebRTC updates continuously but hosted deployments normally require TURN."
-            ),
-        )
+        st.subheader("Recording and analysis settings")
         setting_a, setting_b, setting_c = st.columns(3)
         with setting_a:
-            chunk_seconds = st.slider("Analysis chunk", min_value=3, max_value=10, value=4, step=1)
+            chunk_seconds = st.slider(
+                "Analysis chunk",
+                min_value=3,
+                max_value=10,
+                value=5,
+                step=1,
+                help="Longer recordings are divided into chunks of this duration.",
+            )
         with setting_b:
-            risk_threshold = st.slider("Alert threshold", min_value=40, max_value=90, value=70, step=5)
+            risk_threshold = st.slider(
+                "Alert threshold",
+                min_value=40,
+                max_value=90,
+                value=70,
+                step=5,
+            )
         with setting_c:
-            transcript_options = ["Audio only", "Manual demo text"]
+            transcript_options = ["Manual transcript", "Audio only"]
             if WHISPER_AVAILABLE:
                 transcript_options.insert(0, "Local Whisper")
             transcript_source = st.selectbox("Transcript source", transcript_options)
@@ -564,134 +580,186 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
         whisper_size = "tiny"
         manual_transcript = ""
         if transcript_source == "Local Whisper":
-            whisper_size = st.selectbox("Whisper model size", ["tiny", "base"], index=0)
-            st.caption("The first use may download the selected Whisper model and can be slow on CPU.")
-        elif transcript_source == "Manual demo text":
+            whisper_size = st.selectbox(
+                "Whisper model size",
+                ["tiny", "base"],
+                index=0,
+                help="Tiny is fastest on CPU. Base can improve transcription at the cost of more processing time.",
+            )
+            st.caption("The first use downloads and caches the selected model. Later clips reuse it.")
+        elif transcript_source == "Manual transcript":
             manual_transcript = st.text_area(
-                "Manual transcript overlay",
-                placeholder="Enter a sentence used only for educational text-risk fusion. It is not transcribed from the microphone.",
+                "Spoken words for this clip",
+                placeholder="Type what was said, then record the matching voice clip.",
                 height=90,
+                help="Use this fallback when local Whisper is not installed.",
             )
 
-        action_left, action_right = st.columns([0.72, 0.28])
-        with action_left:
+        note_column, clear_column = st.columns([0.72, 0.28])
+        with note_column:
             st.caption(
-                "Audio is processed in memory as short chunks. Raw microphone audio is not saved by this page."
+                "Recordings are processed in memory. Only the analysis summary is added to report history when you choose Save."
             )
-        with action_right:
-            if st.button("Clear live session", use_container_width=True):
+        with clear_column:
+            if st.button("Clear recording session", use_container_width=True):
                 _clear_live_state()
                 st.rerun()
 
     buffer.configure(chunk_seconds)
 
     whisper_model = None
-    if transcript_source == "Local Whisper":
-        with st.spinner(f"Loading local Whisper {whisper_size} model..."):
-            try:
-                whisper_model = _load_whisper_model(whisper_size)
-            except Exception as exc:
-                st.error(f"Whisper could not be loaded: {exc}")
-                transcript_source = "Audio only"
+
+    render_section_header(
+        "Record the next conversation clip",
+        "Speak for roughly 5-10 seconds, stop the recorder, and wait for the transcript and risk panels to update.",
+        "Primary microphone input",
+    )
+
+    recorded_audio = None
+    if not hasattr(st, "audio_input"):
+        render_info_banner(
+            "This recorder requires Streamlit 1.48 or newer. Reinstall requirements.txt and restart the app.",
+            kind="danger",
+            code="UPGRADE",
+        )
+    else:
+        recorder_generation = int(st.session_state.get("live_recorder_generation", 0))
+        recorded_audio = st.audio_input(
+            "Microphone recording",
+            sample_rate=16_000,
+            key=f"aifds_microphone_{recorder_generation}",
+            help="Stop the recording when finished. The new clip is analysed automatically.",
+        )
+
+    if recorded_audio is not None:
+        recorded_bytes = recorded_audio.getvalue()
+        recording_signature = hashlib.sha256(recorded_bytes).hexdigest()
+        processed_signatures = list(
+            st.session_state.get("live_recording_signatures", [])
+        )
+
+        if recording_signature not in processed_signatures:
+            with st.spinner("Transcribing and analysing the recorded clip..."):
+                try:
+                    if transcript_source == "Local Whisper":
+                        whisper_model = _load_whisper_model(whisper_size)
+                        if whisper_model is None:
+                            raise RuntimeError(
+                                "Local Whisper is unavailable. Install requirements-live.txt "
+                                "or select Manual transcript."
+                            )
+                    processed = _process_recording(
+                        recorded_bytes,
+                        chunk_seconds=chunk_seconds,
+                        transcript_source=transcript_source,
+                        manual_transcript=manual_transcript,
+                        whisper_model=whisper_model,
+                        audio_classifier=audio_classifier,
+                        text_classifier=text_classifier,
+                    )
+                except Exception as exc:
+                    st.session_state["live_audio_error"] = str(exc)
+                    st.error(f"Microphone clip analysis failed: {exc}")
+                else:
+                    clip_number = int(st.session_state.get("live_clip_count", 0)) + 1
+                    for chunk_index, result in enumerate(processed, 1):
+                        result["clip"] = clip_number
+                        result["clip_chunk"] = chunk_index
+                        result["capture_mode"] = "Short microphone recording"
+                    results.extend(processed)
+                    if len(results) > 60:
+                        del results[:-60]
+
+                    processed_signatures.append(recording_signature)
+                    st.session_state["live_recording_signatures"] = processed_signatures[-60:]
+                    st.session_state["live_clip_count"] = clip_number
+                    st.session_state["live_audio_saved_signature"] = ""
+                    st.session_state["live_audio_error"] = ""
+                    render_analysis_ready(
+                        f"Clip {clip_number} analysed in {len(processed)} chunk(s)"
+                    )
+
+        next_column, session_column = st.columns([0.34, 0.66])
+        with next_column:
+            if st.button(
+                "Record next clip",
+                type="primary",
+                use_container_width=True,
+                help="Resets the recorder while keeping the current session analysis.",
+            ):
+                st.session_state["live_recorder_generation"] = (
+                    int(st.session_state.get("live_recorder_generation", 0)) + 1
+                )
+                st.rerun()
+        with session_column:
+            st.caption(
+                f"{int(st.session_state.get('live_clip_count', 0))} clip(s) currently stored in this analysis session."
+            )
+    else:
+        st.caption("No microphone clip has been submitted yet.")
 
     webrtc_context = None
-    if capture_mode == "Reliable recorder":
-        render_section_header(
-            "Reliable microphone recorder",
-            "Record a short sample, stop the recording, and the app will immediately analyse it in chunks without WebRTC.",
-            "Recommended input",
+    advanced_webrtc_enabled = False
+    with st.expander("Advanced local WebRTC experiment", expanded=False):
+        st.caption(
+            "Optional continuous streaming for a local demonstration. Hosted or restricted networks may still require TURN. "
+            "The short recorder above is the supported reliable path."
         )
-        render_info_banner(
-            "This mode avoids ICE, STUN, and TURN negotiation. It is the recommended capstone demonstration path on Streamlit Cloud.",
-            kind="success",
-            code="RELIABLE",
+        advanced_webrtc_enabled = st.toggle(
+            "Enable advanced WebRTC controls",
+            value=False,
+            help="Leave this off unless you are intentionally testing continuous local streaming.",
         )
-        if not hasattr(st, "audio_input"):
-            render_info_banner(
-                "Reliable recorder requires Streamlit 1.48 or newer. Reinstall requirements.txt and restart the app.",
-                kind="danger",
-                code="UPGRADE",
-            )
-            recorded_audio = None
-        else:
-            recorded_audio = st.audio_input(
-                "Record microphone audio",
-                key="aifds_reliable_microphone",
-                help="Stop the recording when finished. Analysis starts automatically.",
-            )
-        if recorded_audio is not None:
-            recorded_bytes = recorded_audio.getvalue()
-            settings_signature = json.dumps(
-                [chunk_seconds, transcript_source, whisper_size, manual_transcript],
-                ensure_ascii=True,
-            ).encode("utf-8")
-            recording_signature = hashlib.sha256(recorded_bytes + settings_signature).hexdigest()
-            if recording_signature != st.session_state.get("live_recording_signature"):
-                with st.spinner("Analysing recorded microphone audio..."):
-                    try:
-                        processed = _process_recording(
-                            recorded_bytes,
-                            chunk_seconds=chunk_seconds,
-                            transcript_source=transcript_source,
-                            manual_transcript=manual_transcript,
-                            whisper_model=whisper_model,
-                            audio_classifier=audio_classifier,
-                            text_classifier=text_classifier,
-                        )
-                    except Exception as exc:
-                        st.session_state["live_audio_error"] = str(exc)
-                        st.error(f"Recorded microphone analysis failed: {exc}")
-                    else:
-                        results[:] = processed[-60:]
-                        st.session_state["live_recording_signature"] = recording_signature
-                        st.session_state["live_audio_saved_signature"] = ""
-                        st.session_state["live_audio_error"] = ""
-                        render_analysis_ready(f"Recorded audio analysed in {len(results)} chunk(s)")
-    else:
-        render_section_header(
-            "Live microphone stream",
-            "Select Start and grant microphone permission. This advanced mode requires a working WebRTC network path.",
-            "TURN-dependent input",
-        )
-        if not WEBRTC_AVAILABLE:
-            render_info_banner(
-                "Live WebRTC transport is unavailable. Install requirements.txt and restart Streamlit, or use Reliable recorder.",
-                kind="danger",
-                code="SETUP",
-            )
-        else:
-            if rtc_error:
-                render_info_banner(rtc_error, kind="danger", code="TURN ERROR")
-            elif rtc_mode == "STUN only":
+        if advanced_webrtc_enabled:
+            if not WEBRTC_AVAILABLE:
                 render_info_banner(
-                    "No TURN relay is configured. If Start immediately switches off, use Reliable recorder or configure real TURN credentials.",
+                    "streamlit-webrtc is unavailable. Install requirements.txt or continue with the recorder above.",
                     kind="danger",
-                    code="CONNECTION",
+                    code="SETUP",
                 )
             else:
-                render_info_banner(
-                    "TURN relay credentials are configured. Hosted WebRTC can relay microphone media when direct ICE paths fail.",
-                    kind="success",
-                    code="TURN READY",
-                )
+                if transcript_source == "Local Whisper":
+                    with st.spinner(f"Loading local Whisper {whisper_size} model..."):
+                        try:
+                            whisper_model = _load_whisper_model(whisper_size)
+                        except Exception as exc:
+                            st.session_state["live_audio_error"] = str(exc)
+                            st.error(f"Whisper could not be loaded: {exc}")
+                            transcript_source = "Audio only"
 
-            def audio_frame_callback(frame):
-                return buffer.push_frame(frame)
+                rtc_configuration, rtc_mode, rtc_error = _rtc_settings()
+                if rtc_error:
+                    render_info_banner(rtc_error, kind="danger", code="TURN ERROR")
+                elif rtc_mode == "STUN only":
+                    render_info_banner(
+                        "No TURN relay is configured. Use this only on a network where a direct WebRTC connection succeeds.",
+                        kind="warning",
+                        code="STUN ONLY",
+                    )
+                else:
+                    render_info_banner(
+                        "A TURN relay is configured for this optional WebRTC test.",
+                        kind="success",
+                        code="TURN READY",
+                    )
 
-            webrtc_context = webrtc_streamer(
-                key="aifds-live-audio",
-                mode=WebRtcMode.SENDONLY,
-                audio_frame_callback=audio_frame_callback,
-                media_stream_constraints={
-                    "audio": {
-                        "echoCancellation": True,
-                        "noiseSuppression": True,
-                        "channelCount": 1,
+                def audio_frame_callback(frame):
+                    return buffer.push_frame(frame)
+
+                webrtc_context = webrtc_streamer(
+                    key="aifds-live-audio-advanced",
+                    mode=WebRtcMode.SENDONLY,
+                    audio_frame_callback=audio_frame_callback,
+                    media_stream_constraints={
+                        "audio": {
+                            "echoCancellation": True,
+                            "noiseSuppression": True,
+                            "channelCount": 1,
+                        },
+                        "video": False,
                     },
-                    "video": False,
-                },
-                rtc_configuration=rtc_configuration,
-            )
+                    rtc_configuration=rtc_configuration,
+                )
 
     status_placeholder = st.empty()
     metrics_placeholder = st.empty()
@@ -700,12 +768,12 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
 
     display_a, display_b = st.columns([0.62, 0.38])
     with display_a:
-        render_section_header("Recent chunks and transcript", eyebrow="Live evidence")
+        render_section_header("Session transcript and chunks", eyebrow="Conversation evidence")
         transcript_placeholder = st.empty()
         render_section_header("MFCC feature heatmap", eyebrow="Audio pattern")
         mfcc_placeholder = st.empty()
     with display_b:
-        render_section_header("Live frequency spectrum", eyebrow="Audio frequency")
+        render_section_header("Latest frequency spectrum", eyebrow="Audio frequency")
         frequency_placeholder = st.empty()
         render_section_header("Latest acoustic features", eyebrow="Voice indicators")
         features_placeholder = st.empty()
@@ -723,8 +791,9 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
     )
 
     if webrtc_context is not None and webrtc_context.state.playing:
+        stream_clip = int(st.session_state.get("live_clip_count", 0)) + 1
         status_placeholder.success(
-            f"Microphone active. Processing approximately every {chunk_seconds} seconds."
+            f"Advanced microphone stream active. Processing approximately every {chunk_seconds} seconds."
         )
         while webrtc_context.state.playing:
             chunk = buffer.get_chunk(timeout=0.4)
@@ -735,7 +804,7 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
             try:
                 if transcript_source == "Local Whisper":
                     transcript = transcribe_with_whisper(chunk, whisper_model)
-                elif transcript_source == "Manual demo text":
+                elif transcript_source == "Manual transcript":
                     transcript = manual_transcript
                 else:
                     transcript = ""
@@ -746,13 +815,20 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
                     audio_classifier=audio_classifier,
                     text_classifier=text_classifier,
                 )
+                result["clip"] = stream_clip
+                result["clip_chunk"] = (
+                    sum(1 for item in results if int(item.get("clip", 0)) == stream_clip) + 1
+                )
+                result["capture_mode"] = "Advanced local WebRTC"
             except Exception as exc:
                 st.session_state["live_audio_error"] = str(exc)
-                status_placeholder.error(f"Chunk analysis failed: {exc}")
+                status_placeholder.error(f"WebRTC chunk analysis failed: {exc}")
                 time.sleep(0.15)
                 continue
 
             results.append(result)
+            st.session_state["live_clip_count"] = stream_clip
+            st.session_state["live_audio_saved_signature"] = ""
             if len(results) > 60:
                 del results[:-60]
 
@@ -767,10 +843,14 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
                 frequency_placeholder=frequency_placeholder,
                 features_placeholder=features_placeholder,
             )
-    elif capture_mode == "Live WebRTC (advanced)":
-        status_placeholder.info("Microphone is stopped. Start the stream to continue analysis.")
+    elif advanced_webrtc_enabled:
+        status_placeholder.info("Advanced WebRTC is enabled but stopped.")
+    elif results:
+        status_placeholder.success(
+            "The recorded session is ready. Record another clip above to continue the conversation."
+        )
     else:
-        status_placeholder.info("Record and stop a microphone sample above to update the analysis.")
+        status_placeholder.info("Record and stop the first microphone clip to begin analysis.")
 
     if st.session_state.get("live_audio_error"):
         st.warning(f"Most recent processing issue: {st.session_state['live_audio_error']}")
@@ -778,7 +858,7 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
     if results:
         render_section_header(
             "Save session evidence",
-            "Store the current live-session summary so it appears in the AI Report Generator.",
+            "Store the current microphone-session summary so it appears in the AI Report Generator.",
             "Report integration",
         )
         current_signature = json.dumps(
@@ -790,12 +870,17 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
             ensure_ascii=True,
         )
         already_saved = current_signature == st.session_state.get("live_audio_saved_signature")
+        capture_modes = {
+            str(item.get("capture_mode", "Short microphone recording"))
+            for item in results
+        }
+        capture_mode = " + ".join(sorted(capture_modes))
         if st.button(
-            "Save live session to report history",
+            "Save microphone session to report history",
             type="primary",
             use_container_width=True,
             disabled=already_saved,
         ):
             _save_session(history, results, transcript_source, capture_mode)
         if already_saved:
-            st.caption("This live-session state has already been saved. Process another chunk to create a new version.")
+            st.caption("This session version is already saved. Record another clip to create a new version.")

@@ -76,20 +76,24 @@ sudo apt install ffmpeg
 pip install -r requirements-live.txt
 ```
 
-The first Whisper session downloads the selected model. The `tiny` model is recommended for
-CPU demonstrations. Without Whisper, the page still supports audio-only MFCC/SVM analysis and
-a clearly labelled manual transcript demonstration mode.
+The first recorded clip downloads the selected Whisper model. The model is then cached and
+reused for later clips. The `tiny` model is recommended for CPU demonstrations. Without
+Whisper, the page supports audio-only MFCC/SVM analysis or a clearly labelled manual transcript
+fallback.
 
 Browser microphone access works on `localhost`. Remote deployments require HTTPS, and some
 restricted networks or cloud hosts also require a configured TURN server for WebRTC.
 
-The Live Audio Detection page defaults to **Reliable recorder**, which uses Streamlit's
-built-in `st.audio_input`. Record a sample and stop it; the app automatically divides the
-recording into chunks and updates the transcript, frequency spectrum, MFCC, and risk panels.
-This mode does not use WebRTC and is recommended for Streamlit Cloud demonstrations.
+The Live Audio Detection page uses Streamlit's built-in `st.audio_input` as its primary path.
+Record for roughly 5-10 seconds and stop; the app automatically transcribes and divides the
+recording into analysis chunks. Select **Record next clip** to continue the same conversation
+session. Earlier transcript, frequency, MFCC, and risk results remain visible, and the complete
+session can be saved to the AI Report Generator. This path does not use WebRTC and is recommended
+for local and Streamlit Cloud demonstrations.
 
-**Live WebRTC (advanced)** remains available for continuous chunk updates. It requires a
-working TURN relay on many hosted or restricted networks.
+**Advanced local WebRTC experiment** is collapsed and disabled by default. It remains available
+for continuous local chunk updates, but it requires a working TURN relay on many hosted or
+restricted networks and is not the supported presentation path.
 
 ### TURN Setup for Hosted Live Audio
 
