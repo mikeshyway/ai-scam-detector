@@ -1,17 +1,7 @@
-"""Near-real-time microphone clip analysis for the AI-FDS live page.
-
-The primary path decodes WAV recordings returned by Streamlit's built-in
-microphone widget. The optional ``AudioChunkBuffer`` remains available for
-advanced local WebRTC experiments. Analysis logic is shared by both paths.
-"""
+"""Near-real-time audio analysis shared by local capture and upload flows."""
 
 from __future__ import annotations
 
-import io
-import queue
-import threading
-import wave
-from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -21,51 +11,6 @@ from src.time_utils import now_for_app
 
 
 TARGET_SAMPLE_RATE = 16_000
-
-
-def wav_bytes_to_audio(
-    data: bytes,
-    *,
-    target_sample_rate: int = TARGET_SAMPLE_RATE,
-) -> tuple[np.ndarray, int]:
-    """Decode PCM WAV bytes from Streamlit's microphone recorder."""
-
-    with wave.open(io.BytesIO(data), "rb") as wav_file:
-        channels = wav_file.getnchannels()
-        sample_width = wav_file.getsampwidth()
-        source_rate = wav_file.getframerate()
-        frame_count = wav_file.getnframes()
-        raw = wav_file.readframes(frame_count)
-
-    dtype_map = {
-        1: np.uint8,
-        2: np.int16,
-        4: np.int32,
-    }
-    if sample_width not in dtype_map:
-        raise ValueError(f"Unsupported WAV sample width: {sample_width * 8}-bit.")
-
-    samples = np.frombuffer(raw, dtype=dtype_map[sample_width])
-    if sample_width == 1:
-        audio = (samples.astype(np.float32) - 128.0) / 128.0
-    else:
-        integer_info = np.iinfo(dtype_map[sample_width])
-        scale = float(max(abs(integer_info.min), integer_info.max))
-        audio = samples.astype(np.float32) / scale
-
-    if channels > 1:
-        audio = audio.reshape(-1, channels).mean(axis=1)
-
-    if source_rate != target_sample_rate and audio.size > 1:
-        target_size = max(1, int(round(audio.size * target_sample_rate / source_rate)))
-        source_positions = np.linspace(0.0, 1.0, num=audio.size, endpoint=False)
-        target_positions = np.linspace(0.0, 1.0, num=target_size, endpoint=False)
-        audio = np.interp(target_positions, source_positions, audio).astype(np.float32)
-        source_rate = target_sample_rate
-
-    if audio.size == 0:
-        raise ValueError("The microphone recording contained no audio samples.")
-    return np.clip(audio.astype(np.float32), -1.0, 1.0), int(source_rate)
 
 
 def _spectrum_summary(
@@ -96,83 +41,6 @@ def _spectrum_summary(
         np.round(decibels, 2).astype(float).tolist(),
         dominant_frequency,
     )
-
-
-def _normalise_frame(frame: Any, target_sample_rate: int = TARGET_SAMPLE_RATE) -> np.ndarray:
-    """Convert a PyAV audio frame into mono float32 audio."""
-
-    array = np.asarray(frame.to_ndarray())
-    original_dtype = array.dtype
-    integer_audio = np.issubdtype(original_dtype, np.integer)
-    if array.ndim > 1:
-        array = array.astype(np.float32).mean(axis=0)
-    array = np.ravel(array)
-
-    if integer_audio:
-        scale = float(max(abs(np.iinfo(original_dtype).min), np.iinfo(original_dtype).max))
-        audio = array.astype(np.float32) / scale
-    else:
-        audio = array.astype(np.float32)
-
-    source_rate = int(getattr(frame, "sample_rate", target_sample_rate) or target_sample_rate)
-    if source_rate != target_sample_rate and audio.size > 1:
-        target_size = max(1, int(round(audio.size * target_sample_rate / source_rate)))
-        source_positions = np.linspace(0.0, 1.0, num=audio.size, endpoint=False)
-        target_positions = np.linspace(0.0, 1.0, num=target_size, endpoint=False)
-        audio = np.interp(target_positions, source_positions, audio).astype(np.float32)
-
-    return np.clip(audio, -1.0, 1.0)
-
-
-@dataclass
-class AudioChunkBuffer:
-    """Accumulate callback frames and emit fixed-duration mono chunks."""
-
-    chunk_seconds: int = 4
-    sample_rate: int = TARGET_SAMPLE_RATE
-    _pending: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.float32))
-    _queue: queue.Queue[np.ndarray] = field(default_factory=queue.Queue)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
-
-    @property
-    def chunk_samples(self) -> int:
-        return int(self.sample_rate * self.chunk_seconds)
-
-    def configure(self, chunk_seconds: int) -> None:
-        chunk_seconds = max(3, min(10, int(chunk_seconds)))
-        with self._lock:
-            if chunk_seconds != self.chunk_seconds:
-                self.chunk_seconds = chunk_seconds
-                self._pending = np.empty(0, dtype=np.float32)
-                self._drain_queue()
-
-    def push_frame(self, frame: Any) -> Any:
-        audio = _normalise_frame(frame, self.sample_rate)
-        with self._lock:
-            self._pending = np.concatenate([self._pending, audio])
-            while self._pending.size >= self.chunk_samples:
-                chunk = self._pending[: self.chunk_samples].copy()
-                self._pending = self._pending[self.chunk_samples :]
-                self._queue.put(chunk)
-        return frame
-
-    def get_chunk(self, timeout: float = 0.25) -> np.ndarray | None:
-        try:
-            return self._queue.get(timeout=timeout)
-        except queue.Empty:
-            return None
-
-    def clear(self) -> None:
-        with self._lock:
-            self._pending = np.empty(0, dtype=np.float32)
-            self._drain_queue()
-
-    def _drain_queue(self) -> None:
-        while True:
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                break
 
 
 def extract_live_features(audio: np.ndarray, sample_rate: int = TARGET_SAMPLE_RATE) -> dict[str, object]:
@@ -398,10 +266,8 @@ def transcribe_with_whisper(audio: np.ndarray, whisper_model: Any | None) -> str
 
 
 __all__ = [
-    "AudioChunkBuffer",
     "TARGET_SAMPLE_RATE",
     "analyse_live_chunk",
     "extract_live_features",
     "transcribe_with_whisper",
-    "wav_bytes_to_audio",
 ]

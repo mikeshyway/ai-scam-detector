@@ -11,8 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_PACKAGES = [
     "streamlit",
-    "streamlit_webrtc",
-    "av",
+    "soundcard",
     "pandas",
     "numpy",
     "sklearn",

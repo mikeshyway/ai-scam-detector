@@ -11,7 +11,7 @@ clean visual feedback, and downloadable evidence summaries.
 ## App Pages
 
 - Scam Simulation Lab: uploaded call/meeting recording chunk analysis.
-- Live Audio Detection: browser-microphone chunk analysis with optional local Whisper
+- Live Audio Detection: local Zoom/Meet/Teams system-output capture with rolling Whisper
   transcription, transcript scam scoring, MFCC/SVM voice scoring, and report-history saving.
 - Detection Center: email, transcript, AI voice/deepfake, and phone-number risk checkers.
 - AI Report Generator: downloadable TXT/PDF/DOCX evidence summary.
@@ -36,8 +36,8 @@ trained models are inserted.
 - Scam transcript detection using TF-IDF with Naive Bayes.
 - AI-generated speech detection using MFCC audio features with an SVM classifier.
 - Uploaded meeting/call recording chunk analysis with 5-10 second confidence results.
-- Browser microphone analysis using configurable 3-10 second chunks.
-- Reliable built-in microphone recording that avoids WebRTC/STUN/TURN negotiation.
+- Local system-output analysis using configurable 3-10 second chunks.
+- Windows WASAPI loopback, Linux monitor-source, and virtual-audio-cable input support.
 - Optional local Whisper speech-to-text for combining spoken content and voice signals.
 - AI report generation with TXT/PDF/DOCX downloads when dependencies are installed.
 - Confidence scoring and Streamlit warning banners.
@@ -76,57 +76,38 @@ sudo apt install ffmpeg
 pip install -r requirements-live.txt
 ```
 
-The first recorded clip downloads the selected Whisper model. The model is then cached and
-reused for later clips. The `tiny` model is recommended for CPU demonstrations. Without
-Whisper, the page supports audio-only MFCC/SVM analysis or a clearly labelled manual transcript
-fallback.
+The first monitored chunk downloads the selected Whisper model. The model is then cached and
+reused for later chunks. The `tiny` model is recommended for CPU demonstrations. Without
+Whisper, the page can still display and score MFCC/acoustic voice features, but it cannot
+produce automatic transcript scam analysis.
 
-Browser microphone access works on `localhost`. Remote deployments require HTTPS, and some
-restricted networks or cloud hosts also require a configured TURN server for WebRTC.
+The Live Audio Detection page must run on the same computer that is playing the meeting audio.
+It records locally through the operating system's audio backend and does not use browser
+media streaming. A Streamlit Cloud deployment cannot capture audio from the user's laptop
+because its Python process runs on a remote server.
 
-The Live Audio Detection page uses Streamlit's built-in `st.audio_input` as its primary path.
-Record for roughly 5-10 seconds and stop; the app automatically transcribes and divides the
-recording into analysis chunks. Select **Record next clip** to continue the same conversation
-session. Earlier transcript, frequency, MFCC, and risk results remain visible, and the complete
-session can be saved to the AI Report Generator. This path does not use WebRTC and is recommended
-for local and Streamlit Cloud demonstrations.
+### Local Meeting Monitor Setup
 
-**Advanced local WebRTC experiment** is collapsed and disabled by default. It remains available
-for continuous local chunk updates, but it requires a working TURN relay on many hosted or
-restricted networks and is not the supported presentation path.
+**Windows**
 
-### TURN Setup for Hosted Live Audio
+1. Start the app locally.
+2. Open the Live Audio Detection page.
+3. Select a device labelled `System output` for WASAPI loopback.
+4. If no loopback appears, install VB-Cable or VoiceMeeter.
+5. Route Zoom, Google Meet, or Teams output to the virtual cable input.
+6. Select the matching cable output in the app and start the monitor.
 
-The default STUN-only connection may stall on Streamlit Community Cloud, university Wi-Fi,
-VPNs, corporate firewalls, or carrier-grade NAT. For a hosted demonstration, configure TURN
-credentials in Streamlit Cloud under **Settings > Secrets**.
+**Linux/Kali**
 
-Recommended Twilio Network Traversal Service configuration:
+Select the PulseAudio/PipeWire source ending in `monitor`. Enable it through `pavucontrol` or
+your PipeWire controls if it is hidden.
 
-```toml
-[webrtc]
-twilio_account_sid = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-twilio_auth_token = "replace-with-real-token"
-```
+**macOS**
 
-The app uses Twilio's Tokens API to request short-lived ICE servers and refreshes the cached
-configuration hourly. No Twilio credentials are sent to the browser.
+CoreAudio has no native loopback recording. Install BlackHole, configure a multi-output device,
+route the meeting through it, and select BlackHole in the app.
 
-A static TURN provider or self-hosted `coturn` server is also supported:
-
-```toml
-[webrtc]
-turn_urls = [
-  "turn:turn.example.com:3478?transport=udp",
-  "turn:turn.example.com:3478?transport=tcp",
-  "turns:turn.example.com:443?transport=tcp",
-]
-turn_username = "replace-with-turn-username"
-turn_credential = "replace-with-turn-password"
-```
-
-See `.streamlit/secrets.toml.example`. Never commit the real `.streamlit/secrets.toml` file.
-For local use through `http://localhost`, TURN is normally unnecessary.
+Only record or analyse a meeting after receiving permission from its participants.
 
 On Windows PowerShell:
 
@@ -189,11 +170,12 @@ Keep `requirements.txt` at the repository root.
 
 ## Detection Scope
 
-The system supports uploaded evidence and an educational browser-microphone demonstration.
-The live page analyses only the microphone selected by the browser. It does not automatically
-intercept phone calls, meeting platforms, system audio, emails, or messages. Capturing another
-speaker requires speaker playback into the microphone or a separately configured virtual audio
-cable. Automatic pre-delivery monitoring remains outside the Streamlit prototype.
+The system supports uploaded evidence and local system-output monitoring. The Live Audio
+Detection page can analyse audio played by Zoom, Google Meet, Teams, or another application on
+the same computer when a loopback, monitor, or virtual-cable input is available. It does not
+join meetings through platform APIs, capture mobile phone calls, monitor email/SMS delivery, or
+block communications automatically. The local monitor is educational near-real-time chunk
+analysis, not a commercial interception or prevention system.
 
 ## Change Log
 

@@ -71,6 +71,13 @@ def _init_state() -> None:
 
 
 def _select_page(page_name: str) -> None:
+    if (
+        st.session_state.get("active_page") == "Live Audio Detection"
+        and page_name != "Live Audio Detection"
+    ):
+        monitor = st.session_state.get("live_system_monitor")
+        if monitor is not None and hasattr(monitor, "stop"):
+            monitor.stop()
     st.session_state.active_page = page_name
 
 

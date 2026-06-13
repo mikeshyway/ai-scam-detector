@@ -5,16 +5,16 @@ stays aligned with the current capstone demo scope.
 
 ## Current Direction
 
-The project now presents itself as an uploaded-evidence scam detection interface with a
-professional GuardAI-style Streamlit UI. The strongest student-facing feature is the Scam
-Simulation Lab, which demonstrates how an uploaded meeting or call recording can be split into
-short chunks, analyzed, visualized, and explained.
+The project now combines uploaded-evidence detection with a local meeting monitor. The Live
+Audio Detection page captures system output from the computer running Streamlit, divides it
+into short chunks, transcribes speech locally, and displays rolling scam-risk explanations.
 
 ## Current Page Structure
 
 1. Scam Simulation Lab
-2. Detection Center
-3. AI Report Generator
+2. Live Audio Detection
+3. Detection Center
+4. AI Report Generator
 
 Removed by request:
 
@@ -30,7 +30,9 @@ Removed by request:
 - `app/detection_center_page.py`
 - `app/report_page.py`
 - `src/recording_audio_simulation.py`
+- `src/system_audio_capture.py`
 - Uploaded recording chunk analysis
+- Local system-output meeting monitoring
 - 5-10 second audio chunk processing
 - PDF/DOCX/TXT report generator
 - Malaysia-time report timestamps via `src/time_utils.py`
@@ -68,7 +70,8 @@ Reason:
 Replacement:
 
 - Uploaded-evidence detection.
-- Browser-microphone educational analysis through WebRTC.
+- Local system-output educational analysis through WASAPI/PulseAudio/PipeWire or a virtual
+  audio cable.
 - Paste email/text.
 - Upload `.txt`, `.csv`, `.wav`, `.flac`, `.mp3`, or `.m4a`.
 
@@ -86,55 +89,54 @@ Replacement:
 - Manual Phone Number Risk Checker using educational heuristics and synthetic demo reputation
   data.
 
-### PC Meeting Platform Integration
+### PC Meeting Audio Integration
 
-Not implemented.
-
-Reason:
-
-- Streamlit does not connect directly to Zoom, Teams, or Google Meet audio streams.
-
-Replacement:
-
-- Upload exported meeting/call recording.
-- Split audio into 5-10 second chunks.
-- Run MFCC extraction and SVM/demo prediction per chunk.
-- Show chunk confidence results as an educational replay-style analysis.
-
-## Other Excluded Items
-
-### Near-Real-Time Microphone Recording
-
-Implemented as short browser-microphone recordings using Streamlit's built-in
-`st.audio_input`. This is intentionally near-real-time rather than continuous call
-interception.
+Implemented locally without direct Zoom, Teams, or Google Meet APIs.
 
 Implemented scope:
 
-- Record a 5-10 second microphone clip, stop, and analyse it immediately without WebRTC
-  connection negotiation.
-- Append repeated clips to one rolling conversation session instead of replacing the previous
-  result.
-- Label transcript and risk results by clip and analysis chunk.
-- Extract MFCC and acoustic features for the existing SVM or educational heuristic.
-- Optionally run local Whisper speech-to-text, then score the transcript with the existing
-  transcript model and suspicious-phrase explanations.
-- Load and cache Whisper only when the first clip is submitted.
-- Save a session summary into the AI Report Generator history.
-- Keep continuous `streamlit-webrtc` controls collapsed and disabled as an advanced local
-  experiment.
+- Capture the speaker output of the computer running Streamlit.
+- Use Windows WASAPI loopback, Linux PulseAudio/PipeWire monitor sources, or a virtual cable.
+- Split the local stream into 3-10 second chunks.
+- Run local Whisper transcription, transcript scam analysis, and MFCC/SVM voice analysis.
+- Display rolling confidence, transcript, frequency, MFCC, and alert results.
 
 Limitations:
 
-- Requires browser microphone permission.
-- Does not intercept phone calls, Zoom, Teams, Google Meet, or operating-system audio.
-- Capturing another participant requires speaker playback or a separately configured virtual
-  audio cable.
+- The app must run locally on the same computer that is playing the meeting audio.
+- Streamlit Cloud cannot capture the user's laptop audio.
+- macOS requires BlackHole or another virtual audio device because CoreAudio has no native
+  loopback input.
+- This monitors operating-system audio; it does not integrate with meeting-platform APIs.
+
+## Other Excluded Items
+
+### Near-Real-Time Local System-Audio Monitoring
+
+Implemented as continuous local capture with rolling analysis chunks. This replaces the
+earlier browser-microphone and WebRTC approaches.
+
+Implemented scope:
+
+- Enumerate loopback, monitor, virtual-cable, and microphone input devices.
+- Capture the selected local device in a background thread.
+- Emit and analyse rolling 3-10 second chunks.
+- Extract MFCC and acoustic features for the existing SVM or educational heuristic.
+- Optionally run local Whisper speech-to-text, then score the transcript with the existing
+  transcript model and suspicious-phrase explanations.
+- Refresh the Streamlit analysis panel every second without blocking the rest of the page.
+- Save a session summary into the AI Report Generator history.
+- Stop capture automatically when the user leaves the Live Audio Detection page.
+
+Limitations:
+
+- Requires the app to run locally and access an operating-system audio input.
+- Requires participant permission before recording or analysis.
+- A virtual cable may be required depending on the operating system and audio hardware.
 - Whisper is optional because its model download and CPU cost are too heavy for the default
   capstone installation.
-- The optional advanced WebRTC experiment supports static TURN credentials or short-lived
-  Twilio Network Traversal Service tokens. TURN is required on many cloud, university, VPN,
-  firewall, and carrier-grade NAT networks, so WebRTC is not the supported presentation path.
+- This is near-real-time chunk analysis, not zero-latency interception or automatic call
+  blocking.
 
 ### Suspicious Timestamp Replay In Audio
 
