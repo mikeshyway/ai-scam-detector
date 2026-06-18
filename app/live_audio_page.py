@@ -136,6 +136,17 @@ def _clear_monitor_state() -> None:
     st.session_state["live_monitor_test_error"] = ""
 
 
+def _prepare_next_monitor_capture() -> None:
+    """Reset only the active internal-audio widget, preserving analysed clips."""
+
+    st.session_state["live_monitor_generation"] = (
+        int(st.session_state.get("live_monitor_generation", 0)) + 1
+    )
+    st.session_state["live_monitor_error"] = ""
+    st.session_state["live_monitor_source"] = ""
+    st.session_state["live_monitor_last_wav"] = b""
+
+
 def _recording_chunks(
     audio: np.ndarray,
     sample_rate: int,
@@ -810,15 +821,22 @@ def _render_audio_setup_diagnostics(
 
         meeting_devices = diagnostics.get("meeting_devices", [])
         if isinstance(meeting_devices, list) and meeting_devices:
-            st.caption("Detected meeting/system-audio sources")
+            st.caption("Meeting Capture Devices")
             st.dataframe(
                 pd.DataFrame(
                     [
                         {
+                            "Recommended": "Yes" if item.get("is_recommended") else "No",
+                            "ID": item.get("index", "-"),
                             "Device": item.get("name", "Unknown"),
+                            "Category": item.get("category", "System audio source"),
                             "Host API": item.get("hostapi", "Unknown"),
+                            "Capture support": item.get("capture_support", "Unknown"),
+                            "Rate": item.get("sample_rate", 0),
                             "Input": item.get("max_input_channels", 0),
                             "Output": item.get("max_output_channels", 0),
+                            "WASAPI": "Yes" if item.get("is_wasapi") else "No",
+                            "Input-ready": "Yes" if item.get("can_open_as_input") else "No",
                         }
                         for item in meeting_devices
                         if isinstance(item, dict)
@@ -891,7 +909,16 @@ def _render_audio_setup_diagnostics(
                     )
                     summary = analyse_capture_test(audio, sample_rate)
                 except Exception as exc:
-                    st.session_state["live_monitor_test_error"] = str(exc)
+                    error_message = str(exc)
+                    st.session_state["live_monitor_test_error"] = error_message
+                    log_system_diagnostics(
+                        root,
+                        {
+                            "event": "internal_audio_capture_test_failed",
+                            "device": getattr(selected_device, "label", "Unknown"),
+                            "error": error_message,
+                        },
+                    )
                 else:
                     summary["device"] = selected_device.label
                     st.session_state["live_monitor_test_result"] = summary
@@ -1141,12 +1168,33 @@ def _render_device_audio_monitor(
 
     with st.container(border=True):
         sounddevice_ready = sounddevice_available()
-        devices = list_internal_audio_devices() if sounddevice_ready else []
+        reported_devices = list_internal_audio_devices() if sounddevice_ready else []
+        unsupported_devices = [
+            device
+            for device in reported_devices
+            if getattr(device, "is_unsupported_backend", False)
+        ]
+        devices = [
+            device
+            for device in reported_devices
+            if not getattr(device, "is_unsupported_backend", False)
+        ]
+        stored_device = st.session_state.get("monitor_supported_internal_device")
+        if stored_device is not None and not hasattr(
+            stored_device,
+            "is_unsupported_backend",
+        ):
+            del st.session_state["monitor_supported_internal_device"]
         selected_device = None
         if not sounddevice_ready:
             st.caption(
                 "Setup required: sounddevice is unavailable in this Python environment. "
                 "Open Audio setup and diagnostics below."
+            )
+        elif not devices and unsupported_devices:
+            st.caption(
+                "Only Windows WDM-KS capture devices were detected. They are listed in "
+                "diagnostics but excluded because this app's blocking capture flow is unsupported."
             )
         elif not devices:
             st.caption(
@@ -1157,19 +1205,58 @@ def _render_device_audio_monitor(
                 "Step 1: Select system audio device",
                 devices,
                 format_func=lambda device: device.label,
-                key="monitor_internal_device",
-                help="Choose a speaker/output device on Windows WASAPI, BlackHole on macOS, or a monitor source on Linux.",
+                key="monitor_supported_internal_device",
+                help=(
+                    "Preferred Windows order: WASAPI, DirectSound, then MME. "
+                    "WDM-KS is shown only in diagnostics because blocking capture is unsupported."
+                ),
             )
+            if getattr(selected_device, "is_virtual_device", False):
+                recommendation_text = (
+                    "Meeting Capture Device - prioritized for live transcription and scam detection"
+                    if selected_device.max_input_channels > 0
+                    else "Meeting Capture Device - routing endpoint; select its input-capable pair for capture"
+                )
+                st.markdown(
+                    f"""
+                    <div style="display:flex;align-items:center;gap:9px;margin:2px 0 8px 0;">
+                        <span style="
+                            display:inline-flex;align-items:center;padding:3px 8px;
+                            border-radius:999px;background:rgba(16,185,129,.14);
+                            border:1px solid rgba(52,211,153,.45);color:#6EE7B7;
+                            font-size:11px;font-weight:700;letter-spacing:.04em;
+                            text-transform:uppercase;
+                        ">Recommended</span>
+                        <span style="color:#CBD5E1;font-size:13px;">
+                            {recommendation_text}
+                        </span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
             if selected_device.is_microphone:
                 st.warning(
                     "This appears to be a microphone input. Device Audio Monitor is internal-audio only, so this source is blocked."
+                )
+            elif (
+                getattr(selected_device, "is_virtual_device", False)
+                and selected_device.max_input_channels <= 0
+            ):
+                st.warning(
+                    "This is the virtual playback/routing endpoint and cannot be recorded directly. "
+                    "Choose the paired CABLE/VoiceMeeter/BlackHole endpoint with input channels."
                 )
             elif not selected_device.is_internal_candidate:
                 st.warning(
                     "This device is not recognised as system/internal audio. Choose a speaker output, monitor source, BlackHole, Stereo Mix, or virtual cable."
                 )
             else:
-                st.caption(f"Selected internal source: {selected_device.label}")
+                st.caption(
+                    f"Selected internal source: {selected_device.label} | "
+                    f"ID {selected_device.index} | {selected_device.default_samplerate} Hz | "
+                    f"input {selected_device.max_input_channels} / "
+                    f"output {selected_device.max_output_channels} channels"
+                )
 
         setting_a, setting_b, setting_c = st.columns(3)
         with setting_a:
@@ -1221,6 +1308,11 @@ def _render_device_audio_monitor(
                 "Internal capture setup needed: install sounddevice with "
                 "`pip install sounddevice soundfile`, then restart Streamlit."
             )
+        elif not devices and unsupported_devices:
+            capture_problem = (
+                "Only Windows WDM-KS sources are available, and their blocking API is unsupported. "
+                "Enable a WASAPI/DirectSound/MME duplicate or configure VB-Cable/VoiceMeeter."
+            )
         elif not devices:
             capture_problem = (
                 "Internal capture setup needed: no local audio devices were reported. "
@@ -1232,6 +1324,14 @@ def _render_device_audio_monitor(
             capture_problem = (
                 "Device Audio Monitor blocks microphone inputs. Select a speaker output, "
                 "Stereo Mix, BlackHole, monitor source, or virtual cable instead."
+            )
+        elif (
+            getattr(selected_device, "is_virtual_device", False)
+            and selected_device.max_input_channels <= 0
+        ):
+            capture_problem = (
+                "Select the input-capable endpoint of this virtual audio device. The current "
+                "CABLE/VoiceMeeter/BlackHole endpoint is for playback or routing only."
             )
         elif not selected_device.is_internal_candidate:
             capture_problem = (
@@ -1258,16 +1358,21 @@ def _render_device_audio_monitor(
         progress_slot = st.empty()
         action_a, action_b, action_c = st.columns(3)
         captured_wav = None
+        monitor_generation = int(st.session_state["live_monitor_generation"])
         with action_a:
             if st.button(
                 f"Start {chunk_seconds}s internal capture",
                 type="primary",
                 use_container_width=True,
+                key=f"start_internal_capture_{monitor_generation}",
             ):
                 if capture_problem:
                     st.session_state["live_monitor_error"] = capture_problem
                 else:
-                    progress = progress_slot.progress(0.0, text="Speaker output capture starting...")
+                    progress = progress_slot.progress(
+                        0.0,
+                        text="Speaker output capture starting...",
+                    )
 
                     def update_meter(progress_value: float, level: float) -> None:
                         meter = min(1.0, max(0.0, level * 10.0))
@@ -1292,7 +1397,16 @@ def _render_device_audio_monitor(
                         st.session_state["live_monitor_last_wav"] = captured_wav
                         st.session_state["live_monitor_source"] = selected_device.label
                     except Exception as exc:
-                        st.session_state["live_monitor_error"] = str(exc)
+                        error_message = str(exc)
+                        st.session_state["live_monitor_error"] = error_message
+                        log_system_diagnostics(
+                            root,
+                            {
+                                "event": "internal_audio_capture_failed",
+                                "device": getattr(selected_device, "label", "Unknown"),
+                                "error": error_message,
+                            },
+                        )
                     else:
                         _render_internal_audio_meter(
                             meter_slot,
@@ -1303,17 +1417,26 @@ def _render_device_audio_monitor(
                         )
                         progress.progress(1.0, text="Internal capture complete")
         with action_b:
-            if st.button("Stop capture session", use_container_width=True):
-                st.caption("Capture session stopped. Existing recordings remain available below.")
+            if st.session_state.get("live_monitor_last_wav") and st.button(
+                "Capture another sample",
+                use_container_width=True,
+                key=f"next_internal_capture_{monitor_generation}",
+            ):
+                _prepare_next_monitor_capture()
+                st.rerun()
         with action_c:
-            if st.button("Clear session", use_container_width=True):
+            if st.button(
+                "Clear session",
+                use_container_width=True,
+                key=f"clear_internal_capture_{monitor_generation}",
+            ):
                 _clear_monitor_state()
                 st.rerun()
 
         uploaded_wav = st.file_uploader(
             "Fallback: upload a WAV chunk",
             type=["wav"],
-            key="monitor_fallback_wav",
+            key=f"monitor_fallback_wav_{monitor_generation}",
             help="Use this when local internal capture is unavailable in the current environment.",
         )
         if uploaded_wav is not None:

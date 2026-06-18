@@ -127,6 +127,14 @@ Implemented scope:
   capture dependencies are missing.
 - Test the selected source for three seconds and report duration, RMS, peak level, silence,
   playback, and pass/warning/error status.
+- Probe multiple sample-rate, channel, and latency combinations for supported Windows Stereo Mix
+  sources while letting PortAudio choose a compatible stream buffer size.
+- Display device ID, host API, sample rate, channels, WASAPI/input readiness, and preserve exact
+  PortAudio failures in `logs/system_diagnostics.log`.
+- Detect CABLE/VB-Cable, VoiceMeeter, and BlackHole endpoints as Meeting Capture Devices, add a
+  Recommended badge, and prioritize input-capable virtual devices for transcription/scam analysis.
+- Exclude Windows WDM-KS devices from blocking capture after PortAudio reported error `-9999`,
+  keep them visible as unsupported diagnostics rows, and prefer WASAPI, DirectSound, then MME.
 - Append non-fatal diagnostic snapshots to `logs/system_diagnostics.log`.
 - Save each chunk as a temporary WAV for Whisper.
 - Extract MFCC and acoustic features for the existing SVM or educational heuristic.
@@ -134,6 +142,8 @@ Implemented scope:
   transcript model and suspicious-phrase explanations.
 - Use per-tab recording carousels so Voice Recorder and Device Audio Monitor clips can be
   reviewed separately.
+- Use `live_monitor_generation` like Voice Recorder's `live_recorder_generation`: capturing
+  another sample resets only the active input/playback widget while preserving analysed clips.
 - Continue audio-only analysis if Whisper cannot transcribe because `ffmpeg` is missing.
 - Save a session summary into the AI Report Generator history.
 

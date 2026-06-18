@@ -98,6 +98,22 @@ The **Test selected device for 3 seconds** action verifies duration, RMS/peak le
 WAV playback, and capture permission. Diagnostic snapshots are appended to
 `logs/system_diagnostics.log`; log files are excluded from Git.
 
+On Windows, test an input-capable source such as Stereo Mix or a virtual-cable output before
+starting monitoring. The capture helper probes compatible sample rates, mono/stereo channels,
+and latency settings. If every attempt fails, the page displays and logs the exact PortAudio
+exception instead of a generic device message.
+
+Windows capture backends are prioritized in this order: **WASAPI**, **DirectSound**, then
+**MME**. Windows WDM-KS devices remain visible in diagnostics but are excluded from the capture
+selector because PortAudio reports `Blocking API not supported yet` for this workflow. When the
+same device name is exposed by several host APIs, the host API remains visible in its label.
+
+Devices containing `CABLE`, `VB-Cable`, `VoiceMeeter`, or `BlackHole` are grouped as
+**Meeting Capture Devices**, receive a **Recommended** badge, and are prioritized in the audio
+device selector. Input-capable virtual endpoints are placed first because they can feed live
+transcription and scam detection; playback-only routing endpoints remain labelled but cannot be
+captured directly.
+
 Both Live Audio tabs include a recording carousel so previous clips can be reviewed one at a
 time with their own transcript, flags, risk score, MFCC heatmap, and spectrum.
 

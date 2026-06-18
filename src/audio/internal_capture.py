@@ -18,15 +18,41 @@ import numpy as np
 
 TARGET_SAMPLE_RATE = 16_000
 _MICROPHONE_TERMS = ("mic", "microphone", "array", "webcam", "camera")
-_INTERNAL_TERMS = (
-    "blackhole",
+_VIRTUAL_DEVICE_TERMS = (
     "cable",
+    "vb-cable",
+    "vb cable",
+    "voicemeeter",
+    "blackhole",
+)
+_INTERNAL_TERMS = (
+    *_VIRTUAL_DEVICE_TERMS,
     "loopback",
     "monitor",
     "stereo mix",
-    "voicemeeter",
     "what u hear",
 )
+
+
+def is_unsupported_capture_host(hostapi: str) -> bool:
+    """Return True for Windows backends incompatible with this blocking workflow."""
+
+    return "wdm-ks" in hostapi.casefold()
+
+
+def host_api_priority(hostapi: str) -> int:
+    """Prefer stable Windows capture APIs and place WDM-KS last."""
+
+    lowered = hostapi.casefold()
+    if "wdm-ks" in lowered:
+        return 99
+    if "wasapi" in lowered:
+        return 0
+    if "directsound" in lowered:
+        return 1
+    if "mme" in lowered:
+        return 2
+    return 10
 
 
 @dataclass(frozen=True)
@@ -42,14 +68,36 @@ class InternalAudioDevice:
     kind: str
     is_microphone: bool
     is_internal_candidate: bool
+    is_virtual_device: bool = False
+    is_recommended: bool = False
+    is_unsupported_backend: bool = False
+    host_priority: int = 10
 
     @property
     def label(self) -> str:
+        if getattr(self, "is_unsupported_backend", False):
+            return (
+                f"{self.name} [WDM-KS unsupported for blocking capture | "
+                f"{self.hostapi}]"
+            )
+        if getattr(self, "is_virtual_device", False):
+            readiness = "Input-ready" if self.max_input_channels > 0 else "Routing endpoint"
+            return (
+                f"[Recommended] {self.name} "
+                f"[Meeting Capture Device | {readiness} | {self.hostapi}]"
+            )
         return f"{self.name} [{self.kind} | {self.hostapi}]"
 
 
 def _normalise_name(name: str) -> str:
     return name.casefold()
+
+
+def is_virtual_audio_device(name: str) -> bool:
+    """Identify virtual routing devices suited to meeting-audio capture."""
+
+    lowered = _normalise_name(name)
+    return any(term in lowered for term in _VIRTUAL_DEVICE_TERMS)
 
 
 def classify_device(
@@ -109,6 +157,8 @@ def list_internal_audio_devices() -> list[InternalAudioDevice]:
             max_input_channels=max_input,
             max_output_channels=max_output,
         )
+        is_virtual = is_virtual_audio_device(str(device["name"]))
+        unsupported_backend = is_unsupported_capture_host(hostapi)
         if max_input <= 0 and max_output <= 0:
             continue
         devices.append(
@@ -122,12 +172,25 @@ def list_internal_audio_devices() -> list[InternalAudioDevice]:
                 kind=kind,
                 is_microphone=is_microphone,
                 is_internal_candidate=is_internal,
+                is_virtual_device=is_virtual,
+                is_recommended=is_virtual and not unsupported_backend,
+                is_unsupported_backend=unsupported_backend,
+                host_priority=host_api_priority(hostapi),
             )
         )
 
     return sorted(
         devices,
         key=lambda item: (
+            getattr(item, "is_unsupported_backend", False),
+            0
+            if getattr(item, "is_virtual_device", False) and item.max_input_channels > 0
+            else 1
+            if item.is_internal_candidate
+            else 2
+            if getattr(item, "is_virtual_device", False)
+            else 3,
+            getattr(item, "host_priority", 10),
             not item.is_internal_candidate,
             item.is_microphone,
             item.name.casefold(),
@@ -185,7 +248,7 @@ def wav_bytes_from_audio(audio: np.ndarray, sample_rate: int = TARGET_SAMPLE_RAT
 
 
 def _stream_settings(device: InternalAudioDevice):
-    """Return sounddevice stream settings for internal capture."""
+    """Return platform settings for internal capture."""
 
     import sounddevice as sd
 
@@ -195,6 +258,35 @@ def _stream_settings(device: InternalAudioDevice):
         extra_settings = sd.WasapiSettings(auto_convert=True)
         channels = max(1, min(2, device.max_output_channels))
     return extra_settings, channels
+
+
+def _capture_configurations(device: InternalAudioDevice) -> list[dict[str, object]]:
+    """Build conservative stream combinations for picky Windows host APIs."""
+
+    extra_settings, preferred_channels = _stream_settings(device)
+    rates = [int(device.default_samplerate or 48_000), 48_000, 44_100]
+    channels = [preferred_channels]
+    if preferred_channels > 1:
+        channels.append(1)
+
+    configurations = []
+    seen = set()
+    for sample_rate in rates:
+        for channel_count in channels:
+            for latency in ("high", None):
+                signature = (sample_rate, channel_count, latency)
+                if signature in seen:
+                    continue
+                seen.add(signature)
+                configurations.append(
+                    {
+                        "samplerate": sample_rate,
+                        "channels": channel_count,
+                        "latency": latency,
+                        "extra_settings": extra_settings,
+                    }
+                )
+    return configurations
 
 
 def record_internal_chunk(
@@ -216,6 +308,14 @@ def record_internal_chunk(
             "Selected device is not an internal/system-audio source. Choose a "
             "WASAPI output, monitor source, BlackHole, Stereo Mix, or virtual cable."
         )
+    if getattr(device, "is_unsupported_backend", False) or is_unsupported_capture_host(
+        device.hostapi
+    ):
+        raise RuntimeError(
+            f"'{device.name}' uses {device.hostapi}, which does not support the blocking "
+            "capture workflow used by this app. Select the WASAPI, DirectSound, or MME "
+            "version of the device, or use an input-capable virtual cable."
+        )
 
     try:
         import sounddevice as sd
@@ -224,37 +324,75 @@ def record_internal_chunk(
 
     minimum_seconds = max(1, min(5, int(minimum_seconds)))
     seconds = max(minimum_seconds, min(10, int(seconds)))
-    source_rate = int(device.default_samplerate or 48_000)
-    extra_settings, channels = _stream_settings(device)
-    block_frames = max(512, int(source_rate * 0.25))
+    stream = None
+    selected_configuration: dict[str, object] | None = None
+    attempt_errors = []
+    for configuration in _capture_configurations(device):
+        candidate = None
+        stream_kwargs = {
+            "samplerate": int(configuration["samplerate"]),
+            "device": device.index,
+            "channels": int(configuration["channels"]),
+            "dtype": "float32",
+            "blocksize": 0,
+        }
+        if configuration["latency"] is not None:
+            stream_kwargs["latency"] = configuration["latency"]
+        if configuration["extra_settings"] is not None:
+            stream_kwargs["extra_settings"] = configuration["extra_settings"]
+        try:
+            candidate = sd.InputStream(**stream_kwargs)
+            candidate.start()
+        except Exception as exc:
+            if candidate is not None:
+                try:
+                    candidate.close()
+                except Exception:
+                    pass
+            attempt_errors.append(
+                f"{configuration['samplerate']} Hz/{configuration['channels']} ch/"
+                f"{configuration['latency'] or 'default'}: {type(exc).__name__}: {exc}"
+            )
+            continue
+        stream = candidate
+        selected_configuration = configuration
+        break
+
+    if stream is None or selected_configuration is None:
+        details = " | ".join(attempt_errors[-6:]) or "No compatible stream configuration."
+        raise RuntimeError(
+            f"Could not open '{device.name}' (ID {device.index}, {device.hostapi}) as an "
+            f"internal-audio input. PortAudio attempts: {details}"
+        )
+
+    source_rate = int(selected_configuration["samplerate"])
+    block_frames = max(512, int(source_rate * 0.1))
     total_frames = int(source_rate * seconds)
     captured = []
     captured_frames = 0
-
     try:
-        with sd.InputStream(
-            samplerate=source_rate,
-            device=device.index,
-            channels=channels,
-            dtype="float32",
-            extra_settings=extra_settings,
-            blocksize=block_frames,
-        ) as stream:
-            while captured_frames < total_frames:
-                frames_to_read = min(block_frames, total_frames - captured_frames)
-                block, _overflowed = stream.read(frames_to_read)
-                block = np.asarray(block, dtype=np.float32)
-                captured.append(block)
-                captured_frames += block.shape[0]
-                if progress_callback is not None:
-                    level = float(np.sqrt(np.mean(np.square(normalise_audio(block)))))
-                    progress_callback(captured_frames / total_frames, level)
+        while captured_frames < total_frames:
+            frames_to_read = min(block_frames, total_frames - captured_frames)
+            block, overflowed = stream.read(frames_to_read)
+            block = np.asarray(block, dtype=np.float32)
+            captured.append(block)
+            captured_frames += block.shape[0]
+            if progress_callback is not None:
+                level = float(np.sqrt(np.mean(np.square(normalise_audio(block)))))
+                progress_callback(captured_frames / total_frames, level)
+            if overflowed:
+                continue
     except Exception as exc:
         raise RuntimeError(
-            "Internal audio capture could not start for this device. On Windows, "
-            "choose a WASAPI speaker/output device. On macOS, route audio through "
-            "BlackHole. On Linux, choose a PulseAudio/PipeWire monitor source."
+            f"Capture started on '{device.name}' but reading failed: "
+            f"{type(exc).__name__}: {exc}"
         ) from exc
+    finally:
+        try:
+            stream.stop()
+        except Exception:
+            pass
+        stream.close()
 
     raw = normalise_audio(np.concatenate(captured)) if captured else np.empty(0, dtype=np.float32)
     if raw.size == 0:
@@ -267,6 +405,9 @@ __all__ = [
     "InternalAudioDevice",
     "TARGET_SAMPLE_RATE",
     "classify_device",
+    "host_api_priority",
+    "is_unsupported_capture_host",
+    "is_virtual_audio_device",
     "list_internal_audio_devices",
     "normalise_audio",
     "record_internal_chunk",

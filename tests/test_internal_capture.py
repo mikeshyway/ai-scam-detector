@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import io
+import sys
+import types
 import unittest
 import wave
+from unittest.mock import patch
 
 import numpy as np
 
 from src.audio.internal_capture import (
+    InternalAudioDevice,
     classify_device,
+    host_api_priority,
+    is_virtual_audio_device,
+    list_internal_audio_devices,
     normalise_audio,
+    record_internal_chunk,
     resample_audio,
     wav_bytes_from_audio,
 )
@@ -74,6 +82,148 @@ class InternalCaptureTests(unittest.TestCase):
             self.assertEqual(wav_file.getsampwidth(), 2)
             self.assertEqual(wav_file.getframerate(), sample_rate)
             self.assertEqual(wav_file.getnframes(), sample_rate)
+
+    def test_capture_retries_after_incompatible_stream_configuration(self) -> None:
+        attempts = []
+
+        class FakeStream:
+            def __init__(self, channels: int) -> None:
+                self.channels = channels
+
+            def start(self) -> None:
+                return None
+
+            def read(self, frames: int):
+                return np.full((frames, self.channels), 0.05, dtype=np.float32), False
+
+            def stop(self) -> None:
+                return None
+
+            def close(self) -> None:
+                return None
+
+        def input_stream(**kwargs):
+            attempts.append(kwargs)
+            if len(attempts) == 1:
+                raise RuntimeError("unsupported latency")
+            return FakeStream(int(kwargs["channels"]))
+
+        fake_sounddevice = types.SimpleNamespace(InputStream=input_stream)
+        device = InternalAudioDevice(
+            index=7,
+            name="Stereo Mix",
+            hostapi="Windows DirectSound",
+            max_input_channels=2,
+            max_output_channels=0,
+            default_samplerate=44_100,
+            kind="Internal monitor input",
+            is_microphone=False,
+            is_internal_candidate=True,
+        )
+
+        with patch.dict(sys.modules, {"sounddevice": fake_sounddevice}):
+            audio, sample_rate, wav_bytes = record_internal_chunk(
+                device,
+                seconds=1,
+                minimum_seconds=1,
+            )
+
+        self.assertGreaterEqual(len(attempts), 2)
+        self.assertEqual(sample_rate, 16_000)
+        self.assertEqual(audio.size, 16_000)
+        self.assertTrue(wav_bytes.startswith(b"RIFF"))
+
+    def test_virtual_meeting_devices_are_recommended_and_prioritized(self) -> None:
+        for name in (
+            "CABLE Output (VB-Audio Virtual Cable)",
+            "VB-Cable Monitor",
+            "VoiceMeeter Output",
+            "BlackHole 2ch",
+        ):
+            self.assertTrue(is_virtual_audio_device(name))
+
+        fake_devices = [
+            {
+                "index": 3,
+                "name": "Stereo Mix",
+                "hostapi": 2,
+                "max_input_channels": 2,
+                "max_output_channels": 0,
+                "default_samplerate": 44_100,
+            },
+            {
+                "index": 9,
+                "name": "CABLE Output (VB-Audio Virtual Cable)",
+                "hostapi": 1,
+                "max_input_channels": 2,
+                "max_output_channels": 0,
+                "default_samplerate": 48_000,
+            },
+        ]
+        fake_sounddevice = types.SimpleNamespace(
+            query_hostapis=lambda: [
+                {"name": "Windows WASAPI"},
+                {"name": "Windows DirectSound"},
+                {"name": "MME"},
+            ],
+            query_devices=lambda: fake_devices,
+        )
+
+        with patch.dict(sys.modules, {"sounddevice": fake_sounddevice}):
+            devices = list_internal_audio_devices()
+
+        self.assertEqual(devices[0].index, 9)
+        self.assertTrue(devices[0].is_recommended)
+        self.assertIn("[Recommended]", devices[0].label)
+        self.assertIn("Meeting Capture Device", devices[0].label)
+
+    def test_wdm_ks_is_unsupported_and_sorted_after_stable_backends(self) -> None:
+        fake_devices = [
+            {
+                "index": 14,
+                "name": "Stereo Mix",
+                "hostapi": 0,
+                "max_input_channels": 2,
+                "max_output_channels": 0,
+                "default_samplerate": 48_000,
+            },
+            {
+                "index": 15,
+                "name": "Stereo Mix",
+                "hostapi": 1,
+                "max_input_channels": 2,
+                "max_output_channels": 0,
+                "default_samplerate": 48_000,
+            },
+            {
+                "index": 16,
+                "name": "Stereo Mix",
+                "hostapi": 2,
+                "max_input_channels": 2,
+                "max_output_channels": 0,
+                "default_samplerate": 44_100,
+            },
+        ]
+        fake_sounddevice = types.SimpleNamespace(
+            query_hostapis=lambda: [
+                {"name": "Windows WDM-KS"},
+                {"name": "Windows WASAPI"},
+                {"name": "MME"},
+            ],
+            query_devices=lambda: fake_devices,
+        )
+
+        with patch.dict(sys.modules, {"sounddevice": fake_sounddevice}):
+            devices = list_internal_audio_devices()
+
+        self.assertEqual([device.index for device in devices], [15, 16, 14])
+        self.assertFalse(devices[0].is_unsupported_backend)
+        self.assertTrue(devices[-1].is_unsupported_backend)
+        self.assertIn("WDM-KS unsupported", devices[-1].label)
+        self.assertLess(host_api_priority("Windows WASAPI"), host_api_priority("MME"))
+
+        with self.assertRaisesRegex(RuntimeError, "blocking capture workflow"):
+            record_internal_chunk(devices[-1], seconds=1, minimum_seconds=1)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,12 @@ from typing import Any
 
 import numpy as np
 
+from src.audio.internal_capture import (
+    host_api_priority,
+    is_unsupported_capture_host,
+    is_virtual_audio_device,
+)
+
 
 def _package_check(
     module_name: str,
@@ -93,22 +99,22 @@ def get_audio_devices() -> list[dict[str, Any]]:
             max_input = int(device.get("max_input_channels", 0))
             max_output = int(device.get("max_output_channels", 0))
             internal_terms = (
-                "blackhole",
-                "cable",
                 "loopback",
                 "monitor",
                 "stereo mix",
-                "voicemeeter",
                 "what u hear",
             )
             microphone_terms = ("mic", "microphone", "array", "webcam", "camera")
-            has_internal_name = any(term in lowered for term in internal_terms)
+            is_virtual = is_virtual_audio_device(name)
+            has_internal_name = is_virtual or any(term in lowered for term in internal_terms)
             is_microphone = (
                 max_input > 0
                 and any(term in lowered for term in microphone_terms)
                 and not has_internal_name
             )
-            is_windows_output = "wasapi" in hostapi.casefold() and max_output > 0
+            is_wasapi = "wasapi" in hostapi.casefold()
+            unsupported_backend = is_unsupported_capture_host(hostapi)
+            is_windows_output = is_wasapi and max_output > 0
             is_internal = is_windows_output or (has_internal_name and max_input > 0)
             devices.append(
                 {
@@ -120,8 +126,22 @@ def get_audio_devices() -> list[dict[str, Any]]:
                     "sample_rate": int(float(device.get("default_samplerate", 0) or 0)),
                     "is_microphone": is_microphone,
                     "is_internal_candidate": is_internal,
+                    "is_wasapi": is_wasapi,
+                    "is_loopback_candidate": is_internal,
+                    "can_open_as_input": max_input > 0,
+                    "is_virtual_device": is_virtual,
+                    "is_recommended": is_virtual and not unsupported_backend,
+                    "is_unsupported_backend": unsupported_backend,
+                    "host_priority": host_api_priority(hostapi),
+                    "capture_support": (
+                        "Unsupported: WDM-KS blocking API"
+                        if unsupported_backend
+                        else "Supported backend"
+                    ),
                     "category": (
-                        "Meeting capture"
+                        "Meeting Capture Devices"
+                        if is_virtual
+                        else "System audio source"
                         if is_internal
                         else "Microphone"
                         if is_microphone
@@ -129,7 +149,23 @@ def get_audio_devices() -> list[dict[str, Any]]:
                     ),
                 }
             )
-        return devices
+        return sorted(
+            devices,
+            key=lambda item: (
+                item["is_unsupported_backend"],
+                0
+                if item["is_virtual_device"] and item["can_open_as_input"]
+                else 1
+                if item["is_internal_candidate"]
+                else 2
+                if item["is_virtual_device"]
+                else 3,
+                item["host_priority"],
+                not item["is_internal_candidate"],
+                item["is_microphone"],
+                str(item["name"]).casefold(),
+            ),
+        )
     except Exception:
         return []
 
@@ -170,19 +206,44 @@ def build_audio_diagnostics() -> dict[str, Any]:
         check_whisper(),
     ]
     devices = get_audio_devices()
-    meeting_devices = [item for item in devices if item["is_internal_candidate"]]
+    meeting_devices = [
+        item
+        for item in devices
+        if item["is_virtual_device"] or item["is_internal_candidate"]
+    ]
+    capture_inputs = [
+        item
+        for item in meeting_devices
+        if item["is_internal_candidate"]
+        and item["can_open_as_input"]
+        and not item["is_unsupported_backend"]
+    ]
     microphones = [item for item in devices if item["is_microphone"]]
     required_ready = all(
         item["available"]
         for item in dependencies
         if item["name"] in {"sounddevice", "soundfile"}
     )
-    if required_ready and meeting_devices:
+    if required_ready and capture_inputs:
         capture_status = "PASS"
-        capture_message = "Internal system-audio capture is ready for a device test."
+        capture_message = (
+            "An internal/loopback input is available. Run the 3-second test before monitoring."
+        )
     elif not required_ready:
         capture_status = "ERROR"
         capture_message = "Install the missing Python audio dependencies, then refresh checks."
+    elif any(item["is_unsupported_backend"] for item in meeting_devices):
+        capture_status = "WARNING"
+        capture_message = (
+            "Only WDM-KS meeting inputs were detected. This backend reports 'Blocking API not "
+            "supported yet'; choose a WASAPI, DirectSound, or MME duplicate, or use a virtual cable."
+        )
+    elif meeting_devices:
+        capture_status = "WARNING"
+        capture_message = (
+            "A WASAPI speaker output was detected, but no input-capable loopback source is "
+            "available. Enable Stereo Mix or route audio through a virtual cable."
+        )
     else:
         capture_status = "WARNING"
         capture_message = (
