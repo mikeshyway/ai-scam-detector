@@ -82,8 +82,12 @@ recorder. **Device Audio Monitor** is a separate in-device short recording mode 
 Whisper transcription, runs transcript and audio-risk analysis, and lets the user record another
 chunk to simulate near-real-time monitoring.
 
+Both Live Audio tabs include a recording carousel so previous clips can be reviewed one at a
+time with their own transcript, flags, risk score, MFCC heatmap, and spectrum.
+
 If Whisper is unavailable, Device Audio Monitor keeps a demo fallback transcript mode so the
-page remains usable for presentation.
+page remains usable for presentation. Whisper also requires the `ffmpeg` executable to be
+installed and available on PATH when transcribing temporary audio files.
 
 On Windows PowerShell:
 

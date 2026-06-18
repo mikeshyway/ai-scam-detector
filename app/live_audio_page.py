@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -78,13 +79,13 @@ def _load_whisper_model(model_size: str):
 
 def _init_live_state() -> None:
     defaults: dict[str, Any] = {
-        "live_audio_mode": "Voice recorder",
         "live_recorder_results": [],
         "live_recorder_signatures": [],
         "live_recorder_clip_count": 0,
         "live_recorder_generation": 0,
         "live_recorder_error": "",
         "live_recorder_saved_signature": "",
+        "live_recorder_carousel_index": 0,
         "live_monitor_results": [],
         "live_monitor_signatures": [],
         "live_monitor_clip_count": 0,
@@ -92,6 +93,7 @@ def _init_live_state() -> None:
         "live_monitor_error": "",
         "live_monitor_saved_signature": "",
         "live_monitor_source": "",
+        "live_monitor_carousel_index": 0,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -104,6 +106,7 @@ def _clear_recorder_state() -> None:
     st.session_state["live_recorder_clip_count"] = 0
     st.session_state["live_recorder_error"] = ""
     st.session_state["live_recorder_saved_signature"] = ""
+    st.session_state["live_recorder_carousel_index"] = 0
     st.session_state["live_recorder_generation"] = (
         int(st.session_state.get("live_recorder_generation", 0)) + 1
     )
@@ -119,6 +122,7 @@ def _clear_monitor_state() -> None:
     st.session_state["live_monitor_error"] = ""
     st.session_state["live_monitor_saved_signature"] = ""
     st.session_state["live_monitor_source"] = ""
+    st.session_state["live_monitor_carousel_index"] = 0
 
 
 def _recording_chunks(
@@ -174,6 +178,12 @@ def _transcribe_recording_file(
 
     if whisper_model is None:
         return ""
+    if shutil.which("ffmpeg") is None:
+        raise RuntimeError(
+            "ffmpeg is not installed or not on PATH. Whisper needs ffmpeg to decode "
+            "the recorded WAV before transcription. Install ffmpeg, restart the "
+            "terminal/Streamlit, or use Demo fallback / Audio only."
+        )
     temp_path = ""
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
@@ -561,6 +571,81 @@ def _render_dashboard_section(
     )
 
 
+def _recording_groups(results: list[dict[str, object]]) -> list[tuple[int, list[dict[str, object]]]]:
+    groups: dict[int, list[dict[str, object]]] = {}
+    for result in results:
+        clip_number = int(result.get("clip", 1))
+        groups.setdefault(clip_number, []).append(result)
+    return sorted(groups.items(), key=lambda item: item[0])
+
+
+def _render_recording_carousel(
+    results: list[dict[str, object]],
+    risk_threshold: int,
+    *,
+    state_key: str,
+    title: str,
+    transcript_heading: str,
+    frequency_heading: str,
+    latest_title: str,
+) -> None:
+    groups = _recording_groups(results)
+    if not groups:
+        return
+
+    current_index = int(st.session_state.get(state_key, len(groups) - 1))
+    current_index = max(0, min(current_index, len(groups) - 1))
+    st.session_state[state_key] = current_index
+    clip_number, clip_results = groups[current_index]
+    peak = max(float(item.get("risk", 0)) for item in clip_results)
+    flags = sorted(
+        {
+            str(flag)
+            for item in clip_results
+            for flag in item.get("flags", [])
+            if str(flag).strip()
+        }
+    )
+
+    render_section_header(
+        title,
+        f"Recording {current_index + 1} of {len(groups)} | Clip {clip_number} | Peak risk {peak:.1f}%",
+        "Recording carousel",
+    )
+    nav_left, nav_mid, nav_right = st.columns([0.2, 0.6, 0.2])
+    with nav_left:
+        if st.button(
+            "Previous",
+            use_container_width=True,
+            disabled=current_index == 0,
+            key=f"{state_key}_prev",
+        ):
+            st.session_state[state_key] = current_index - 1
+            st.rerun()
+    with nav_mid:
+        st.markdown(
+            f"**Clip {clip_number}** | {len(clip_results)} chunk(s) | "
+            f"Flags: {', '.join(flags) if flags else 'none'}"
+        )
+    with nav_right:
+        if st.button(
+            "Next",
+            use_container_width=True,
+            disabled=current_index >= len(groups) - 1,
+            key=f"{state_key}_next",
+        ):
+            st.session_state[state_key] = current_index + 1
+            st.rerun()
+
+    _render_dashboard_section(
+        clip_results,
+        risk_threshold,
+        transcript_heading=transcript_heading,
+        frequency_heading=frequency_heading,
+        latest_title=latest_title,
+    )
+
+
 def _session_signature(results: list[dict[str, object]]) -> str:
     return json.dumps(
         [
@@ -727,6 +812,10 @@ def _render_voice_recorder(
                     st.session_state["live_recorder_signatures"] = signatures[-60:]
                     st.session_state["live_recorder_clip_count"] = clip
                     st.session_state["live_recorder_saved_signature"] = ""
+                    st.session_state["live_recorder_carousel_index"] = max(
+                        0,
+                        len(_recording_groups(results)) - 1,
+                    )
                     st.session_state["live_recorder_error"] = ""
                     render_analysis_ready(f"Voice sample {clip} analysed")
 
@@ -735,9 +824,11 @@ def _render_voice_recorder(
     elif not results:
         st.caption("Your transcript, confidence scores, and audio visualisations will appear after recording.")
 
-    _render_dashboard_section(
+    _render_recording_carousel(
         results,
         risk_threshold,
+        state_key="live_recorder_carousel_index",
+        title="Voice recording analysis",
         transcript_heading="Recorded transcript and chunks",
         frequency_heading="Latest frequency spectrum",
         latest_title="Latest recorded chunk {chunk}",
@@ -822,11 +913,14 @@ def _render_device_audio_monitor(
             )
             return
 
+        st.caption(
+            "The recorder below shows live input activity while recording. The speaker icon marks this as the in-device short-recording workflow."
+        )
         audio_bytes = audio_recorder(
             text="Click to record 5-10 seconds",
             recording_color="#ef4444",
             neutral_color="#6366f1",
-            icon_name="microphone",
+            icon_name="volume-up",
             icon_size="2x",
             key=f"device_audio_recorder_{int(st.session_state['live_monitor_generation'])}",
         )
@@ -862,14 +956,19 @@ def _render_device_audio_monitor(
                 try:
                     whisper_model = None
                     full_transcript = ""
+                    warning_message = ""
                     if transcript_source == "Local Whisper":
                         whisper_model = _load_whisper_model(whisper_size)
                         if whisper_model is None:
                             raise RuntimeError("Local Whisper could not be loaded.")
-                        full_transcript = _transcribe_recording_file(
-                            audio_bytes,
-                            whisper_model,
-                        )
+                        try:
+                            full_transcript = _transcribe_recording_file(
+                                audio_bytes,
+                                whisper_model,
+                            )
+                        except RuntimeError as exc:
+                            warning_message = str(exc)
+                            full_transcript = ""
                     elif transcript_source == "Demo fallback":
                         full_transcript = demo_transcript
 
@@ -896,17 +995,27 @@ def _render_device_audio_monitor(
                     st.session_state["live_monitor_signatures"] = signatures[-60:]
                     st.session_state["live_monitor_clip_count"] = clip
                     st.session_state["live_monitor_saved_signature"] = ""
-                    st.session_state["live_monitor_error"] = ""
+                    st.session_state["live_monitor_carousel_index"] = max(
+                        0,
+                        len(_recording_groups(results)) - 1,
+                    )
+                    st.session_state["live_monitor_error"] = warning_message
                     render_analysis_ready(f"Audio chunk {clip} analysed")
 
     if st.session_state.get("live_monitor_error"):
-        st.error(f"Device audio analysis failed: {st.session_state['live_monitor_error']}")
+        message = str(st.session_state["live_monitor_error"])
+        if "ffmpeg" in message.casefold():
+            st.warning(message)
+        else:
+            st.error(f"Device audio analysis failed: {message}")
     elif not results:
         st.caption("Risk score, transcript, suspicious flags, and audio charts appear after recording.")
 
-    _render_dashboard_section(
+    _render_recording_carousel(
         results,
         risk_threshold,
+        state_key="live_monitor_carousel_index",
+        title="In-device recording analysis",
         transcript_heading="Recorded device-audio transcript",
         frequency_heading="Latest in-device audio spectrum",
         latest_title="Latest local audio chunk {chunk}",
@@ -927,16 +1036,11 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
     _init_live_state()
     render_section_header(
         "Live audio detection",
-        "Choose the original browser voice recorder or the in-device short recording workflow.",
+        "Use separate tabs for the original Voice Recorder and the in-device short recording workflow.",
         "Audio analysis",
     )
-    mode = st.segmented_control(
-        "Audio source",
-        ["Voice recorder", "Device audio monitor"],
-        key="live_audio_mode",
-        label_visibility="collapsed",
-    )
-    if mode == "Device audio monitor":
-        _render_device_audio_monitor(root, history)
-    else:
+    voice_tab, device_tab = st.tabs(["Voice Recorder", "Device Audio Monitor"])
+    with voice_tab:
         _render_voice_recorder(root, history)
+    with device_tab:
+        _render_device_audio_monitor(root, history)

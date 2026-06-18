@@ -118,6 +118,9 @@ Implemented scope:
 - Extract MFCC and acoustic features for the existing SVM or educational heuristic.
 - Optionally run local Whisper speech-to-text, then score the transcript with the existing
   transcript model and suspicious-phrase explanations.
+- Use per-tab recording carousels so Voice Recorder and Device Audio Monitor clips can be
+  reviewed separately.
+- Continue audio-only analysis if Whisper cannot transcribe because `ffmpeg` is missing.
 - Save a session summary into the AI Report Generator history.
 
 Limitations:
