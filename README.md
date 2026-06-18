@@ -87,6 +87,13 @@ Device Audio Monitor does not use the physical microphone. It cannot work proper
 Streamlit Cloud because cloud servers cannot access your laptop's Zoom/Meet/Teams audio.
 Use the WAV upload fallback when internal capture is unavailable.
 
+The Device Audio Monitor includes a collapsed **Audio setup and diagnostics** panel. It checks
+`sounddevice`, `soundfile`, `ffmpeg`, Whisper, default input/output devices, and detected
+system-audio or virtual-cable sources. Missing dependencies show exact installation commands.
+The **Test selected device for 3 seconds** action verifies duration, RMS/peak level, silence,
+WAV playback, and capture permission. Diagnostic snapshots are appended to
+`logs/system_diagnostics.log`; log files are excluded from Git.
+
 Both Live Audio tabs include a recording carousel so previous clips can be reviewed one at a
 time with their own transcript, flags, risk score, MFCC heatmap, and spectrum.
 

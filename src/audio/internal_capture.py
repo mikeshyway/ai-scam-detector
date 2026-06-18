@@ -195,6 +195,7 @@ def record_internal_chunk(
     seconds: int,
     target_sample_rate: int = TARGET_SAMPLE_RATE,
     progress_callback: Callable[[float, float], None] | None = None,
+    minimum_seconds: int = 5,
 ) -> tuple[np.ndarray, int, bytes]:
     """Record one 5-10 second internal-audio chunk.
 
@@ -213,7 +214,8 @@ def record_internal_chunk(
     except Exception as exc:
         raise RuntimeError("sounddevice is required for internal audio capture.") from exc
 
-    seconds = max(5, min(10, int(seconds)))
+    minimum_seconds = max(1, min(5, int(minimum_seconds)))
+    seconds = max(minimum_seconds, min(10, int(seconds)))
     source_rate = int(device.default_samplerate or 48_000)
     extra_settings, channels = _stream_settings(device)
     block_frames = max(512, int(source_rate * 0.25))

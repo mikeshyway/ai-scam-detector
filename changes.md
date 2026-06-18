@@ -120,6 +120,11 @@ Implemented scope:
 
 - Capture local 5-10 second internal audio chunks with `sounddevice`.
 - Reject likely microphone inputs.
+- Run automatic dependency and audio-device diagnostics when the page first opens.
+- Provide a refreshable setup panel with exact package/FFmpeg installation commands.
+- Test the selected source for three seconds and report duration, RMS, peak level, silence,
+  playback, and pass/warning/error status.
+- Append non-fatal diagnostic snapshots to `logs/system_diagnostics.log`.
 - Save each chunk as a temporary WAV for Whisper.
 - Extract MFCC and acoustic features for the existing SVM or educational heuristic.
 - Optionally run local Whisper speech-to-text, then score the transcript with the existing

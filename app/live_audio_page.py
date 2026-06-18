@@ -37,6 +37,11 @@ from src.live_audio_analysis import (
 )
 from src.text_classifier import load_text_artifacts
 from src.time_utils import formatted_now
+from src.utils.system_check import (
+    analyse_capture_test,
+    build_audio_diagnostics,
+    log_system_diagnostics,
+)
 
 try:
     import whisper as _whisper
@@ -92,6 +97,10 @@ def _init_live_state() -> None:
         "live_monitor_source": "",
         "live_monitor_last_wav": b"",
         "live_monitor_carousel_index": 0,
+        "live_audio_diagnostics": None,
+        "live_monitor_test_result": {},
+        "live_monitor_test_wav": b"",
+        "live_monitor_test_error": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -122,6 +131,9 @@ def _clear_monitor_state() -> None:
     st.session_state["live_monitor_source"] = ""
     st.session_state["live_monitor_last_wav"] = b""
     st.session_state["live_monitor_carousel_index"] = 0
+    st.session_state["live_monitor_test_result"] = {}
+    st.session_state["live_monitor_test_wav"] = b""
+    st.session_state["live_monitor_test_error"] = ""
 
 
 def _recording_chunks(
@@ -729,6 +741,187 @@ def _render_internal_audio_meter(
     )
 
 
+def _get_audio_diagnostics(root: Path, *, refresh: bool = False) -> dict[str, Any]:
+    current = st.session_state.get("live_audio_diagnostics")
+    if refresh or not isinstance(current, dict):
+        try:
+            current = build_audio_diagnostics()
+        except Exception as exc:
+            current = {
+                "dependencies": [],
+                "devices": [],
+                "meeting_devices": [],
+                "microphones": [],
+                "default_input": None,
+                "default_output": None,
+                "capture_status": "ERROR",
+                "capture_message": f"Diagnostics could not complete: {exc}",
+            }
+        st.session_state["live_audio_diagnostics"] = current
+        log_system_diagnostics(root, current)
+    return current
+
+
+def _device_display_name(device: object) -> str:
+    if isinstance(device, dict):
+        return str(device.get("name", "Not configured"))
+    return "Not configured"
+
+
+def _render_audio_setup_diagnostics(
+    root: Path,
+    diagnostics: dict[str, Any],
+    selected_device: Any | None,
+    capture_problem: str,
+) -> None:
+    """Render compact setup checks and an actual 3-second capture test."""
+
+    with st.expander("Audio setup and diagnostics", expanded=False):
+        status = str(diagnostics.get("capture_status", "ERROR"))
+        st.markdown(
+            f"**Capture readiness:** `{status}`  \n"
+            f"{diagnostics.get('capture_message', 'Diagnostics unavailable.')}"
+        )
+
+        dependencies = diagnostics.get("dependencies", [])
+        if isinstance(dependencies, list) and dependencies:
+            dependency_rows = [
+                {
+                    "Component": item.get("name", "Unknown"),
+                    "Status": item.get("status", "ERROR"),
+                    "Details": item.get("detail", ""),
+                }
+                for item in dependencies
+                if isinstance(item, dict)
+            ]
+            st.dataframe(
+                pd.DataFrame(dependency_rows),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+        default_a, default_b = st.columns(2)
+        with default_a:
+            st.caption("Default input")
+            st.write(_device_display_name(diagnostics.get("default_input")))
+        with default_b:
+            st.caption("Default output")
+            st.write(_device_display_name(diagnostics.get("default_output")))
+
+        meeting_devices = diagnostics.get("meeting_devices", [])
+        if isinstance(meeting_devices, list) and meeting_devices:
+            st.caption("Detected meeting/system-audio sources")
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "Device": item.get("name", "Unknown"),
+                            "Host API": item.get("hostapi", "Unknown"),
+                            "Input": item.get("max_input_channels", 0),
+                            "Output": item.get("max_output_channels", 0),
+                        }
+                        for item in meeting_devices
+                        if isinstance(item, dict)
+                    ]
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+        else:
+            st.caption(
+                "No meeting/system-audio source detected. On Windows enable Stereo Mix or "
+                "configure VB-Cable/VoiceMeeter; on macOS use BlackHole; on Linux select a "
+                "PulseAudio/PipeWire monitor source."
+            )
+
+        install_commands = [
+            str(item.get("install_command", ""))
+            for item in dependencies
+            if isinstance(item, dict) and item.get("install_command")
+        ]
+        if install_commands:
+            st.caption("Required installation commands")
+            st.code("\n".join(install_commands), language="powershell")
+
+        refresh_col, test_col = st.columns(2)
+        with refresh_col:
+            if st.button(
+                "Refresh diagnostics",
+                key="refresh_audio_diagnostics",
+                use_container_width=True,
+            ):
+                _get_audio_diagnostics(root, refresh=True)
+                st.rerun()
+        with test_col:
+            run_test = st.button(
+                "Test selected device for 3 seconds",
+                key="test_internal_audio_capture",
+                use_container_width=True,
+            )
+
+        if run_test:
+            st.session_state["live_monitor_test_error"] = ""
+            if capture_problem:
+                st.session_state["live_monitor_test_error"] = capture_problem
+            else:
+                test_meter = st.empty()
+                _render_internal_audio_meter(
+                    test_meter,
+                    level=0.0,
+                    progress=0.0,
+                    status="Testing internal speaker output",
+                    duration_seconds=3,
+                )
+
+                def update_test_meter(progress_value: float, level: float) -> None:
+                    _render_internal_audio_meter(
+                        test_meter,
+                        level=min(1.0, max(0.0, level * 10.0)),
+                        progress=progress_value,
+                        status="Testing internal speaker output",
+                        duration_seconds=3,
+                    )
+
+                try:
+                    audio, sample_rate, wav_bytes = record_internal_chunk(
+                        selected_device,
+                        seconds=3,
+                        minimum_seconds=1,
+                        progress_callback=update_test_meter,
+                    )
+                    summary = analyse_capture_test(audio, sample_rate)
+                except Exception as exc:
+                    st.session_state["live_monitor_test_error"] = str(exc)
+                else:
+                    summary["device"] = selected_device.label
+                    st.session_state["live_monitor_test_result"] = summary
+                    st.session_state["live_monitor_test_wav"] = wav_bytes
+                    log_system_diagnostics(
+                        root,
+                        {"event": "internal_audio_capture_test", **summary},
+                    )
+
+        test_error = str(st.session_state.get("live_monitor_test_error", ""))
+        test_result = st.session_state.get("live_monitor_test_result", {})
+        if test_error:
+            st.warning(test_error)
+        elif isinstance(test_result, dict) and test_result:
+            status_method = {
+                "PASS": st.success,
+                "WARNING": st.warning,
+                "ERROR": st.error,
+            }.get(str(test_result.get("status", "ERROR")), st.info)
+            status_method(str(test_result.get("message", "Test completed.")))
+            metric_a, metric_b, metric_c, metric_d = st.columns(4)
+            metric_a.metric("Duration", f"{float(test_result.get('duration_seconds', 0)):.2f}s")
+            metric_b.metric("RMS level", f"{float(test_result.get('rms_db', -160)):.1f} dB")
+            metric_c.metric("Peak level", f"{float(test_result.get('peak_db', -160)):.1f} dB")
+            metric_d.metric("Status", str(test_result.get("status", "ERROR")))
+            test_wav = st.session_state.get("live_monitor_test_wav", b"")
+            if test_wav:
+                st.audio(test_wav, format="audio/wav")
+
+
 def _session_signature(results: list[dict[str, object]]) -> str:
     return json.dumps(
         [
@@ -944,18 +1137,20 @@ def _render_device_audio_monitor(
     st.caption(
         "This does not use the physical microphone. It must run locally because hosted Streamlit cannot access your computer's speaker output."
     )
+    diagnostics = _get_audio_diagnostics(root)
 
     with st.container(border=True):
         sounddevice_ready = sounddevice_available()
         devices = list_internal_audio_devices() if sounddevice_ready else []
         selected_device = None
         if not sounddevice_ready:
-            st.info(
-                "Internal capture needs sounddevice installed locally. Upload a WAV chunk below as fallback."
+            st.caption(
+                "Setup required: sounddevice is unavailable in this Python environment. "
+                "Open Audio setup and diagnostics below."
             )
         elif not devices:
-            st.info(
-                "No audio devices were reported by sounddevice. Upload a WAV chunk below as fallback."
+            st.caption(
+                "Setup required: no audio devices were reported. Open Audio setup and diagnostics below."
             )
         else:
             selected_device = st.selectbox(
@@ -1020,17 +1215,6 @@ def _render_device_audio_monitor(
                 key="monitor_demo_transcript",
             )
 
-        st.markdown("**Step 2: Open Zoom / Google Meet / Teams, then capture a chunk**")
-        meter_slot = st.empty()
-        _render_internal_audio_meter(
-            meter_slot,
-            level=0.0,
-            progress=0.0,
-            status="Internal speaker output idle",
-            duration_seconds=chunk_seconds,
-        )
-        progress_slot = st.empty()
-        action_a, action_b, action_c = st.columns(3)
         capture_problem = ""
         if not sounddevice_ready:
             capture_problem = (
@@ -1054,6 +1238,25 @@ def _render_device_audio_monitor(
                 "Selected device is not recognised as internal/system audio. Choose a "
                 "WASAPI output, monitor source, BlackHole, Stereo Mix, or virtual cable."
             )
+
+        _render_audio_setup_diagnostics(
+            root,
+            diagnostics,
+            selected_device,
+            capture_problem,
+        )
+
+        st.markdown("**Step 2: Open Zoom / Google Meet / Teams, then capture a chunk**")
+        meter_slot = st.empty()
+        _render_internal_audio_meter(
+            meter_slot,
+            level=0.0,
+            progress=0.0,
+            status="Internal speaker output idle",
+            duration_seconds=chunk_seconds,
+        )
+        progress_slot = st.empty()
+        action_a, action_b, action_c = st.columns(3)
         captured_wav = None
         with action_a:
             if st.button(

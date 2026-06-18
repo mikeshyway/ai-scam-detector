@@ -11,4 +11,5 @@ __all__ = [
     "text_classifier",
     "text_preprocessor",
     "time_utils",
+    "utils",
 ]
