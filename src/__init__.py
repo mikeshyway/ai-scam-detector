@@ -7,7 +7,6 @@ __all__ = [
     "explainability",
     "live_audio_analysis",
     "recording_audio_simulation",
-    "system_audio_capture",
     "text_classifier",
     "text_preprocessor",
     "time_utils",

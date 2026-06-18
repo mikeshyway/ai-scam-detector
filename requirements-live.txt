@@ -1,7 +1,5 @@
 -r requirements.txt
 
-# Optional local speech-to-text for system-audio meeting monitoring.
-# This downloads a Whisper model on first use and is substantially heavier
-# than the core capstone requirements. System-audio capture itself is provided
-# by SoundCard in requirements.txt.
+# Kept for compatibility with older setup notes.
+# Live audio dependencies are now included in requirements.txt.
 openai-whisper

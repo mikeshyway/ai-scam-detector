@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_PACKAGES = [
     "streamlit",
+    "audio_recorder_streamlit",
     "pandas",
     "numpy",
     "sklearn",
@@ -20,17 +21,15 @@ REQUIRED_PACKAGES = [
     "soundfile",
     "matplotlib",
     "plotly",
+    "whisper",
+    "transformers",
+    "torch",
     "joblib",
     "reportlab",
     "docx",
 ]
 
 OPTIONAL_PACKAGES = [
-    ("whisper", "Install requirements-live.txt for local live transcription."),
-    (
-        "soundcard",
-        "Install requirements-device-audio.txt for local system-output monitoring.",
-    ),
 ]
 
 EXPECTED_DIRS = [

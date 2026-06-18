@@ -11,8 +11,8 @@ clean visual feedback, and downloadable evidence summaries.
 ## App Pages
 
 - Scam Simulation Lab: uploaded call/meeting recording chunk analysis.
-- Live Audio Detection: separate browser Voice Recorder and optional local Zoom/Meet/Teams
-  Device Audio Monitor, both with transcript/voice scoring and report-history saving.
+- Live Audio Detection: browser Voice Recorder plus in-device short audio recording, both
+  with transcript/voice scoring and report-history saving.
 - Detection Center: email, transcript, AI voice/deepfake, and phone-number risk checkers.
 - AI Report Generator: downloadable TXT/PDF/DOCX evidence summary.
 
@@ -37,8 +37,7 @@ trained models are inserted.
 - AI-generated speech detection using MFCC audio features with an SVM classifier.
 - Uploaded meeting/call recording chunk analysis with 5-10 second confidence results.
 - Browser voice recording using Streamlit's built-in microphone recorder.
-- Optional local system-output analysis using configurable 3-10 second chunks.
-- Windows WASAPI loopback, Linux monitor-source, and virtual-audio-cable input support.
+- In-device 5-10 second recording chunks using `audio-recorder-streamlit`.
 - Optional local Whisper speech-to-text for combining spoken content and voice signals.
 - AI report generation with TXT/PDF/DOCX downloads when dependencies are installed.
 - Confidence scoring and Streamlit warning banners.
@@ -69,55 +68,22 @@ pip install -r requirements.txt
 python scripts/00_setup_check.py
 ```
 
-For optional local Whisper transcription on the Live Audio Detection page:
+For local audio recording and Whisper transcription on the Live Audio Detection page:
 
 ```bash
 sudo apt update
 sudo apt install ffmpeg
-pip install -r requirements-live.txt
-```
-
-For local system-output capture as well as Whisper transcription:
-
-```bash
-pip install -r requirements-device-audio.txt
+pip install -r requirements.txt
 ```
 
 The Live Audio Detection page opens in **Voice Recorder** mode. This uses Streamlit's browser
-recorder and remains available on local and hosted deployments without the SoundCard package.
-Automatic Whisper transcription is optional; manual transcript and audio-only analysis remain
-available.
+recorder. **Device Audio Monitor** is a separate in-device short recording mode using
+`audio-recorder-streamlit`. It records manual 5-10 second chunks, saves each temporary WAV for
+Whisper transcription, runs transcript and audio-risk analysis, and lets the user record another
+chunk to simulate near-real-time monitoring.
 
-**Device Audio Monitor** is a separate local-only mode. Its SoundCard dependency is kept out of
-the core requirements so a missing desktop audio backend cannot break the Voice Recorder.
-
-The Device Audio Monitor must run on the same computer that is playing the meeting audio.
-It records locally through the operating system's audio backend and does not use browser
-media streaming. A Streamlit Cloud deployment cannot capture audio from the user's laptop
-because its Python process runs on a remote server.
-
-### Local Meeting Monitor Setup
-
-**Windows**
-
-1. Start the app locally.
-2. Open the Live Audio Detection page.
-3. Select a device labelled `System output` for WASAPI loopback.
-4. If no loopback appears, install VB-Cable or VoiceMeeter.
-5. Route Zoom, Google Meet, or Teams output to the virtual cable input.
-6. Select the matching cable output in the app and start the monitor.
-
-**Linux/Kali**
-
-Select the PulseAudio/PipeWire source ending in `monitor`. Enable it through `pavucontrol` or
-your PipeWire controls if it is hidden.
-
-**macOS**
-
-CoreAudio has no native loopback recording. Install BlackHole, configure a multi-output device,
-route the meeting through it, and select BlackHole in the app.
-
-Only record or analyse a meeting after receiving permission from its participants.
+If Whisper is unavailable, Device Audio Monitor keeps a demo fallback transcript mode so the
+page remains usable for presentation.
 
 On Windows PowerShell:
 
@@ -180,12 +146,11 @@ Keep `requirements.txt` at the repository root.
 
 ## Detection Scope
 
-The system supports uploaded evidence and local system-output monitoring. The Live Audio
-Detection page can analyse audio played by Zoom, Google Meet, Teams, or another application on
-the same computer when a loopback, monitor, or virtual-cable input is available. It does not
-join meetings through platform APIs, capture mobile phone calls, monitor email/SMS delivery, or
-block communications automatically. The local monitor is educational near-real-time chunk
-analysis, not a commercial interception or prevention system.
+The system supports uploaded evidence and local short audio recording. The Live Audio Detection
+page can analyse manually recorded 5-10 second clips, but it does not join meetings through
+platform APIs, capture mobile phone calls, monitor email/SMS delivery, or block communications
+automatically. The local recorder is educational near-real-time chunk analysis, not a commercial
+interception or prevention system.
 
 ## Change Log
 

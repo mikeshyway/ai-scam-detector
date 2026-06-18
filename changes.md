@@ -5,9 +5,10 @@ stays aligned with the current capstone demo scope.
 
 ## Current Direction
 
-The project now combines uploaded-evidence detection with a local meeting monitor. The Live
-Audio Detection page captures system output from the computer running Streamlit, divides it
-into short chunks, transcribes speech locally, and displays rolling scam-risk explanations.
+The project now combines uploaded-evidence detection with short local audio recording. The Live
+Audio Detection page supports browser voice recording and an in-device short recording mode
+that sends each completed WAV clip to Python for transcription, audio features, and scam-risk
+analysis.
 
 ## Current Page Structure
 
@@ -30,9 +31,8 @@ Removed by request:
 - `app/detection_center_page.py`
 - `app/report_page.py`
 - `src/recording_audio_simulation.py`
-- `src/system_audio_capture.py`
 - Uploaded recording chunk analysis
-- Local system-output meeting monitoring
+- In-device short audio recording
 - 5-10 second audio chunk processing
 - PDF/DOCX/TXT report generator
 - Malaysia-time report timestamps via `src/time_utils.py`
@@ -70,8 +70,7 @@ Reason:
 Replacement:
 
 - Uploaded-evidence detection.
-- Local system-output educational analysis through WASAPI/PulseAudio/PipeWire or a virtual
-  audio cable.
+- In-device short audio recording with manual 5-10 second chunks.
 - Paste email/text.
 - Upload `.txt`, `.csv`, `.wav`, `.flac`, `.mp3`, or `.m4a`.
 
@@ -89,56 +88,42 @@ Replacement:
 - Manual Phone Number Risk Checker using educational heuristics and synthetic demo reputation
   data.
 
-### PC Meeting Audio Integration
-
-Implemented locally without direct Zoom, Teams, or Google Meet APIs.
+### In-Device Audio Recording
 
 Implemented scope:
 
-- Capture the speaker output of the computer running Streamlit.
-- Use Windows WASAPI loopback, Linux PulseAudio/PipeWire monitor sources, or a virtual cable.
-- Split the local stream into 3-10 second chunks.
-- Run local Whisper transcription, transcript scam analysis, and MFCC/SVM voice analysis.
-- Display rolling confidence, transcript, frequency, MFCC, and alert results.
+- Record 5-10 second local microphone clips through `audio-recorder-streamlit`.
+- Save each recording temporarily as a WAV for local Whisper transcription.
+- Run transcript scam analysis and MFCC/SVM voice analysis.
+- Display rolling confidence, transcript, frequency, MFCC, suspicious flags, and alert results.
+- Let the user record another chunk to simulate near-real-time monitoring.
 
 Limitations:
 
-- The app must run locally on the same computer that is playing the meeting audio.
-- Streamlit Cloud cannot capture the user's laptop audio.
-- macOS requires BlackHole or another virtual audio device because CoreAudio has no native
-  loopback input.
-- This monitors operating-system audio; it does not integrate with meeting-platform APIs.
+- This is manual short-chunk recording, not always-on call interception.
+- It does not integrate directly with Zoom, Teams, Google Meet, phone calls, or OS-level caller ID.
+- It depends on browser/local microphone permission.
 
 ## Other Excluded Items
 
-### Near-Real-Time Local System-Audio Monitoring
+### Near-Real-Time In-Device Recording
 
-Implemented as continuous local capture with rolling analysis chunks. This replaces the
-earlier browser-microphone and WebRTC approaches.
-
-The browser Voice Recorder remains available as a separate default feature. Device-audio
-capture is optional and uses `requirements-device-audio.txt`, so missing desktop audio
-dependencies do not disable browser recording.
+Implemented as short local recording chunks. This replaces the earlier continuous streaming
+approach while keeping the original Voice Recorder as a separate default feature.
 
 Implemented scope:
 
-- Enumerate loopback, monitor, virtual-cable, and microphone input devices.
-- Capture the selected local device in a background thread.
-- Emit and analyse rolling 3-10 second chunks.
+- Record local 5-10 second chunks with `audio-recorder-streamlit`.
+- Save each chunk as a temporary WAV for Whisper.
 - Extract MFCC and acoustic features for the existing SVM or educational heuristic.
 - Optionally run local Whisper speech-to-text, then score the transcript with the existing
   transcript model and suspicious-phrase explanations.
-- Refresh the Streamlit analysis panel every second without blocking the rest of the page.
 - Save a session summary into the AI Report Generator history.
-- Stop capture automatically when the user leaves the Live Audio Detection page.
 
 Limitations:
 
-- Requires the app to run locally and access an operating-system audio input.
-- Requires participant permission before recording or analysis.
-- A virtual cable may be required depending on the operating system and audio hardware.
-- Whisper is optional because its model download and CPU cost are too heavy for the default
-  capstone installation.
+- Requires microphone/browser recording permission.
+- Whisper can be heavy on CPU; demo fallback mode remains available.
 - This is near-real-time chunk analysis, not zero-latency interception or automatic call
   blocking.
 
