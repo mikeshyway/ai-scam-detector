@@ -667,68 +667,61 @@ def _render_internal_audio_meter(
     level: float,
     progress: float,
     status: str,
+    duration_seconds: int = 5,
 ) -> None:
-    """Render a speaker-output activity preview for local system audio."""
+    """Render a compact speaker-output preview matching Streamlit's recorder style."""
 
     safe_level = min(1.0, max(0.0, float(level)))
     safe_progress = min(1.0, max(0.0, float(progress)))
-    active_bars = int(round(safe_level * 28))
+    duration_seconds = max(1, int(duration_seconds))
+    elapsed_seconds = min(duration_seconds, int(round(safe_progress * duration_seconds)))
+    active_progress = int(round(safe_progress * 64))
     bars = []
-    for index in range(28):
-        height = 6 + int(18 * abs(np.sin((index + 1) * 0.72)))
-        is_active = index < active_bars
-        color = "#38BDF8" if is_active else "rgba(148,163,184,0.28)"
-        glow = "0 0 12px rgba(56,189,248,0.35)" if is_active else "none"
+    for index in range(64):
+        wave = abs(np.sin((index + 1) * 0.67))
+        height = 2 + int(20 * (0.18 + safe_level * 0.82) * wave)
+        is_elapsed = index <= active_progress and safe_progress > 0
+        color = "rgba(241,245,249,0.96)" if is_elapsed else "rgba(148,163,184,0.45)"
         bars.append(
             "<span style='"
-            f"display:inline-block;width:3px;border-radius:999px;"
-            f"height:{height}px;background:{color};box-shadow:{glow};"
+            f"display:inline-block;width:3px;border-radius:999px;height:{height}px;"
+            f"background:{color};"
             "'></span>"
         )
 
     slot.markdown(
         f"""
         <div style="
-            border:1px solid rgba(148,163,184,0.25);
-            background:rgba(15,23,42,0.72);
-            border-radius:14px;
-            padding:12px 14px;
-            margin:6px 0 14px 0;
+            background:rgba(15,23,42,0.92);
+            border:1px solid rgba(30,41,59,0.72);
+            border-radius:8px;
+            padding:13px 16px;
+            margin:8px 0 16px 0;
         ">
             <div style="display:flex;align-items:center;gap:12px;">
                 <div style="
-                    width:34px;height:34px;border-radius:50%;
-                    display:flex;align-items:center;justify-content:center;
-                    background:rgba(14,165,233,0.14);
-                    border:1px solid rgba(56,189,248,0.35);
-                    color:#E0F2FE;font-size:18px;
-                ">&#128266;</div>
+                    color:#CBD5E1;font-size:16px;line-height:1;width:18px;text-align:center;
+                " title="Internal system audio">&#128266;</div>
+                <div style="
+                    width:0;height:0;border-top:5px solid transparent;
+                    border-bottom:5px solid transparent;border-left:7px solid #CBD5E1;
+                    opacity:.95;
+                "></div>
                 <div style="flex:1;">
                     <div style="
-                        display:flex;align-items:center;gap:4px;height:28px;
+                        display:flex;align-items:center;gap:4px;height:26px;
                     ">
                         {''.join(bars)}
                     </div>
-                    <div style="
-                        height:4px;background:rgba(148,163,184,0.18);
-                        border-radius:999px;overflow:hidden;margin-top:8px;
-                    ">
-                        <div style="
-                            width:{safe_progress * 100:.1f}%;
-                            height:100%;
-                            background:linear-gradient(90deg,#2563EB,#06B6D4);
-                        "></div>
-                    </div>
                 </div>
                 <div style="
-                    min-width:76px;text-align:right;
-                    color:#CBD5E1;font-size:12px;
+                    min-width:90px;text-align:right;color:#CBD5E1;font-size:12px;
                     font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-                ">{safe_level * 100:.0f}%</div>
+                ">{elapsed_seconds:02d}s / {duration_seconds:02d}s</div>
             </div>
             <div style="
-                margin-top:8px;color:#94A3B8;font-size:12px;
-                letter-spacing:.04em;text-transform:uppercase;
+                margin-top:8px;color:#94A3B8;font-size:11px;
+                letter-spacing:.08em;text-transform:uppercase;
             ">{status}</div>
         </div>
         """,
@@ -953,9 +946,10 @@ def _render_device_audio_monitor(
     )
 
     with st.container(border=True):
-        devices = list_internal_audio_devices() if sounddevice_available() else []
+        sounddevice_ready = sounddevice_available()
+        devices = list_internal_audio_devices() if sounddevice_ready else []
         selected_device = None
-        if not sounddevice_available():
+        if not sounddevice_ready:
             st.info(
                 "Internal capture needs sounddevice installed locally. Upload a WAV chunk below as fallback."
             )
@@ -1033,51 +1027,78 @@ def _render_device_audio_monitor(
             level=0.0,
             progress=0.0,
             status="Internal speaker output idle",
+            duration_seconds=chunk_seconds,
         )
         progress_slot = st.empty()
         action_a, action_b, action_c = st.columns(3)
-        can_capture = bool(selected_device and selected_device.is_internal_candidate and not selected_device.is_microphone)
+        capture_problem = ""
+        if not sounddevice_ready:
+            capture_problem = (
+                "Internal capture setup needed: install sounddevice with "
+                "`pip install sounddevice soundfile`, then restart Streamlit."
+            )
+        elif not devices:
+            capture_problem = (
+                "Internal capture setup needed: no local audio devices were reported. "
+                "Use the WAV fallback or enable a system-output/monitor source."
+            )
+        elif selected_device is None:
+            capture_problem = "Select a system audio device before starting capture."
+        elif selected_device.is_microphone:
+            capture_problem = (
+                "Device Audio Monitor blocks microphone inputs. Select a speaker output, "
+                "Stereo Mix, BlackHole, monitor source, or virtual cable instead."
+            )
+        elif not selected_device.is_internal_candidate:
+            capture_problem = (
+                "Selected device is not recognised as internal/system audio. Choose a "
+                "WASAPI output, monitor source, BlackHole, Stereo Mix, or virtual cable."
+            )
         captured_wav = None
         with action_a:
             if st.button(
                 f"Start {chunk_seconds}s internal capture",
                 type="primary",
                 use_container_width=True,
-                disabled=not can_capture,
             ):
-                progress = progress_slot.progress(0.0, text="Speaker output capture starting...")
-
-                def update_meter(progress_value: float, level: float) -> None:
-                    meter = min(1.0, max(0.0, level * 10.0))
-                    _render_internal_audio_meter(
-                        meter_slot,
-                        level=meter,
-                        progress=progress_value,
-                        status="Capturing internal speaker output",
-                    )
-                    progress.progress(
-                        min(1.0, max(0.0, progress_value)),
-                        text=f"Speaker output level {meter:.0%}",
-                    )
-
-                try:
-                    _audio, _sample_rate, captured_wav = record_internal_chunk(
-                        selected_device,
-                        seconds=chunk_seconds,
-                        progress_callback=update_meter,
-                    )
-                    st.session_state["live_monitor_last_wav"] = captured_wav
-                    st.session_state["live_monitor_source"] = selected_device.label
-                except Exception as exc:
-                    st.session_state["live_monitor_error"] = str(exc)
+                if capture_problem:
+                    st.session_state["live_monitor_error"] = capture_problem
                 else:
-                    _render_internal_audio_meter(
-                        meter_slot,
-                        level=0.0,
-                        progress=1.0,
-                        status="Internal speaker output capture complete",
-                    )
-                    progress.progress(1.0, text="Internal capture complete")
+                    progress = progress_slot.progress(0.0, text="Speaker output capture starting...")
+
+                    def update_meter(progress_value: float, level: float) -> None:
+                        meter = min(1.0, max(0.0, level * 10.0))
+                        _render_internal_audio_meter(
+                            meter_slot,
+                            level=meter,
+                            progress=progress_value,
+                            status="Capturing internal speaker output",
+                            duration_seconds=chunk_seconds,
+                        )
+                        progress.progress(
+                            min(1.0, max(0.0, progress_value)),
+                            text=f"Speaker output level {meter:.0%}",
+                        )
+
+                    try:
+                        _audio, _sample_rate, captured_wav = record_internal_chunk(
+                            selected_device,
+                            seconds=chunk_seconds,
+                            progress_callback=update_meter,
+                        )
+                        st.session_state["live_monitor_last_wav"] = captured_wav
+                        st.session_state["live_monitor_source"] = selected_device.label
+                    except Exception as exc:
+                        st.session_state["live_monitor_error"] = str(exc)
+                    else:
+                        _render_internal_audio_meter(
+                            meter_slot,
+                            level=0.0,
+                            progress=1.0,
+                            status="Internal speaker output capture complete",
+                            duration_seconds=chunk_seconds,
+                        )
+                        progress.progress(1.0, text="Internal capture complete")
         with action_b:
             if st.button("Stop capture session", use_container_width=True):
                 st.caption("Capture session stopped. Existing recordings remain available below.")
@@ -1170,7 +1191,7 @@ def _render_device_audio_monitor(
 
     if st.session_state.get("live_monitor_error"):
         message = str(st.session_state["live_monitor_error"])
-        if "ffmpeg" in message.casefold():
+        if "ffmpeg" in message.casefold() or "setup needed" in message.casefold():
             st.warning(message)
         else:
             st.error(f"Device audio analysis failed: {message}")
