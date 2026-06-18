@@ -11,7 +11,7 @@ clean visual feedback, and downloadable evidence summaries.
 ## App Pages
 
 - Scam Simulation Lab: uploaded call/meeting recording chunk analysis.
-- Live Audio Detection: browser Voice Recorder plus in-device short audio recording, both
+- Live Audio Detection: browser Voice Recorder plus local-only internal audio capture, both
   with transcript/voice scoring and report-history saving.
 - Detection Center: email, transcript, AI voice/deepfake, and phone-number risk checkers.
 - AI Report Generator: downloadable TXT/PDF/DOCX evidence summary.
@@ -37,7 +37,8 @@ trained models are inserted.
 - AI-generated speech detection using MFCC audio features with an SVM classifier.
 - Uploaded meeting/call recording chunk analysis with 5-10 second confidence results.
 - Browser voice recording using Streamlit's built-in microphone recorder.
-- In-device 5-10 second recording chunks using `audio-recorder-streamlit`.
+- Local-only internal audio capture from system output, monitor sources, or virtual audio
+  devices using `sounddevice`.
 - Optional local Whisper speech-to-text for combining spoken content and voice signals.
 - AI report generation with TXT/PDF/DOCX downloads when dependencies are installed.
 - Confidence scoring and Streamlit warning banners.
@@ -68,7 +69,7 @@ pip install -r requirements.txt
 python scripts/00_setup_check.py
 ```
 
-For local audio recording and Whisper transcription on the Live Audio Detection page:
+For local internal audio capture and Whisper transcription on the Live Audio Detection page:
 
 ```bash
 sudo apt update
@@ -77,10 +78,14 @@ pip install -r requirements.txt
 ```
 
 The Live Audio Detection page opens in **Voice Recorder** mode. This uses Streamlit's browser
-recorder. **Device Audio Monitor** is a separate in-device short recording mode using
-`audio-recorder-streamlit`. It records manual 5-10 second chunks, saves each temporary WAV for
-Whisper transcription, runs transcript and audio-risk analysis, and lets the user record another
-chunk to simulate near-real-time monitoring.
+recorder. **Device Audio Monitor** is a separate local-only internal audio mode using
+`sounddevice`. It captures manual 5-10 second chunks from system speaker output, BlackHole,
+PulseAudio/PipeWire monitor sources, Stereo Mix, or virtual-cable devices, then saves each
+temporary WAV for Whisper transcription and risk analysis.
+
+Device Audio Monitor does not use the physical microphone. It cannot work properly on
+Streamlit Cloud because cloud servers cannot access your laptop's Zoom/Meet/Teams audio.
+Use the WAV upload fallback when internal capture is unavailable.
 
 Both Live Audio tabs include a recording carousel so previous clips can be reviewed one at a
 time with their own transcript, flags, risk score, MFCC heatmap, and spectrum.
@@ -150,11 +155,11 @@ Keep `requirements.txt` at the repository root.
 
 ## Detection Scope
 
-The system supports uploaded evidence and local short audio recording. The Live Audio Detection
-page can analyse manually recorded 5-10 second clips, but it does not join meetings through
-platform APIs, capture mobile phone calls, monitor email/SMS delivery, or block communications
-automatically. The local recorder is educational near-real-time chunk analysis, not a commercial
-interception or prevention system.
+The system supports uploaded evidence, browser voice samples, and local internal-audio chunks.
+The Live Audio Detection page can analyse manually recorded 5-10 second clips, but it does not
+join meetings through platform APIs, capture mobile phone calls, monitor email/SMS delivery, or
+block communications automatically. The internal-audio monitor is educational near-real-time
+chunk analysis, not a commercial interception or prevention system.
 
 ## Change Log
 

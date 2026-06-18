@@ -1,12 +1,13 @@
 streamlit>=1.48
-audio-recorder-streamlit
 pandas>=2.0
 numpy>=1.24
+sounddevice
 scikit-learn>=1.3
 nltk>=3.8
 librosa>=0.10
 pydub>=0.25
 soundfile>=0.12
+scipy
 matplotlib>=3.7
 plotly>=5.18
 openai-whisper

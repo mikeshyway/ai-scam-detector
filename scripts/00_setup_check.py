@@ -11,14 +11,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_PACKAGES = [
     "streamlit",
-    "audio_recorder_streamlit",
     "pandas",
     "numpy",
+    "sounddevice",
     "sklearn",
     "nltk",
     "librosa",
     "pydub",
     "soundfile",
+    "scipy",
     "matplotlib",
     "plotly",
     "whisper",

@@ -5,10 +5,10 @@ stays aligned with the current capstone demo scope.
 
 ## Current Direction
 
-The project now combines uploaded-evidence detection with short local audio recording. The Live
-Audio Detection page supports browser voice recording and an in-device short recording mode
-that sends each completed WAV clip to Python for transcription, audio features, and scam-risk
-analysis.
+The project now combines uploaded-evidence detection with short local audio workflows. The Live
+Audio Detection page supports browser voice recording and a separate internal system-audio
+capture mode that sends each completed WAV clip to Python for transcription, audio features,
+and scam-risk analysis.
 
 ## Current Page Structure
 
@@ -32,7 +32,7 @@ Removed by request:
 - `app/report_page.py`
 - `src/recording_audio_simulation.py`
 - Uploaded recording chunk analysis
-- In-device short audio recording
+- Internal system-audio capture
 - 5-10 second audio chunk processing
 - PDF/DOCX/TXT report generator
 - Malaysia-time report timestamps via `src/time_utils.py`
@@ -70,7 +70,7 @@ Reason:
 Replacement:
 
 - Uploaded-evidence detection.
-- In-device short audio recording with manual 5-10 second chunks.
+- Internal system-audio capture with manual 5-10 second chunks.
 - Paste email/text.
 - Upload `.txt`, `.csv`, `.wav`, `.flac`, `.mp3`, or `.m4a`.
 
@@ -88,32 +88,38 @@ Replacement:
 - Manual Phone Number Risk Checker using educational heuristics and synthetic demo reputation
   data.
 
-### In-Device Audio Recording
+### Internal Device Audio Capture
 
 Implemented scope:
 
-- Record 5-10 second local microphone clips through `audio-recorder-streamlit`.
-- Save each recording temporarily as a WAV for local Whisper transcription.
+- Capture 5-10 second chunks from local system audio using `sounddevice`.
+- Support Windows WASAPI output candidates, macOS BlackHole-style virtual devices, and
+  Linux PulseAudio/PipeWire monitor sources where available.
+- Block physical microphone inputs for this feature.
+- Save each captured chunk temporarily as a WAV for local Whisper transcription.
+- Provide WAV upload fallback when internal capture is unavailable.
 - Run transcript scam analysis and MFCC/SVM voice analysis.
 - Display rolling confidence, transcript, frequency, MFCC, suspicious flags, and alert results.
-- Let the user record another chunk to simulate near-real-time monitoring.
+- Let the user capture another chunk to simulate near-real-time monitoring.
 
 Limitations:
 
 - This is manual short-chunk recording, not always-on call interception.
 - It does not integrate directly with Zoom, Teams, Google Meet, phone calls, or OS-level caller ID.
-- It depends on browser/local microphone permission.
+- It must run locally; Streamlit Cloud cannot access the user's system speaker output.
 
 ## Other Excluded Items
 
-### Near-Real-Time In-Device Recording
+### Near-Real-Time Internal Audio Capture
 
-Implemented as short local recording chunks. This replaces the earlier continuous streaming
-approach while keeping the original Voice Recorder as a separate default feature.
+Implemented as short local internal-audio chunks. This replaces the earlier browser/microphone
+recorder approach for Device Audio Monitor while keeping the original Voice Recorder as a
+separate default feature.
 
 Implemented scope:
 
-- Record local 5-10 second chunks with `audio-recorder-streamlit`.
+- Capture local 5-10 second internal audio chunks with `sounddevice`.
+- Reject likely microphone inputs.
 - Save each chunk as a temporary WAV for Whisper.
 - Extract MFCC and acoustic features for the existing SVM or educational heuristic.
 - Optionally run local Whisper speech-to-text, then score the transcript with the existing
@@ -125,7 +131,8 @@ Implemented scope:
 
 Limitations:
 
-- Requires microphone/browser recording permission.
+- Requires a local internal audio source such as WASAPI output, BlackHole, Stereo Mix, a
+  monitor source, or a virtual cable.
 - Whisper can be heavy on CPU; demo fallback mode remains available.
 - This is near-real-time chunk analysis, not zero-latency interception or automatic call
   blocking.

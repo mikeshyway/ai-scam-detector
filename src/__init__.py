@@ -2,6 +2,7 @@
 
 __all__ = [
     "audio_classifier",
+    "audio",
     "audio_preprocessor",
     "demo_data",
     "explainability",

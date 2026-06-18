@@ -22,6 +22,11 @@ from app.ui_components import (
     render_result_card,
     render_section_header,
 )
+from src.audio.internal_capture import (
+    list_internal_audio_devices,
+    record_internal_chunk,
+    sounddevice_available,
+)
 from src.audio_classifier import load_audio_model
 from src.explainability import highlighted_html
 from src.history_db import DEFAULT_SESSION_ID, history_fingerprint, insert_scan
@@ -32,14 +37,6 @@ from src.live_audio_analysis import (
 )
 from src.text_classifier import load_text_artifacts
 from src.time_utils import formatted_now
-
-try:
-    from audio_recorder_streamlit import audio_recorder
-
-    AUDIO_RECORDER_AVAILABLE = True
-except Exception:
-    audio_recorder = None
-    AUDIO_RECORDER_AVAILABLE = False
 
 try:
     import whisper as _whisper
@@ -93,6 +90,7 @@ def _init_live_state() -> None:
         "live_monitor_error": "",
         "live_monitor_saved_signature": "",
         "live_monitor_source": "",
+        "live_monitor_last_wav": b"",
         "live_monitor_carousel_index": 0,
     }
     for key, value in defaults.items():
@@ -122,6 +120,7 @@ def _clear_monitor_state() -> None:
     st.session_state["live_monitor_error"] = ""
     st.session_state["live_monitor_saved_signature"] = ""
     st.session_state["live_monitor_source"] = ""
+    st.session_state["live_monitor_last_wav"] = b""
     st.session_state["live_monitor_carousel_index"] = 0
 
 
@@ -637,12 +636,103 @@ def _render_recording_carousel(
             st.session_state[state_key] = current_index + 1
             st.rerun()
 
+    if peak >= risk_threshold:
+        st.warning(
+            "Recommendation: pause the conversation, do not share OTP/passwords/payment details, "
+            "and verify the request through an official channel."
+        )
+    elif peak >= 40:
+        st.info(
+            "Recommendation: treat this as needing review. Ask for written confirmation and "
+            "check the sender/caller through a trusted source."
+        )
+    else:
+        st.success(
+            "Recommendation: no strong scam indicators were found in this chunk, but continue "
+            "to verify unexpected requests."
+        )
+
     _render_dashboard_section(
         clip_results,
         risk_threshold,
         transcript_heading=transcript_heading,
         frequency_heading=frequency_heading,
         latest_title=latest_title,
+    )
+
+
+def _render_internal_audio_meter(
+    slot,
+    *,
+    level: float,
+    progress: float,
+    status: str,
+) -> None:
+    """Render a speaker-output activity preview for local system audio."""
+
+    safe_level = min(1.0, max(0.0, float(level)))
+    safe_progress = min(1.0, max(0.0, float(progress)))
+    active_bars = int(round(safe_level * 28))
+    bars = []
+    for index in range(28):
+        height = 6 + int(18 * abs(np.sin((index + 1) * 0.72)))
+        is_active = index < active_bars
+        color = "#38BDF8" if is_active else "rgba(148,163,184,0.28)"
+        glow = "0 0 12px rgba(56,189,248,0.35)" if is_active else "none"
+        bars.append(
+            "<span style='"
+            f"display:inline-block;width:3px;border-radius:999px;"
+            f"height:{height}px;background:{color};box-shadow:{glow};"
+            "'></span>"
+        )
+
+    slot.markdown(
+        f"""
+        <div style="
+            border:1px solid rgba(148,163,184,0.25);
+            background:rgba(15,23,42,0.72);
+            border-radius:14px;
+            padding:12px 14px;
+            margin:6px 0 14px 0;
+        ">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <div style="
+                    width:34px;height:34px;border-radius:50%;
+                    display:flex;align-items:center;justify-content:center;
+                    background:rgba(14,165,233,0.14);
+                    border:1px solid rgba(56,189,248,0.35);
+                    color:#E0F2FE;font-size:18px;
+                ">&#128266;</div>
+                <div style="flex:1;">
+                    <div style="
+                        display:flex;align-items:center;gap:4px;height:28px;
+                    ">
+                        {''.join(bars)}
+                    </div>
+                    <div style="
+                        height:4px;background:rgba(148,163,184,0.18);
+                        border-radius:999px;overflow:hidden;margin-top:8px;
+                    ">
+                        <div style="
+                            width:{safe_progress * 100:.1f}%;
+                            height:100%;
+                            background:linear-gradient(90deg,#2563EB,#06B6D4);
+                        "></div>
+                    </div>
+                </div>
+                <div style="
+                    min-width:76px;text-align:right;
+                    color:#CBD5E1;font-size:12px;
+                    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+                ">{safe_level * 100:.0f}%</div>
+            </div>
+            <div style="
+                margin-top:8px;color:#94A3B8;font-size:12px;
+                letter-spacing:.04em;text-transform:uppercase;
+            ">{status}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
 
@@ -854,15 +944,44 @@ def _render_device_audio_monitor(
     text_classifier = _load_transcript_classifier(str(root))
 
     render_section_header(
-        "In-device audio recording",
-        "Record 5-10 second local microphone chunks, then analyse each chunk like a near-real-time stream.",
-        "Short local clips",
+        "Internal audio capture",
+        "Capture sound produced by this device, such as Zoom, Google Meet, Teams, browser audio, or speaker output.",
+        "Local-only system audio",
     )
     st.caption(
-        "This mode replaces continuous streaming with manual local recordings. Record, stop, review, then record another chunk."
+        "This does not use the physical microphone. It must run locally because hosted Streamlit cannot access your computer's speaker output."
     )
 
     with st.container(border=True):
+        devices = list_internal_audio_devices() if sounddevice_available() else []
+        selected_device = None
+        if not sounddevice_available():
+            st.info(
+                "Internal capture needs sounddevice installed locally. Upload a WAV chunk below as fallback."
+            )
+        elif not devices:
+            st.info(
+                "No audio devices were reported by sounddevice. Upload a WAV chunk below as fallback."
+            )
+        else:
+            selected_device = st.selectbox(
+                "Step 1: Select system audio device",
+                devices,
+                format_func=lambda device: device.label,
+                key="monitor_internal_device",
+                help="Choose a speaker/output device on Windows WASAPI, BlackHole on macOS, or a monitor source on Linux.",
+            )
+            if selected_device.is_microphone:
+                st.warning(
+                    "This appears to be a microphone input. Device Audio Monitor is internal-audio only, so this source is blocked."
+                )
+            elif not selected_device.is_internal_candidate:
+                st.warning(
+                    "This device is not recognised as system/internal audio. Choose a speaker output, monitor source, BlackHole, Stereo Mix, or virtual cable."
+                )
+            else:
+                st.caption(f"Selected internal source: {selected_device.label}")
+
         setting_a, setting_b, setting_c = st.columns(3)
         with setting_a:
             chunk_seconds = st.slider(
@@ -907,46 +1026,93 @@ def _render_device_audio_monitor(
                 key="monitor_demo_transcript",
             )
 
-        if not AUDIO_RECORDER_AVAILABLE:
-            st.info(
-                "Install audio-recorder-streamlit in requirements.txt, then restart Streamlit to enable this recorder."
-            )
-            return
-
-        st.caption(
-            "The recorder below shows live input activity while recording. The speaker icon marks this as the in-device short-recording workflow."
+        st.markdown("**Step 2: Open Zoom / Google Meet / Teams, then capture a chunk**")
+        meter_slot = st.empty()
+        _render_internal_audio_meter(
+            meter_slot,
+            level=0.0,
+            progress=0.0,
+            status="Internal speaker output idle",
         )
-        audio_bytes = audio_recorder(
-            text="Click to record 5-10 seconds",
-            recording_color="#ef4444",
-            neutral_color="#6366f1",
-            icon_name="volume-up",
-            icon_size="2x",
-            key=f"device_audio_recorder_{int(st.session_state['live_monitor_generation'])}",
-        )
-
-        action_a, action_b = st.columns(2)
+        progress_slot = st.empty()
+        action_a, action_b, action_c = st.columns(3)
+        can_capture = bool(selected_device and selected_device.is_internal_candidate and not selected_device.is_microphone)
+        captured_wav = None
         with action_a:
-            if audio_bytes and st.button(
-                "Record another chunk",
+            if st.button(
+                f"Start {chunk_seconds}s internal capture",
+                type="primary",
                 use_container_width=True,
+                disabled=not can_capture,
             ):
-                st.session_state["live_monitor_generation"] += 1
-                st.rerun()
+                progress = progress_slot.progress(0.0, text="Speaker output capture starting...")
+
+                def update_meter(progress_value: float, level: float) -> None:
+                    meter = min(1.0, max(0.0, level * 10.0))
+                    _render_internal_audio_meter(
+                        meter_slot,
+                        level=meter,
+                        progress=progress_value,
+                        status="Capturing internal speaker output",
+                    )
+                    progress.progress(
+                        min(1.0, max(0.0, progress_value)),
+                        text=f"Speaker output level {meter:.0%}",
+                    )
+
+                try:
+                    _audio, _sample_rate, captured_wav = record_internal_chunk(
+                        selected_device,
+                        seconds=chunk_seconds,
+                        progress_callback=update_meter,
+                    )
+                    st.session_state["live_monitor_last_wav"] = captured_wav
+                    st.session_state["live_monitor_source"] = selected_device.label
+                except Exception as exc:
+                    st.session_state["live_monitor_error"] = str(exc)
+                else:
+                    _render_internal_audio_meter(
+                        meter_slot,
+                        level=0.0,
+                        progress=1.0,
+                        status="Internal speaker output capture complete",
+                    )
+                    progress.progress(1.0, text="Internal capture complete")
         with action_b:
+            if st.button("Stop capture session", use_container_width=True):
+                st.caption("Capture session stopped. Existing recordings remain available below.")
+        with action_c:
             if st.button("Clear session", use_container_width=True):
                 _clear_monitor_state()
                 st.rerun()
+
+        uploaded_wav = st.file_uploader(
+            "Fallback: upload a WAV chunk",
+            type=["wav"],
+            key="monitor_fallback_wav",
+            help="Use this when local internal capture is unavailable in the current environment.",
+        )
+        if uploaded_wav is not None:
+            captured_wav = uploaded_wav.getvalue()
+            st.session_state["live_monitor_last_wav"] = captured_wav
+            st.session_state["live_monitor_source"] = uploaded_wav.name
 
     if not WHISPER_AVAILABLE and transcript_source == "Local Whisper":
         st.caption("Local Whisper is unavailable. Use Demo fallback or install requirements.txt.")
     if not WHISPER_AVAILABLE:
         st.caption("Demo fallback keeps the page usable when Whisper is unavailable.")
 
+    audio_bytes = captured_wav or st.session_state.get("live_monitor_last_wav", b"")
     if audio_bytes:
         st.audio(audio_bytes, format="audio/wav")
         settings = json.dumps(
-            [chunk_seconds, transcript_source, whisper_size, demo_transcript],
+            [
+                chunk_seconds,
+                transcript_source,
+                whisper_size,
+                demo_transcript,
+                st.session_state.get("live_monitor_source", ""),
+            ],
             ensure_ascii=True,
         ).encode("utf-8")
         signature = hashlib.sha256(audio_bytes + settings).hexdigest()
@@ -988,7 +1154,7 @@ def _render_device_audio_monitor(
                     for chunk_index, result in enumerate(processed, 1):
                         result["clip"] = clip
                         result["clip_chunk"] = chunk_index
-                        result["capture_mode"] = "In-device short recording"
+                        result["capture_mode"] = "Internal system audio capture"
                     results.extend(processed)
                     del results[:-60]
                     signatures.append(signature)
@@ -1015,7 +1181,7 @@ def _render_device_audio_monitor(
         results,
         risk_threshold,
         state_key="live_monitor_carousel_index",
-        title="In-device recording analysis",
+        title="Internal system audio analysis",
         transcript_heading="Recorded device-audio transcript",
         frequency_heading="Latest in-device audio spectrum",
         latest_title="Latest local audio chunk {chunk}",
@@ -1024,11 +1190,11 @@ def _render_device_audio_monitor(
         history,
         results,
         transcript_source,
-        "In-device short audio recorder",
-        scan_type="In-device Audio",
-        source_name="In-device audio session",
+        "Internal system audio capture",
+        scan_type="Internal Audio",
+        source_name="Internal audio session",
         saved_signature_key="live_monitor_saved_signature",
-        button_label="Save in-device audio session to report history",
+        button_label="Save internal audio session to report history",
     )
 
 
@@ -1036,7 +1202,7 @@ def render_live_audio_page(root: Path, history: list[dict[str, object]]) -> None
     _init_live_state()
     render_section_header(
         "Live audio detection",
-        "Use separate tabs for the original Voice Recorder and the in-device short recording workflow.",
+        "Use separate tabs for the original Voice Recorder and the internal system-audio workflow.",
         "Audio analysis",
     )
     voice_tab, device_tab = st.tabs(["Voice Recorder", "Device Audio Monitor"])
