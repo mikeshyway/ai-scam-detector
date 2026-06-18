@@ -57,7 +57,7 @@ def check_ffmpeg() -> dict[str, Any]:
     elif "darwin" in system:
         install_command = "brew install ffmpeg"
     else:
-        install_command = "sudo apt update && sudo apt install ffmpeg"
+        install_command = "conda install -c conda-forge ffmpeg"
     return {
         "name": "ffmpeg",
         "available": executable is not None,

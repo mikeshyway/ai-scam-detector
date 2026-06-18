@@ -9,6 +9,7 @@ laptop audio output.
 from __future__ import annotations
 
 import io
+import wave
 from dataclasses import dataclass
 from typing import Callable
 
@@ -164,15 +165,22 @@ def resample_audio(
 
 
 def wav_bytes_from_audio(audio: np.ndarray, sample_rate: int = TARGET_SAMPLE_RATE) -> bytes:
-    """Encode mono float32 audio as WAV bytes."""
+    """Encode mono float32 audio as WAV bytes with a standard-library fallback."""
 
+    mono = normalise_audio(audio)
+    buffer = io.BytesIO()
     try:
         import soundfile as sf
-    except Exception as exc:
-        raise RuntimeError("soundfile is required to write captured WAV chunks.") from exc
+    except Exception:
+        pcm = np.round(mono * 32_767.0).astype("<i2").tobytes()
+        with wave.open(buffer, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(int(sample_rate))
+            wav_file.writeframes(pcm)
+        return buffer.getvalue()
 
-    buffer = io.BytesIO()
-    sf.write(buffer, normalise_audio(audio), sample_rate, format="WAV", subtype="PCM_16")
+    sf.write(buffer, mono, sample_rate, format="WAV", subtype="PCM_16")
     return buffer.getvalue()
 
 

@@ -72,10 +72,14 @@ python scripts/00_setup_check.py
 For local internal audio capture and Whisper transcription on the Live Audio Detection page:
 
 ```bash
-sudo apt update
-sudo apt install ffmpeg
-pip install -r requirements.txt
+python -m pip install sounddevice soundfile
+python -m pip install -r requirements.txt
+# Optional when FFmpeg is missing and Conda is available:
+conda install -c conda-forge ffmpeg
 ```
+
+These commands install into the currently active Python environment and do not require `sudo`.
+After installation, restart Streamlit and press **Refresh diagnostics** in Device Audio Monitor.
 
 The Live Audio Detection page opens in **Voice Recorder** mode. This uses Streamlit's browser
 recorder. **Device Audio Monitor** is a separate local-only internal audio mode using

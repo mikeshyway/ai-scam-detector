@@ -122,6 +122,9 @@ Implemented scope:
 - Reject likely microphone inputs.
 - Run automatic dependency and audio-device diagnostics when the page first opens.
 - Provide a refreshable setup panel with exact package/FFmpeg installation commands.
+- Fall back to Python's built-in PCM WAV writer when `soundfile` is unavailable.
+- Keep WAV upload, audio-only analysis, and manual/demo transcript paths available when local
+  capture dependencies are missing.
 - Test the selected source for three seconds and report duration, RMS, peak level, silence,
   playback, and pass/warning/error status.
 - Append non-fatal diagnostic snapshots to `logs/system_diagnostics.log`.

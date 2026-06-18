@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import unittest
+import wave
 
 import numpy as np
 
@@ -10,6 +12,7 @@ from src.audio.internal_capture import (
     classify_device,
     normalise_audio,
     resample_audio,
+    wav_bytes_from_audio,
 )
 
 
@@ -59,6 +62,18 @@ class InternalCaptureTests(unittest.TestCase):
         self.assertEqual(mono.shape, (48_000,))
         self.assertEqual(resampled.shape, (16_000,))
         self.assertTrue(np.all(np.isfinite(resampled)))
+
+    def test_wav_encoding_has_standard_library_fallback(self) -> None:
+        sample_rate = 16_000
+        audio = np.linspace(-0.2, 0.2, sample_rate, dtype=np.float32)
+
+        encoded = wav_bytes_from_audio(audio, sample_rate)
+
+        with wave.open(io.BytesIO(encoded), "rb") as wav_file:
+            self.assertEqual(wav_file.getnchannels(), 1)
+            self.assertEqual(wav_file.getsampwidth(), 2)
+            self.assertEqual(wav_file.getframerate(), sample_rate)
+            self.assertEqual(wav_file.getnframes(), sample_rate)
 
 
 if __name__ == "__main__":
