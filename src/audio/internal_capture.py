@@ -55,6 +55,26 @@ def host_api_priority(hostapi: str) -> int:
     return 10
 
 
+def requires_wasapi_loopback(
+    hostapi: str,
+    *,
+    max_input_channels: int,
+    max_output_channels: int,
+) -> bool:
+    """Return True for output-only Windows WASAPI devices.
+
+    These devices are useful diagnostics signals, but this capture helper opens
+    input streams. A speaker output with zero input channels needs a real
+    loopback/virtual cable endpoint before Python can read it.
+    """
+
+    return (
+        "wasapi" in hostapi.casefold()
+        and max_input_channels <= 0
+        and max_output_channels > 0
+    )
+
+
 @dataclass(frozen=True)
 class InternalAudioDevice:
     """One selectable local audio device."""
@@ -71,6 +91,7 @@ class InternalAudioDevice:
     is_virtual_device: bool = False
     is_recommended: bool = False
     is_unsupported_backend: bool = False
+    is_loopback_required: bool = False
     host_priority: int = 10
 
     @property
@@ -80,10 +101,16 @@ class InternalAudioDevice:
                 f"{self.name} [WDM-KS unsupported for blocking capture | "
                 f"{self.hostapi}]"
             )
+        if getattr(self, "is_loopback_required", False):
+            return (
+                f"{self.name} [WASAPI loopback required - diagnostics only | "
+                f"{self.hostapi}]"
+            )
         if getattr(self, "is_virtual_device", False):
             readiness = "Input-ready" if self.max_input_channels > 0 else "Routing endpoint"
+            prefix = "[Recommended] " if getattr(self, "is_recommended", False) else ""
             return (
-                f"[Recommended] {self.name} "
+                f"{prefix}{self.name} "
                 f"[Meeting Capture Device | {readiness} | {self.hostapi}]"
             )
         return f"{self.name} [{self.kind} | {self.hostapi}]"
@@ -129,6 +156,17 @@ def classify_device(
     return "Unavailable", False, False
 
 
+def can_capture_internal_device(device: InternalAudioDevice) -> bool:
+    """Return True when the current blocking InputStream workflow can open it."""
+
+    return (
+        bool(getattr(device, "is_internal_candidate", False))
+        and not bool(getattr(device, "is_microphone", False))
+        and not bool(getattr(device, "is_unsupported_backend", False))
+        and int(getattr(device, "max_input_channels", 0) or 0) > 0
+    )
+
+
 def sounddevice_available() -> bool:
     try:
         import sounddevice  # noqa: F401
@@ -159,6 +197,14 @@ def list_internal_audio_devices() -> list[InternalAudioDevice]:
         )
         is_virtual = is_virtual_audio_device(str(device["name"]))
         unsupported_backend = is_unsupported_capture_host(hostapi)
+        loopback_required = (
+            not is_virtual
+            and requires_wasapi_loopback(
+                hostapi,
+                max_input_channels=max_input,
+                max_output_channels=max_output,
+            )
+        )
         if max_input <= 0 and max_output <= 0:
             continue
         devices.append(
@@ -173,8 +219,9 @@ def list_internal_audio_devices() -> list[InternalAudioDevice]:
                 is_microphone=is_microphone,
                 is_internal_candidate=is_internal,
                 is_virtual_device=is_virtual,
-                is_recommended=is_virtual and not unsupported_backend,
+                is_recommended=is_virtual and max_input > 0 and not unsupported_backend,
                 is_unsupported_backend=unsupported_backend,
+                is_loopback_required=loopback_required,
                 host_priority=host_api_priority(hostapi),
             )
         )
@@ -184,12 +231,15 @@ def list_internal_audio_devices() -> list[InternalAudioDevice]:
         key=lambda item: (
             getattr(item, "is_unsupported_backend", False),
             0
-            if getattr(item, "is_virtual_device", False) and item.max_input_channels > 0
+            if can_capture_internal_device(item)
+            and getattr(item, "is_virtual_device", False)
             else 1
-            if item.is_internal_candidate
+            if can_capture_internal_device(item)
             else 2
+            if getattr(item, "is_loopback_required", False)
+            else 3
             if getattr(item, "is_virtual_device", False)
-            else 3,
+            else 4,
             getattr(item, "host_priority", 10),
             not item.is_internal_candidate,
             item.is_microphone,
@@ -253,10 +303,9 @@ def _stream_settings(device: InternalAudioDevice):
     import sounddevice as sd
 
     extra_settings = None
-    channels = max(1, min(2, device.max_input_channels or device.max_output_channels))
-    if "wasapi" in device.hostapi.casefold() and device.max_output_channels > 0:
+    channels = max(1, min(2, device.max_input_channels))
+    if "wasapi" in device.hostapi.casefold() and device.max_input_channels > 0:
         extra_settings = sd.WasapiSettings(auto_convert=True)
-        channels = max(1, min(2, device.max_output_channels))
     return extra_settings, channels
 
 
@@ -307,6 +356,18 @@ def record_internal_chunk(
         raise RuntimeError(
             "Selected device is not an internal/system-audio source. Choose a "
             "WASAPI output, monitor source, BlackHole, Stereo Mix, or virtual cable."
+        )
+    if device.max_input_channels <= 0:
+        if getattr(device, "is_loopback_required", False):
+            raise RuntimeError(
+                f"'{device.name}' is a speaker/output device with 0 input channels. "
+                "It cannot be opened as a normal input stream. Route the meeting audio "
+                "through VB-Cable/VoiceMeeter/BlackHole and select the input-capable "
+                "capture endpoint instead."
+            )
+        raise RuntimeError(
+            f"'{device.name}' has 0 input channels and cannot be recorded directly. "
+            "Select an input-capable monitor source or use the WAV upload fallback."
         )
     if getattr(device, "is_unsupported_backend", False) or is_unsupported_capture_host(
         device.hostapi
@@ -404,6 +465,7 @@ def record_internal_chunk(
 __all__ = [
     "InternalAudioDevice",
     "TARGET_SAMPLE_RATE",
+    "can_capture_internal_device",
     "classify_device",
     "host_api_priority",
     "is_unsupported_capture_host",
@@ -412,6 +474,7 @@ __all__ = [
     "normalise_audio",
     "record_internal_chunk",
     "resample_audio",
+    "requires_wasapi_loopback",
     "sounddevice_available",
     "wav_bytes_from_audio",
 ]

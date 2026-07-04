@@ -160,6 +160,10 @@ def inject_css() -> None:
         .content-card,.feature-card,.scenario-panel{background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:1.2rem 1.3rem;margin-bottom:1.05rem;box-shadow:0 2px 12px rgba(0,0,0,.15);transition:border-color 200ms,box-shadow 200ms,transform 180ms var(--ease-spring);position:relative;overflow:hidden;}
         .content-card:hover,.feature-card:hover,.scenario-panel:hover{border-color:var(--border-medium);box-shadow:0 6px 22px rgba(0,0,0,.20);}
         .content-card.accent-violet:before,.content-card.accent-red:before,.content-card.accent-green:before{content:'';position:absolute;top:0;left:0;right:0;height:2px}.content-card.accent-violet:before{background:var(--grad-primary)}.content-card.accent-red:before{background:var(--grad-danger)}.content-card.accent-green:before{background:var(--grad-success)}
+        .section-divider{display:flex;align-items:center;gap:14px;margin:1rem 0 1.25rem}.section-divider:before,.section-divider:after{content:'';flex:1;height:1px;background:rgba(148,163,184,.12)}.section-divider span{font-size:.74rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--text-muted)}
+        .soft-panel{background:rgba(17,24,39,.45);border:1px solid rgba(148,163,184,.08);border-radius:14px;padding:1rem 1.1rem;margin:.5rem 0 1rem;color:var(--text-secondary);font-size:.9rem;line-height:1.6}
+        .soft-panel p{margin:0;color:var(--text-secondary)}.soft-panel strong{color:var(--text-primary)}
+        .accent-strip{border-left:4px solid var(--accent-cyan);padding-left:1rem;margin:1rem 0;color:var(--text-secondary)}.accent-strip h3{margin:0 0 .25rem}.accent-strip p{margin:0}
         .feature-card{min-height:145px}.feature-card:hover{transform:translateY(-2px)}
         .feature-index{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;margin-bottom:.85rem;border-radius:9px;background:rgba(37,99,235,.15);color:#BFDBFE;font-family:'JetBrains Mono',monospace;font-size:.7rem;font-weight:750;border:1px solid rgba(37,99,235,.28);}
         .feature-card p{color:var(--text-secondary);font-size:.88rem;line-height:1.55;margin-bottom:0;}
@@ -261,11 +265,40 @@ def render_info_banner(body: str, kind: Literal["info", "warning", "danger", "su
 
 
 def render_content_card_open(accent: Literal["violet", "red", "green"] = "violet") -> None:
-    st.markdown(f'<div class="content-card accent-{_clean(accent)} app-shell">', unsafe_allow_html=True)
+    st.markdown(f'<div class="content-card accent-{_clean(accent)}">', unsafe_allow_html=True)
 
 
 def render_content_card_close() -> None:
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_section_divider(title: str) -> None:
+    st.markdown(
+        f'<div class="section-divider"><span>{_clean(title)}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_soft_panel(body: str) -> None:
+    st.markdown(
+        f'<div class="soft-panel"><p>{_clean(body)}</p></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_soft_panel_html(body_html: str) -> None:
+    st.markdown(
+        f'<div class="soft-panel">{body_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_accent_strip(title: str, body: str = "") -> None:
+    body_html = f"<p>{_clean(body)}</p>" if body else ""
+    st.markdown(
+        f'<div class="accent-strip"><h3>{_clean(title)}</h3>{body_html}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_analysis_ready(message: str = "New analysis ready - scroll to results") -> None:

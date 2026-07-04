@@ -52,6 +52,17 @@ except Exception:
     WHISPER_AVAILABLE = False
 
 
+def _can_capture_internal_device(device: Any) -> bool:
+    """Return True when Device Audio Monitor can open this source safely."""
+
+    return (
+        bool(getattr(device, "is_internal_candidate", False))
+        and not bool(getattr(device, "is_microphone", False))
+        and not bool(getattr(device, "is_unsupported_backend", False))
+        and int(getattr(device, "max_input_channels", 0) or 0) > 0
+    )
+
+
 @st.cache_resource(show_spinner=False)
 def _load_audio_classifier(root: str):
     try:
@@ -837,6 +848,7 @@ def _render_audio_setup_diagnostics(
                             "Output": item.get("max_output_channels", 0),
                             "WASAPI": "Yes" if item.get("is_wasapi") else "No",
                             "Input-ready": "Yes" if item.get("can_open_as_input") else "No",
+                            "Capture-ready": "Yes" if item.get("is_capture_ready") else "No",
                         }
                         for item in meeting_devices
                         if isinstance(item, dict)
@@ -1174,15 +1186,20 @@ def _render_device_audio_monitor(
             for device in reported_devices
             if getattr(device, "is_unsupported_backend", False)
         ]
+        loopback_required_devices = [
+            device
+            for device in reported_devices
+            if getattr(device, "is_loopback_required", False)
+        ]
         devices = [
             device
             for device in reported_devices
-            if not getattr(device, "is_unsupported_backend", False)
+            if _can_capture_internal_device(device)
         ]
         stored_device = st.session_state.get("monitor_supported_internal_device")
-        if stored_device is not None and not hasattr(
-            stored_device,
-            "is_unsupported_backend",
+        if stored_device is not None and (
+            not hasattr(stored_device, "is_unsupported_backend")
+            or not _can_capture_internal_device(stored_device)
         ):
             del st.session_state["monitor_supported_internal_device"]
         selected_device = None
@@ -1190,6 +1207,18 @@ def _render_device_audio_monitor(
             st.caption(
                 "Setup required: sounddevice is unavailable in this Python environment. "
                 "Open Audio setup and diagnostics below."
+            )
+        elif not devices and loopback_required_devices and unsupported_devices:
+            st.caption(
+                "Speaker output and WDM-KS sources were detected, but neither can be "
+                "opened by the current input-stream capture method. Use an input-capable "
+                "virtual cable endpoint such as CABLE Output / VoiceMeeter Output, or upload a WAV chunk."
+            )
+        elif not devices and loopback_required_devices:
+            st.caption(
+                "A Windows speaker output was detected, but it has 0 input channels. "
+                "Route meeting audio through VB-Cable/VoiceMeeter/BlackHole and select the "
+                "input-capable capture endpoint."
             )
         elif not devices and unsupported_devices:
             st.caption(
@@ -1207,8 +1236,9 @@ def _render_device_audio_monitor(
                 format_func=lambda device: device.label,
                 key="monitor_supported_internal_device",
                 help=(
-                    "Preferred Windows order: WASAPI, DirectSound, then MME. "
-                    "WDM-KS is shown only in diagnostics because blocking capture is unsupported."
+                    "Only input-capable internal capture sources are selectable. "
+                    "Speaker outputs and WDM-KS entries stay in diagnostics because this page "
+                    "does not open them as normal input streams."
                 ),
             )
             if getattr(selected_device, "is_virtual_device", False):
@@ -1308,10 +1338,22 @@ def _render_device_audio_monitor(
                 "Internal capture setup needed: install sounddevice with "
                 "`pip install sounddevice soundfile`, then restart Streamlit."
             )
+        elif not devices and loopback_required_devices and unsupported_devices:
+            capture_problem = (
+                "Speaker outputs and Windows WDM-KS sources were detected, but neither "
+                "is selectable for this capture method. Use an input-capable virtual "
+                "cable endpoint such as CABLE Output / VoiceMeeter Output, or upload a WAV chunk."
+            )
         elif not devices and unsupported_devices:
             capture_problem = (
                 "Only Windows WDM-KS sources are available, and their blocking API is unsupported. "
                 "Enable a WASAPI/DirectSound/MME duplicate or configure VB-Cable/VoiceMeeter."
+            )
+        elif not devices and loopback_required_devices:
+            capture_problem = (
+                "Only speaker/output devices were detected. They have 0 input channels in "
+                "this capture workflow, so route meeting audio through VB-Cable/VoiceMeeter/"
+                "BlackHole and select the input-capable endpoint."
             )
         elif not devices:
             capture_problem = (
@@ -1332,6 +1374,11 @@ def _render_device_audio_monitor(
             capture_problem = (
                 "Select the input-capable endpoint of this virtual audio device. The current "
                 "CABLE/VoiceMeeter/BlackHole endpoint is for playback or routing only."
+            )
+        elif selected_device.max_input_channels <= 0:
+            capture_problem = (
+                "Selected device has 0 input channels and cannot be opened as an input stream. "
+                "Use an input-capable virtual cable or monitor source instead."
             )
         elif not selected_device.is_internal_candidate:
             capture_problem = (

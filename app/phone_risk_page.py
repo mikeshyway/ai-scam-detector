@@ -50,6 +50,92 @@ def _risk_from_number(value: str, demo_phones: pd.DataFrame) -> dict[str, object
     }
 
 
+def _phone_indicator_rows(value: str, result: dict[str, object]) -> pd.DataFrame:
+    normalized = _normalize_phone(value)
+    if not normalized:
+        return pd.DataFrame()
+
+    rows: list[dict[str, object]] = []
+    reports = int(result.get("reports", 0) or 0)
+    risk_score = int(result.get("risk_score", 0) or 0)
+    tag = str(result.get("tag", "unknown")).strip()
+    source = str(result.get("source", "manual heuristic demo")).strip()
+
+    if reports > 0:
+        rows.append(
+            {
+                "Indicator": "Reported number match",
+                "Category": "Reputation",
+                "Specific Tactic": tag,
+                "Direction": "Raises caller risk",
+                "Evidence": f"{reports} synthetic report(s)",
+                "Explanation": "Numbers with repeated scam reports should be verified through an official channel before responding.",
+            }
+        )
+
+    if risk_score >= 70:
+        rows.append(
+            {
+                "Indicator": "High synthetic risk score",
+                "Category": "Reputation",
+                "Specific Tactic": "Complaint-weighted risk",
+                "Direction": "Raises caller risk",
+                "Evidence": f"{risk_score}%",
+                "Explanation": "The demo reputation record places this caller in the high-risk range.",
+            }
+        )
+
+    if len(normalized) < 9 or len(normalized) > 15:
+        rows.append(
+            {
+                "Indicator": "Unusual number length",
+                "Category": "Number pattern",
+                "Specific Tactic": "Malformed or incomplete caller ID",
+                "Direction": "Raises caller risk",
+                "Evidence": f"{len(normalized)} digits",
+                "Explanation": "Very short or very long numbers may indicate malformed, spoofed, or non-standard caller ID data.",
+            }
+        )
+
+    if re.search(r"(\d)\1{5,}", normalized):
+        rows.append(
+            {
+                "Indicator": "Repeated digit pattern",
+                "Category": "Number pattern",
+                "Specific Tactic": "Artificial-looking caller ID",
+                "Direction": "Raises caller risk",
+                "Evidence": "6+ repeated digits",
+                "Explanation": "Long repeated digit sequences can indicate test numbers, spoofed numbers, or low-quality caller ID data.",
+            }
+        )
+
+    if not (normalized.startswith("60") or normalized.startswith("0")):
+        rows.append(
+            {
+                "Indicator": "Region mismatch check",
+                "Category": "Caller identity",
+                "Specific Tactic": "Non-local prefix for Malaysia-focused demo",
+                "Direction": "Needs verification",
+                "Evidence": f"+{normalized[:2]} prefix",
+                "Explanation": "A non-local prefix is not automatically suspicious, but it should match the identity claimed by the caller.",
+            }
+        )
+
+    if not rows:
+        rows.append(
+            {
+                "Indicator": "No strong pattern",
+                "Category": "Caller identity",
+                "Specific Tactic": "Manual review",
+                "Direction": "Lower caller risk",
+                "Evidence": source,
+                "Explanation": "No strong pattern was found in the demo checker. Still verify sensitive requests through official channels.",
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None:
     render_demo_notice(root)
     render_section_header(
@@ -75,6 +161,11 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
             "Caller ID risk result",
             score,
             f"Tag: {result['tag']}. Reports in demo data: {int(result['reports'])}.",
+        )
+        st.dataframe(
+            _phone_indicator_rows(number, result),
+            hide_index=True,
+            use_container_width=True,
         )
         history.insert(
             0,

@@ -23,9 +23,9 @@ from src.explainability import (
     educational_summary,
     find_suspicious_phrases,
     highlighted_html,
-    rule_based_text_prediction,
     top_model_terms,
 )
+from src.rule_demo import rule_based_text_prediction
 from src.text_classifier import load_text_artifacts
 
 

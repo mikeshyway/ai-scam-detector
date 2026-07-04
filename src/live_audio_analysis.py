@@ -8,7 +8,8 @@ from typing import Any
 
 import numpy as np
 
-from src.explainability import find_suspicious_phrases, rule_based_text_prediction
+from src.explainability import find_suspicious_phrases
+from src.rule_demo import rule_based_text_prediction
 from src.time_utils import now_for_app
 
 

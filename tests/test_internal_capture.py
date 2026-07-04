@@ -13,6 +13,7 @@ import numpy as np
 
 from src.audio.internal_capture import (
     InternalAudioDevice,
+    can_capture_internal_device,
     classify_device,
     host_api_priority,
     is_virtual_audio_device,
@@ -20,6 +21,7 @@ from src.audio.internal_capture import (
     normalise_audio,
     record_internal_chunk,
     resample_audio,
+    requires_wasapi_loopback,
     wav_bytes_from_audio,
 )
 
@@ -132,6 +134,65 @@ class InternalCaptureTests(unittest.TestCase):
         self.assertEqual(sample_rate, 16_000)
         self.assertEqual(audio.size, 16_000)
         self.assertTrue(wav_bytes.startswith(b"RIFF"))
+
+    def test_wasapi_speaker_output_is_diagnostics_only_without_loopback_input(self) -> None:
+        self.assertTrue(
+            requires_wasapi_loopback(
+                "Windows WASAPI",
+                max_input_channels=0,
+                max_output_channels=2,
+            )
+        )
+
+        fake_devices = [
+            {
+                "index": 8,
+                "name": "Speakers (2- Realtek(R) Audio)",
+                "hostapi": 0,
+                "max_input_channels": 0,
+                "max_output_channels": 2,
+                "default_samplerate": 48_000,
+            },
+            {
+                "index": 9,
+                "name": "CABLE Output (VB-Audio Virtual Cable)",
+                "hostapi": 0,
+                "max_input_channels": 2,
+                "max_output_channels": 0,
+                "default_samplerate": 48_000,
+            },
+            {
+                "index": 10,
+                "name": "CABLE Input (VB-Audio Virtual Cable)",
+                "hostapi": 0,
+                "max_input_channels": 0,
+                "max_output_channels": 2,
+                "default_samplerate": 48_000,
+            },
+        ]
+        fake_sounddevice = types.SimpleNamespace(
+            query_hostapis=lambda: [{"name": "Windows WASAPI"}],
+            query_devices=lambda: fake_devices,
+        )
+
+        with patch.dict(sys.modules, {"sounddevice": fake_sounddevice}):
+            devices = list_internal_audio_devices()
+
+        cable = devices[0]
+        speakers = next(device for device in devices if device.index == 8)
+        cable_input = next(device for device in devices if device.index == 10)
+        self.assertEqual(cable.index, 9)
+        self.assertTrue(can_capture_internal_device(cable))
+        self.assertTrue(cable.is_recommended)
+        self.assertFalse(can_capture_internal_device(speakers))
+        self.assertTrue(speakers.is_loopback_required)
+        self.assertIn("WASAPI loopback required", speakers.label)
+        self.assertFalse(can_capture_internal_device(cable_input))
+        self.assertFalse(cable_input.is_loopback_required)
+        self.assertIn("Routing endpoint", cable_input.label)
+
+        with self.assertRaisesRegex(RuntimeError, "0 input channels"):
+            record_internal_chunk(speakers, seconds=1, minimum_seconds=1)
 
     def test_virtual_meeting_devices_are_recommended_and_prioritized(self) -> None:
         for name in (

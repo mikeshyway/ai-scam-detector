@@ -49,9 +49,9 @@ def render_detection_center_page(root: Path, history: list[dict[str, object]]) -
             "Uses MFCC features and an SVM model to inspect uploaded WAV or FLAC speech recordings.",
             "03",
         )
-        from app.audio_tab import render_audio_tab
+        from app.audio_deepseek_tab import render_audio_deepseek_tab
 
-        render_audio_tab(root, history)
+        render_audio_deepseek_tab(root, history)
     with phone_tab:
         render_feature_card(
             "Phone number caller-risk checker",

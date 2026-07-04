@@ -39,6 +39,21 @@ def _package_check(
     }
 
 
+def _requires_wasapi_loopback(
+    hostapi: str,
+    *,
+    max_input_channels: int,
+    max_output_channels: int,
+) -> bool:
+    """Identify output-only Windows WASAPI devices for diagnostics."""
+
+    return (
+        "wasapi" in hostapi.casefold()
+        and max_input_channels <= 0
+        and max_output_channels > 0
+    )
+
+
 def check_sounddevice() -> dict[str, Any]:
     return _package_check(
         "sounddevice",
@@ -115,7 +130,34 @@ def get_audio_devices() -> list[dict[str, Any]]:
             is_wasapi = "wasapi" in hostapi.casefold()
             unsupported_backend = is_unsupported_capture_host(hostapi)
             is_windows_output = is_wasapi and max_output > 0
+            loopback_required = (
+                not is_virtual
+                and _requires_wasapi_loopback(
+                    hostapi,
+                    max_input_channels=max_input,
+                    max_output_channels=max_output,
+                )
+            )
             is_internal = is_windows_output or (has_internal_name and max_input > 0)
+            can_open_as_input = max_input > 0
+            is_capture_ready = (
+                is_internal
+                and can_open_as_input
+                and not unsupported_backend
+                and not is_microphone
+            )
+            if unsupported_backend:
+                capture_support = "Unsupported: WDM-KS blocking API"
+            elif loopback_required:
+                capture_support = "Diagnostics only: WASAPI loopback required"
+            elif is_virtual and not can_open_as_input:
+                capture_support = "Routing endpoint only: select paired capture input"
+            elif is_capture_ready:
+                capture_support = "Capture-ready input"
+            elif is_microphone:
+                capture_support = "Microphone only"
+            else:
+                capture_support = "Not a meeting capture input"
             devices.append(
                 {
                     "index": int(device.get("index", index)),
@@ -128,16 +170,14 @@ def get_audio_devices() -> list[dict[str, Any]]:
                     "is_internal_candidate": is_internal,
                     "is_wasapi": is_wasapi,
                     "is_loopback_candidate": is_internal,
-                    "can_open_as_input": max_input > 0,
+                    "can_open_as_input": can_open_as_input,
                     "is_virtual_device": is_virtual,
-                    "is_recommended": is_virtual and not unsupported_backend,
+                    "is_recommended": is_virtual and is_capture_ready,
                     "is_unsupported_backend": unsupported_backend,
+                    "is_loopback_required": loopback_required,
+                    "is_capture_ready": is_capture_ready,
                     "host_priority": host_api_priority(hostapi),
-                    "capture_support": (
-                        "Unsupported: WDM-KS blocking API"
-                        if unsupported_backend
-                        else "Supported backend"
-                    ),
+                    "capture_support": capture_support,
                     "category": (
                         "Meeting Capture Devices"
                         if is_virtual
@@ -154,12 +194,14 @@ def get_audio_devices() -> list[dict[str, Any]]:
             key=lambda item: (
                 item["is_unsupported_backend"],
                 0
-                if item["is_virtual_device"] and item["can_open_as_input"]
+                if item["is_virtual_device"] and item["is_capture_ready"]
                 else 1
-                if item["is_internal_candidate"]
+                if item["is_capture_ready"]
                 else 2
+                if item["is_loopback_required"]
+                else 3
                 if item["is_virtual_device"]
-                else 3,
+                else 4,
                 item["host_priority"],
                 not item["is_internal_candidate"],
                 item["is_microphone"],
@@ -214,9 +256,13 @@ def build_audio_diagnostics() -> dict[str, Any]:
     capture_inputs = [
         item
         for item in meeting_devices
-        if item["is_internal_candidate"]
-        and item["can_open_as_input"]
-        and not item["is_unsupported_backend"]
+        if item.get("is_capture_ready")
+    ]
+    loopback_required_devices = [
+        item for item in meeting_devices if item.get("is_loopback_required")
+    ]
+    unsupported_devices = [
+        item for item in meeting_devices if item.get("is_unsupported_backend")
     ]
     microphones = [item for item in devices if item["is_microphone"]]
     required_ready = all(
@@ -232,17 +278,31 @@ def build_audio_diagnostics() -> dict[str, Any]:
     elif not required_ready:
         capture_status = "ERROR"
         capture_message = "Install the missing Python audio dependencies, then refresh checks."
-    elif any(item["is_unsupported_backend"] for item in meeting_devices):
+    elif loopback_required_devices and unsupported_devices:
+        capture_status = "WARNING"
+        capture_message = (
+            "Speaker output and WDM-KS sources were detected, but neither is selectable "
+            "for this blocking capture method. Use an input-capable virtual cable "
+            "such as CABLE Output/VoiceMeeter Output, or upload a WAV chunk."
+        )
+    elif unsupported_devices:
         capture_status = "WARNING"
         capture_message = (
             "Only WDM-KS meeting inputs were detected. This backend reports 'Blocking API not "
             "supported yet'; choose a WASAPI, DirectSound, or MME duplicate, or use a virtual cable."
         )
-    elif meeting_devices:
+    elif loopback_required_devices:
         capture_status = "WARNING"
         capture_message = (
             "A WASAPI speaker output was detected, but no input-capable loopback source is "
-            "available. Enable Stereo Mix or route audio through a virtual cable."
+            "available. Route audio through VB-Cable/VoiceMeeter/BlackHole and select "
+            "the input-capable capture endpoint."
+        )
+    elif meeting_devices:
+        capture_status = "WARNING"
+        capture_message = (
+            "Meeting audio devices were detected, but none can be opened as an input "
+            "source. Select an input-capable capture endpoint or use the WAV upload fallback."
         )
     else:
         capture_status = "WARNING"

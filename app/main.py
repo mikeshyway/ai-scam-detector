@@ -22,12 +22,6 @@ from app.ui_components import (
 )
 
 
-def _simulation(root: Path, history: list[dict[str, object]]) -> None:
-    from app.simulation_lab_page import render_simulation_lab_page
-
-    render_simulation_lab_page(root, history)
-
-
 def _email(root: Path, history: list[dict[str, object]]) -> None:
     from app.detection_center_page import render_detection_center_page
 
@@ -47,14 +41,12 @@ def _report(root: Path, history: list[dict[str, object]]) -> None:
 
 
 PAGES = {
-    "Scam Simulation Lab": _simulation,
     "Live Audio Detection": _live_audio,
     "Detection Center": _email,
     "AI Report Generator": _report,
 }
 
 PAGE_ICONS = {
-    "Scam Simulation Lab": "SIM",
     "Live Audio Detection": "LIVE",
     "Detection Center": "DET",
     "AI Report Generator": "REP",
