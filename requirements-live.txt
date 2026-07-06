@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Kept for compatibility with older setup notes.
+# Live audio dependencies are now included in requirements.txt.
+openai-whisper

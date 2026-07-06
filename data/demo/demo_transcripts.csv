@@ -1,0 +1,6 @@
+sample_id,transcript,label,source
+DEMO-CALL-001,"Caller: I am from the bank fraud team. Your account is suspended. Share the OTP immediately.",Scam,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
+DEMO-CALL-002,"Lecturer: Tomorrow's class will move online. The official meeting link is in the LMS announcement.",Non-scam,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
+DEMO-CALL-003,"Caller: This is confidential. Do not tell anyone. Transfer RM500 to secure your student visa.",Scam,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
+DEMO-CALL-004,"Advisor: Please submit your course registration form before Friday through the student portal.",Non-scam,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
+DEMO-CALL-005,"Caller: The scholarship office selected you, but you must pay a processing fee within 24 hours.",Scam,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
