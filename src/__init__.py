@@ -4,6 +4,7 @@ __all__ = [
     "audio",
     "data",
     "preprocessing",
+    "phone",
     "reporting",
     "text",
     "training",

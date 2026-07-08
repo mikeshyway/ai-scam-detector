@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from email import policy
+from email.parser import BytesParser
 import html
+from io import BytesIO
 import math
 from pathlib import Path
 import re
+import time
 from typing import Any
 
 import pandas as pd
@@ -15,7 +19,6 @@ import streamlit as st
 
 from app.ui_components import (
     apply_chart_theme,
-    get_demo_data,
     render_analysis_ready,
     render_content_card_close,
     render_content_card_open,
@@ -48,6 +51,9 @@ DISPLAY_MODELS = [
     "Random Forest",
     "XGBoost",
 ]
+
+SUPPORTED_UPLOAD_TYPES = ["eml", "msg", "txt", "html", "htm", "pdf", "docx", "csv"]
+SUPPORTED_FORMAT_LABELS = ["EML", "MSG", "TXT", "HTML", "PDF", "DOCX", "CSV"]
 
 
 @st.cache_resource(show_spinner=False)
@@ -84,26 +90,227 @@ def _available_models(root: Path) -> list[str]:
     return available
 
 
+def _decode_uploaded_bytes(raw: bytes) -> str:
+    for encoding in ("utf-8", "utf-16", "latin-1"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="ignore")
+
+
+def _strip_html_content(value: str) -> str:
+    value = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", value)
+    value = re.sub(r"(?is)<br\s*/?>", "\n", value)
+    value = re.sub(r"(?is)</p\s*>", "\n", value)
+    value = re.sub(r"(?is)<[^>]+>", " ", value)
+    value = html.unescape(value)
+    value = re.sub(r"[ \t]+", " ", value)
+    value = re.sub(r"\n{3,}", "\n\n", value)
+    return value.strip()
+
+
+def _message_part_text(part: Any) -> str:
+    try:
+        content_type = part.get_content_type()
+    except Exception:
+        content_type = ""
+
+    if content_type not in {"text/plain", "text/html"}:
+        return ""
+
+    try:
+        payload = part.get_content()
+    except Exception:
+        decoded = part.get_payload(decode=True)
+        payload = _decode_uploaded_bytes(decoded) if isinstance(decoded, bytes) else str(part.get_payload() or "")
+
+    text = str(payload or "")
+    if content_type == "text/html":
+        text = _strip_html_content(text)
+    return text.strip()
+
+
+def _extract_eml_text(raw: bytes) -> str:
+    message = BytesParser(policy=policy.default).parsebytes(raw)
+    parts: list[str] = []
+
+    for key in ("From", "To", "Subject", "Date"):
+        value = message.get(key)
+        if value:
+            parts.append(f"{key}: {value}")
+
+    text_parts: list[str] = []
+    preferred_body = message.get_body(preferencelist=("plain", "html"))
+    if preferred_body is not None:
+        preferred_text = _message_part_text(preferred_body)
+        if preferred_text:
+            text_parts.append(preferred_text)
+
+    for part in message.walk():
+        if part.is_multipart():
+            continue
+        text = _message_part_text(part)
+        if text and text not in text_parts:
+            text_parts.append(text)
+
+    if not text_parts:
+        payload = message.get_payload(decode=True)
+        if isinstance(payload, bytes):
+            fallback_text = _decode_uploaded_bytes(payload).strip()
+            if fallback_text:
+                text_parts.append(fallback_text)
+
+    parts.extend(text_parts)
+
+    extracted = "\n\n".join(part.strip() for part in parts if str(part).strip())
+    if not extracted:
+        raise RuntimeError(
+            "EML text could not be extracted. The email may contain only attachments, "
+            "encrypted content, or an unsupported message structure."
+        )
+    return extracted
+
+
+def _extract_docx_text(raw: bytes) -> str:
+    try:
+        from docx import Document
+    except Exception as exc:
+        raise RuntimeError("Install `python-docx` to extract Word document text.") from exc
+
+    document = Document(BytesIO(raw))
+    paragraphs = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
+    table_cells: list[str] = []
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                if cell.text.strip():
+                    table_cells.append(cell.text.strip())
+
+    return "\n".join([*paragraphs, *table_cells]).strip()
+
+
+def _extract_pdf_text(raw: bytes) -> str:
+    try:
+        from pypdf import PdfReader
+    except Exception:
+        try:
+            from PyPDF2 import PdfReader
+        except Exception as exc:
+            raise RuntimeError("Install `pypdf` or `PyPDF2` to extract PDF text.") from exc
+
+    reader = PdfReader(BytesIO(raw))
+    pages = []
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        if text.strip():
+            pages.append(text.strip())
+    extracted = "\n\n".join(pages).strip()
+    if not extracted:
+        raise RuntimeError(
+            "PDF text could not be extracted. This PDF may be image-only or scanned; "
+            "use OCR externally or paste the visible text into the preview box."
+        )
+    return extracted
+
+
+def _extract_msg_text(raw: bytes) -> str:
+    try:
+        import extract_msg
+    except Exception as exc:
+        raise RuntimeError("Install `extract-msg` to extract Outlook .msg files.") from exc
+
+    import tempfile
+
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".msg") as temp_file:
+            temp_file.write(raw)
+            temp_path = temp_file.name
+
+        message = extract_msg.Message(temp_path)
+        try:
+            html_body = getattr(message, "htmlBody", None)
+            if isinstance(html_body, bytes):
+                html_body = _decode_uploaded_bytes(html_body)
+
+            body = message.body or ""
+            if not body and html_body:
+                body = _strip_html_content(str(html_body))
+
+            parts = [
+                f"From: {message.sender}" if message.sender else "",
+                f"To: {message.to}" if message.to else "",
+                f"CC: {message.cc}" if getattr(message, "cc", None) else "",
+                f"Subject: {message.subject}" if message.subject else "",
+                f"Date: {message.date}" if getattr(message, "date", None) else "",
+                body,
+            ]
+            extracted = "\n\n".join(part.strip() for part in parts if part and part.strip())
+            if not extracted:
+                raise RuntimeError(
+                    "Outlook .msg text could not be extracted. The file may be encrypted, "
+                    "corrupted, or contain only unsupported embedded content."
+                )
+            return extracted
+        finally:
+            close = getattr(message, "close", None)
+            if callable(close):
+                close()
+    finally:
+        if temp_path:
+            try:
+                Path(temp_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def _read_uploaded_text(uploaded_file) -> str | pd.DataFrame | None:
     if uploaded_file is None:
         return None
 
     suffix = Path(uploaded_file.name).suffix.lower()
+    raw = uploaded_file.getvalue()
 
-    if suffix == ".txt":
-        return uploaded_file.getvalue().decode("utf-8", errors="ignore")
+    try:
+        if suffix in {".txt"}:
+            return _decode_uploaded_bytes(raw)
 
-    if suffix == ".csv":
-        return pd.read_csv(uploaded_file)
+        if suffix == ".csv":
+            return pd.read_csv(BytesIO(raw))
 
-    st.warning("Only .txt and .csv files are supported in this tab.")
+        if suffix == ".eml":
+            return _extract_eml_text(raw)
+
+        if suffix in {".html", ".htm"}:
+            return _strip_html_content(_decode_uploaded_bytes(raw))
+
+        if suffix == ".pdf":
+            return _extract_pdf_text(raw)
+
+        if suffix == ".docx":
+            return _extract_docx_text(raw)
+
+        if suffix == ".msg":
+            return _extract_msg_text(raw)
+
+    except RuntimeError as exc:
+        st.warning(str(exc))
+        return None
+    except Exception as exc:
+        st.warning(f"Could not extract text from `{uploaded_file.name}`: {exc}")
+        return None
+
+    st.warning(f"Unsupported file type. Use {', '.join(SUPPORTED_FORMAT_LABELS)}.")
     return None
 
 
 def _predict_text(root: Path, text: str, model_choice: str) -> tuple[dict[str, object], Any | None]:
     try:
         classifier = _load_email_classifier(str(root), model_choice)
+        start_prediction = time.perf_counter()
         prediction = classifier.predict_one(text)
+        prediction_time_ms = (time.perf_counter() - start_prediction) * 1000
         findings = find_suspicious_phrases(text)
 
         return (
@@ -113,6 +320,7 @@ def _predict_text(root: Path, text: str, model_choice: str) -> tuple[dict[str, o
                 "confidence": prediction.confidence,
                 "probabilities": prediction.probabilities,
                 "model_name": prediction.model_name,
+                "prediction_time_ms": prediction_time_ms,
                 "findings": findings,
             },
             classifier,
@@ -173,6 +381,31 @@ def _model_comparison_chart(rows: list[dict[str, object]]) -> go.Figure:
 
     return apply_chart_theme(fig)
 
+
+def _metric_number(values: dict[str, object], *keys: str) -> float | None:
+    for key in keys:
+        if key not in values:
+            continue
+        value = values.get(key)
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _percent_metric(values: dict[str, object], *keys: str) -> float | None:
+    value = _metric_number(values, *keys)
+    return round(value * 100, 2) if value is not None else None
+
+
+def _seconds_metric(values: dict[str, object], *keys: str) -> float | None:
+    value = _metric_number(values, *keys)
+    return round(value, 3) if value is not None else None
+
+
 def _metrics_dataframe(root: Path) -> pd.DataFrame:
     metrics = _load_training_metrics(root)
     if not metrics or "models" not in metrics:
@@ -191,19 +424,18 @@ def _metrics_dataframe(root: Path) -> pd.DataFrame:
         rows.append(
             {
                 "Model": model_name,
-                "Accuracy": round(values.get("accuracy", 0) * 100, 2),
-                "Precision": round(values.get("precision", 0) * 100, 2),
-                "Recall": round(values.get("recall", 0) * 100, 2),
-                "F1 Score": round(values.get("f1", 0) * 100, 2),
-                "ROC-AUC": round(values.get("roc_auc", 0) * 100, 2)
-                if "roc_auc" in values
-                else None,
-                "Training Time (s)": round(values.get("training_time", 0), 3)
-                if "training_time" in values
-                else None,
-                "Prediction Time (ms)": round(values.get("prediction_time_ms", 0), 4)
-                if "prediction_time_ms" in values
-                else None,
+                "Accuracy": _percent_metric(values, "accuracy"),
+                "Precision": _percent_metric(values, "precision"),
+                "Recall": _percent_metric(values, "recall"),
+                "F1 Score": _percent_metric(values, "f1", "f1_score"),
+                "ROC-AUC": _percent_metric(values, "roc_auc", "auc"),
+                "Training Time (s)": _seconds_metric(
+                    values,
+                    "training_time_seconds",
+                    "training_time",
+                    "train_time",
+                ),
+                "Saved Eval Prediction Time (ms)": _metric_number(values, "prediction_time_ms"),
                 "True Positive": tp,
                 "False Positive": fp,
                 "True Negative": tn,
@@ -293,26 +525,19 @@ def _comparison_with_metrics(
                 "Prediction": row["Prediction"],
                 "Risk Score": row["Risk Score"],
                 "Confidence": row["Confidence"],
-                "Accuracy": round(float(values.get("accuracy", 0)) * 100, 2)
+                "Prediction Time (ms)": row.get("Prediction Time (ms)"),
+                "Accuracy": _percent_metric(values, "accuracy") if values else None,
+                "Precision": _percent_metric(values, "precision") if values else None,
+                "Recall": _percent_metric(values, "recall") if values else None,
+                "F1 Score": _percent_metric(values, "f1", "f1_score") if values else None,
+                "ROC-AUC": _percent_metric(values, "roc_auc", "auc") if values else None,
+                "Training Time (s)": _seconds_metric(
+                    values,
+                    "training_time_seconds",
+                    "training_time",
+                    "train_time",
+                )
                 if values
-                else None,
-                "Precision": round(float(values.get("precision", 0)) * 100, 2)
-                if values
-                else None,
-                "Recall": round(float(values.get("recall", 0)) * 100, 2)
-                if values
-                else None,
-                "F1 Score": round(float(values.get("f1", 0)) * 100, 2)
-                if values
-                else None,
-                "ROC-AUC": round(float(values.get("roc_auc", 0)) * 100, 2)
-                if values and "roc_auc" in values
-                else None,
-                "Training Time (s)": round(float(values.get("training_time", 0)), 3)
-                if values and "training_time" in values
-                else None,
-                "Prediction Time (ms)": round(float(values.get("prediction_time_ms", 0)), 4)
-                if values and "prediction_time_ms" in values
                 else None,
             }
         )
@@ -508,10 +733,11 @@ def _render_evaluation_evidence(
 
     with metrics_tab:
         if metrics_df.empty:
-            st.warning("No saved training metrics found. Run the email training script first.")
+            st.warning("Metrics unavailable. Run the email training script first.")
         else:
             st.plotly_chart(_training_metrics_chart(metrics_df), use_container_width=True)
-            st.dataframe(metrics_df, hide_index=True, use_container_width=True)
+            display_metrics_df = metrics_df.astype(object).where(pd.notna(metrics_df), "Metrics unavailable")
+            st.dataframe(display_metrics_df, hide_index=True, use_container_width=True)
 
     with confusion_tab:
         figure = _confusion_matrix_figure(metrics, recommended_model)
@@ -865,6 +1091,303 @@ def _load_training_metrics(root: Path) -> dict[str, object]:
     except Exception:
         return {}
 
+
+def _csv_text_columns(uploaded: pd.DataFrame) -> list[str]:
+    columns = [str(column) for column in uploaded.columns if uploaded[column].dtype == "object"]
+    return columns or [str(column) for column in uploaded.columns]
+
+
+def _csv_preview_text(uploaded: pd.DataFrame, text_column: str | None) -> str:
+    if uploaded.empty or not text_column or text_column not in uploaded.columns:
+        return ""
+
+    values = uploaded[text_column].fillna("").astype(str)
+    non_empty = [value.strip() for value in values if value.strip()]
+    if not non_empty:
+        return ""
+
+    preview_rows = non_empty[:5]
+    return "\n\n--- CSV row preview ---\n\n".join(preview_rows)
+
+
+def _uploaded_signature(uploaded_file: Any | None, uploaded: str | pd.DataFrame | None, csv_text_column: str | None) -> str:
+    if uploaded_file is None:
+        return "manual"
+
+    size = getattr(uploaded_file, "size", None)
+    name = getattr(uploaded_file, "name", "uploaded")
+    shape = uploaded.shape if isinstance(uploaded, pd.DataFrame) else ""
+    return f"upload-parser-v2:{name}:{size}:{shape}:{csv_text_column or ''}"
+
+
+def _sync_email_preview_state(
+    uploaded_file: Any | None,
+    uploaded: str | pd.DataFrame | None,
+    csv_text_column: str | None,
+) -> None:
+    if "email_evidence_text" not in st.session_state:
+        st.session_state.email_evidence_text = ""
+
+    if uploaded_file is None:
+        return
+
+    if uploaded is None:
+        return
+
+    signature = _uploaded_signature(uploaded_file, uploaded, csv_text_column)
+    if st.session_state.get("email_upload_signature") == signature:
+        return
+
+    if isinstance(uploaded, str):
+        st.session_state.email_evidence_text = uploaded
+    elif isinstance(uploaded, pd.DataFrame):
+        st.session_state.email_evidence_text = _csv_preview_text(uploaded, csv_text_column)
+
+    st.session_state.email_upload_signature = signature
+
+
+def _render_email_step_header(index: str, title: str, body: str) -> None:
+    st.markdown(
+        f"""
+        <div class="email-step-header">
+            <span>{html.escape(index)}</span>
+            <div>
+                <h3>{html.escape(title)}</h3>
+                <p>{html.escape(body)}</p>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_evidence_source() -> Any | None:
+    _render_email_step_header(
+        "01",
+        "Choose Evidence Source",
+        "Upload an evidence file or paste text directly into the preview editor below.",
+    )
+
+    render_content_card_open("violet")
+    source_col, paste_col = st.columns(2)
+
+    with source_col:
+        st.markdown(
+            """
+            <div class="email-source-card">
+                <div class="email-source-icon">FILE</div>
+                <div>
+                    <h4>Upload File</h4>
+                    <p>Extract content from email, document, webpage, or CSV evidence.</p>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        uploaded_file = st.file_uploader(
+            "Upload evidence file",
+            type=SUPPORTED_UPLOAD_TYPES,
+            key="email_upload",
+            label_visibility="collapsed",
+        )
+
+    with paste_col:
+        st.markdown(
+            """
+            <div class="email-source-card">
+                <div class="email-source-icon">TEXT</div>
+                <div>
+                    <h4>Paste Text</h4>
+                    <p>Use the preview editor for SMS, chat messages, copied emails, or cleaned transcript text.</p>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.caption("The editor remains editable after upload, so you can remove signatures or add missing message context.")
+
+    format_pills = "".join(f"<span>{html.escape(label)}</span>" for label in SUPPORTED_FORMAT_LABELS)
+    st.markdown(
+        f'<div class="email-format-row"><strong>Supported:</strong>{format_pills}</div>',
+        unsafe_allow_html=True,
+    )
+    render_content_card_close()
+
+    return uploaded_file
+
+
+def _render_evidence_preview(uploaded: str | pd.DataFrame | None, uploaded_file: Any | None) -> tuple[str, str | None]:
+    _render_email_step_header(
+        "02",
+        "Evidence Preview",
+        "Review or edit the extracted message before analysis.",
+    )
+
+    csv_text_column = None
+    if isinstance(uploaded, pd.DataFrame):
+        csv_columns = _csv_text_columns(uploaded)
+        csv_text_column = st.selectbox(
+            "CSV text column for preview and batch analysis",
+            csv_columns,
+            key="email_csv_text_column",
+        )
+
+    _sync_email_preview_state(uploaded_file, uploaded, csv_text_column)
+
+    text = st.text_area(
+        "Evidence Preview",
+        key="email_evidence_text",
+        height=285,
+        placeholder=(
+            "Paste an email, SMS, messaging conversation, scholarship offer, job offer, "
+            "banking message, or other suspicious written content here."
+        ),
+        label_visibility="collapsed",
+    )
+
+    if isinstance(uploaded, pd.DataFrame):
+        st.caption(
+            "CSV preview shows the first non-empty rows from the selected column. Use Batch CSV analysis below "
+            "to scan every row."
+        )
+
+    return text, csv_text_column
+
+
+def _render_ai_engine_status(available_models: list[str]) -> None:
+    ready_count = len([model for model in DISPLAY_MODELS if model in available_models])
+    status = "Ready" if ready_count else "Unavailable"
+    status_class = "ready" if ready_count else "missing"
+    model_items = "".join(
+        f'<span class="{"ready" if model in available_models else "missing"}>{html.escape(model)}</span>'
+        for model in DISPLAY_MODELS
+    )
+
+    st.markdown(
+        f"""
+        <div class="email-engine-card">
+            <div class="email-engine-title">AI Detection Engine</div>
+            <div class="email-engine-state {status_class}">
+                <span></span>{status}
+            </div>
+            <div class="email-engine-count">{ready_count} Models Available</div>
+            <div class="email-engine-models">{model_items}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_model_selection(available_models: list[str]) -> list[str]:
+    _render_email_step_header(
+        "03",
+        "Detection Models",
+        "Choose which trained models should participate in the live comparison.",
+    )
+
+    model_options = [model for model in DISPLAY_MODELS if model in available_models]
+    render_content_card_open("violet")
+    model_col, engine_col = st.columns([0.58, 0.42])
+
+    with model_col:
+        st.markdown('<div class="email-panel-title">Detection Models</div>', unsafe_allow_html=True)
+        st.caption("All available trained models are selected by default.")
+        selected_models: list[str] = []
+
+        if model_options:
+            for model_name in model_options:
+                if st.checkbox(model_name, value=True, key=f"email_model_choice_{model_name}"):
+                    selected_models.append(model_name)
+        else:
+            st.warning(
+                "No trained email models were found. Run `py src/training/train_email_model.py` first. "
+                "Email prediction requires trained ML model artifacts."
+            )
+
+    with engine_col:
+        _render_ai_engine_status(available_models)
+
+    render_content_card_close()
+    return selected_models
+
+
+def _render_analyze_panel(text: str, model_choices: list[str]) -> bool:
+    evidence_status = "1 message loaded" if text.strip() else "No evidence loaded"
+    model_status = f"{len(model_choices)} selected" if model_choices else "No model selected"
+
+    st.markdown(
+        f"""
+        <div class="email-analyze-card">
+            <div>
+                <div class="email-analyze-eyebrow">Ready to Analyze</div>
+                <h3>Evidence</h3>
+                <p>{html.escape(evidence_status)}</p>
+            </div>
+            <div>
+                <h3>Models</h3>
+                <p>{html.escape(model_status)}</p>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    return st.button(
+        "Analyze Evidence",
+        type="primary",
+        use_container_width=True,
+        key="email_analyze_button",
+    )
+
+
+def _render_batch_csv_analysis(
+    root: Path,
+    uploaded: pd.DataFrame,
+    model_choices: list[str],
+    csv_text_column: str | None,
+) -> None:
+    render_section_header("Batch CSV analysis", eyebrow="Multiple rows")
+    render_content_card_open("violet")
+
+    if not csv_text_column:
+        csv_columns = _csv_text_columns(uploaded)
+        csv_text_column = st.selectbox("Text column", csv_columns, key="email_batch_text_column")
+    else:
+        st.caption(f"Batch analysis will use `{csv_text_column}`.")
+
+    if st.button("Analyze CSV rows", use_container_width=True):
+        if not model_choices:
+            st.warning("Select at least one trained model first.")
+            render_content_card_close()
+            return
+
+        texts = uploaded[csv_text_column].fillna("").astype(str).tolist()
+        rows = []
+
+        for value in texts:
+            for selected_model in model_choices:
+                try:
+                    result, _classifier = _predict_text(root, value, selected_model)
+                except RuntimeError as exc:
+                    st.error(str(exc))
+                    render_content_card_close()
+                    return
+                rows.append(
+                    {
+                        "model": selected_model,
+                        "preview": value[:120],
+                        "prediction": result["label_name"],
+                        "risk_score": round(_risk_score(result), 2),
+                        "confidence": round(float(result["confidence"]) * 100, 2),
+                        "engine": result["model_name"],
+                    }
+                )
+
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+    render_content_card_close()
+
+
 def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
     render_detection_tool_intro(
         title="Emails and Messages",
@@ -877,127 +1400,19 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
         accent="blue",
     )
 
-    render_section_header(
-        "Scan email or message content",
-        "Paste one message, upload a text file, or inspect multiple CSV rows.",
-        "Text evidence",
-    )
-
-    demo_emails = get_demo_data()["emails"]
     available_models = _available_models(root)
-    model_options = [model for model in DISPLAY_MODELS if model in available_models]
-
-    with st.expander("Email model status", expanded=False):
-        st.dataframe(_model_status(root), hide_index=True, use_container_width=True)
-        if not available_models:
-            st.warning(
-                "No trained email models were found. Run `py src/training/train_email_model.py` first. "
-                "Email prediction requires trained ML model artifacts."
-            )
-
-        metrics_df = _metrics_dataframe(root)
-
-        with st.expander("Trained AI model evaluation metrics", expanded=False):
-            if not metrics_df.empty:
-                st.dataframe(metrics_df, hide_index=True, use_container_width=True)
-
-                st.info(
-                    "Accuracy measures overall correctness. Precision shows how many flagged emails were truly suspicious. "
-                    "Recall shows how many suspicious emails were caught. F1 balances precision and recall. "
-                    "ROC-AUC measures class separation. Training time and prediction time are saved after retraining with the latest script. "
-                    "False positives are safe emails wrongly flagged as suspicious. False negatives are suspicious emails missed by the model."
-                )
-            else:
-                st.warning("No saved training metrics found. Run the email training script first.")
-
-    render_content_card_open("violet")
-    controls, input_area = st.columns([0.30, 0.70])
-
-    with controls:
-        select_all = st.checkbox("Select all trained models", value=True)
-
-        if select_all:
-            model_choices = model_options
-        else:
-            model_choices = st.multiselect(
-                "Select AI models to compare",
-                model_options,
-                default=[model_options[0]] if model_options else [],
-                help="Select one or more trained models to compare their predictions.",
-            )
-
-        demo_choice = st.selectbox(
-            "Try synthetic demo email",
-            ["None"] + demo_emails["sample_id"].tolist(),
-        )
-
-        uploaded_file = st.file_uploader(
-            "Upload email text or CSV",
-            type=["txt", "csv"],
-            key="email_upload",
-        )
-
-        analyze_button = st.button(
-            "Analyze email",
-            type="primary",
-            use_container_width=True,
-        )
-
+    uploaded_file = _render_evidence_source()
     uploaded = _read_uploaded_text(uploaded_file)
-
-    if demo_choice != "None":
-        selected = demo_emails.loc[demo_emails["sample_id"] == demo_choice].iloc[0]
-        default_text = str(selected["text"])
-    elif isinstance(uploaded, str):
-        default_text = uploaded
-    else:
-        default_text = ""
-
-    with input_area:
-        text = st.text_area(
-            "Paste suspicious email or message",
-            value=default_text,
-            height=260,
-            placeholder="Paste an email, campus message, scholarship offer, job offer, or banking message here.",
-        )
-
-    render_content_card_close()
+    text, csv_text_column = _render_evidence_preview(uploaded, uploaded_file)
+    model_choices = _render_model_selection(available_models)
+    analyze_button = _render_analyze_panel(text, model_choices)
 
     if isinstance(uploaded, pd.DataFrame):
-        render_section_header("Batch CSV analysis", eyebrow="Multiple rows")
-        render_content_card_open("violet")
-
-        text_column = st.selectbox("Text column", uploaded.columns)
-
-        if st.button("Analyze CSV rows", use_container_width=True):
-            texts = uploaded[text_column].fillna("").astype(str).tolist()
-            rows = []
-
-            for value in texts:
-                for selected_model in model_choices:
-                    try:
-                        result, _classifier = _predict_text(root, value, selected_model)
-                    except RuntimeError as exc:
-                        st.error(str(exc))
-                        return
-                    rows.append(
-                        {
-                            "model": selected_model,
-                            "preview": value[:120],
-                            "prediction": result["label_name"],
-                            "risk_score": round(_risk_score(result), 2),
-                            "confidence": round(float(result["confidence"]) * 100, 2),
-                            "engine": result["model_name"],
-                        }
-                    )
-
-            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-
-        render_content_card_close()
+        _render_batch_csv_analysis(root, uploaded, model_choices, csv_text_column)
 
     if analyze_button:
         if not text.strip():
-            st.warning("Paste text or upload a .txt file first.")
+            st.warning("Paste text or upload a supported evidence file first.")
             return
 
         if not model_choices:
@@ -1025,6 +1440,7 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
                     "Prediction": result["label_name"],
                     "Risk Score": round(_risk_score(result), 2),
                     "Confidence": round(float(result["confidence"]) * 100, 2),
+                    "Prediction Time (ms)": round(float(result.get("prediction_time_ms", 0.0)), 4),
                     "Engine": result["model_name"],
                 }
             )
@@ -1094,14 +1510,15 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
         )
 
         st.dataframe(
-            df_compare_metrics,
+            df_compare_metrics.astype(object).where(pd.notna(df_compare_metrics), "Metrics unavailable"),
             hide_index=True,
             use_container_width=True,
         )
 
         st.caption(
-            "Higher agreement between independent models generally increases confidence in the prediction. "
-            "If models disagree significantly, the message should be reviewed manually."
+            "Risk Score, Confidence, and Prediction Time are live values for the current evidence. "
+            "Accuracy, Precision, Recall, F1, ROC-AUC, and Training Time are saved evaluation metrics "
+            "from the latest email training run."
         )
 
         render_content_card_close()

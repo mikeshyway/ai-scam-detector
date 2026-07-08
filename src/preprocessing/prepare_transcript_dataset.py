@@ -4,8 +4,8 @@ Combines multiple transcript sources into:
     data/processed/transcript/transcript_dataset.csv
 
 Supported sources (optional):
-- data/raw/call_transcripts_scam_determinations/
-- data/raw/youtube_scam_transcripts/
+- data/raw/voice_transcript/call_transcripts_scam_determinations/
+- data/raw/voice_transcript/youtube_scam_phone_call_transcripts/
 
 Output columns:
     transcript,label,source
@@ -19,7 +19,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 
-RAW = ROOT / "data" / "raw"
+RAW = ROOT / "data" / "raw" / "voice_transcript"
 OUT_DIR = ROOT / "data" / "processed" / "transcript"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -67,7 +67,7 @@ rows = []
 
 sources = [
     ("Call Transcripts Scam Determinations", RAW / "call_transcripts_scam_determinations"),
-    ("YouTube Scam Phone Call Transcripts", RAW / "youtube_scam_transcripts"),
+    ("YouTube Scam Phone Call Transcripts", RAW / "youtube_scam_phone_call_transcripts"),
 ]
 
 for source_name, folder in sources:

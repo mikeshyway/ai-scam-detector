@@ -1242,4 +1242,3 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
         )
 
         st.session_state["transcript_pending_voice_analysis"] = False
-
