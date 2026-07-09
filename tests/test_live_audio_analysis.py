@@ -8,7 +8,7 @@ import wave
 
 import numpy as np
 
-from src.live_audio_analysis import analyse_live_chunk, wav_bytes_to_audio
+from src.audio.live_audio_analysis import analyse_live_chunk, wav_bytes_to_audio
 
 
 class LiveAudioAnalysisTests(unittest.TestCase):

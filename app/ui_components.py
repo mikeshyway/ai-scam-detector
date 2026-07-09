@@ -58,11 +58,10 @@ def get_model_status(root: str) -> dict[str, bool]:
 def get_dataset_status(root: str) -> dict[str, bool]:
     base = Path(root)
     checks = {
-        "SpamAssassin spam": base / "data/raw/spamassassin/spam",
-        "SpamAssassin ham": base / "data/raw/spamassassin/ham",
-        "Transcript CSV": base / "data/raw/transcripts/scam_nonscam_calls.csv",
-        "YouTube demo CSV": base / "data/raw/transcripts/youtube_scam_transcripts.csv",
-        "ASVspoof labels": base / "data/raw/asvspoof_subset/labels.csv",
+        "Email datasets": base / "data/raw/email",
+        "Transcript datasets": base / "data/raw/voice_transcript",
+        "ASVspoof source": base / "data/raw/asvspoof_2019_dataset_subset",
+        "Processed phone fallback": base / "data/processed/phone/phone_dataset.csv",
     }
     status: dict[str, bool] = {}
     for name, path in checks.items():

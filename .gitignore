@@ -8,6 +8,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.numba_cache/
+**/.numba_cache/
 
 .venv/
 venv/
@@ -117,3 +119,5 @@ logs/
 # ==========================================================
 *.tmp
 *.temp
+*.bak
+*.swp

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.explainability import (
+from src.text.explainability import (
     analyse_domain_indicators,
     find_legitimate_indicators,
     find_suspicious_phrases,

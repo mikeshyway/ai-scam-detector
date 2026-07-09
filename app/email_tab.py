@@ -752,7 +752,7 @@ def _render_evaluation_evidence(
         if figure is None:
             st.warning(
                 "ROC-AUC data is not available yet. Retrain the email models after "
-                "updating `src/training/train_email_model.py`."
+                "updating `src/training/email_trainer.py`."
             )
         else:
             st.plotly_chart(figure, use_container_width=True)
@@ -1300,7 +1300,7 @@ def _render_model_selection(available_models: list[str]) -> list[str]:
                     selected_models.append(model_name)
         else:
             st.warning(
-                "No trained email models were found. Run `py src/training/train_email_model.py` first. "
+                "No trained email models were found. Run `py scripts/04_train_email_model.py` first. "
                 "Email prediction requires trained ML model artifacts."
             )
 

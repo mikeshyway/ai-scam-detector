@@ -2,7 +2,7 @@
 
 This module is used by Streamlit pages to load trained text models and produce
 consistent predictions. The main email training pipeline lives in
-src/training/train_email_model.py, but these helpers remain useful at runtime.
+src/training/email_trainer.py, but these helpers remain useful at runtime.
 """
 
 from __future__ import annotations
@@ -156,7 +156,7 @@ def train_text_models(
 ) -> tuple[Any, dict[str, Any], dict[str, dict[str, Any]]]:
     """Legacy reusable trainer for quick experiments.
 
-    The official email training pipeline is src/training/train_email_model.py.
+    The official email training pipeline is src/training/email_trainer.py.
     This helper is kept for older scripts and lightweight tests.
     """
 

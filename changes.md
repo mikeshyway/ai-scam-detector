@@ -1,5 +1,28 @@
 # Changes
 
+## 2026-07-09 - Option A source and script naming
+
+- Renamed reusable preprocessing modules to `*_preprocessor.py`.
+- Renamed reusable training modules to `*_trainer.py`.
+- Renumbered the public workflow scripts from `00` through `07`.
+- Archived superseded numbered compatibility scripts under
+  `archive/deprecated_scripts/`.
+- Kept ML behavior, metrics, model artifacts, datasets, reports, and UI logic
+  unchanged.
+
+## 2026-07-09 - Architecture audit
+
+- Added stable root and script entry points while keeping `app/main.py` as the
+  canonical Streamlit Cloud path.
+- Converted stale numbered preprocessing/training scripts into compatibility
+  wrappers around canonical `src` workflows.
+- Added package markers for `src/preprocessing`, `src/training`, and `scripts`.
+- Made transcript dataset preparation import-safe by moving execution into
+  `prepare_transcript_dataset()` and `main()`.
+- Archived unreferenced former page modules under `archive/deprecated/app/`.
+- Updated tests, setup checks, dataset status paths, README, and architecture
+  documentation to match the current project.
+
 This document records project changes made after the original proposal so the implementation
 stays aligned with the current capstone demo scope.
 

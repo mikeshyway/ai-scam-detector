@@ -22,12 +22,15 @@ REQUIRED_PACKAGES = [
     "scipy",
     "matplotlib",
     "plotly",
+    "requests",
     "whisper",
     "transformers",
     "torch",
     "joblib",
     "reportlab",
     "docx",
+    "pypdf",
+    "extract_msg",
 ]
 
 OPTIONAL_PACKAGES = [
@@ -38,12 +41,16 @@ EXPECTED_DIRS = [
     "src",
     "scripts",
     "models",
-    "data/raw/spamassassin/spam",
-    "data/raw/spamassassin/ham",
-    "data/raw/transcripts",
-    "data/raw/asvspoof_subset",
-    "data/processed",
+    "data/raw/email",
+    "data/raw/voice_transcript",
+    "data/raw/asvspoof_2019_dataset_subset",
+    "data/processed/email",
+    "data/processed/transcript",
+    "data/processed/audio",
+    "data/processed/phone",
     "notebooks",
+    "reports/metrics",
+    "tests",
 ]
 
 
