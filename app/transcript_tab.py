@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 from difflib import SequenceMatcher
 from datetime import datetime
 from pathlib import Path
@@ -99,6 +100,12 @@ def _init_transcript_voice_state() -> None:
         "transcript_recorder_error": "",
         "transcript_recorder_carousel_index": 0,
         "transcript_pending_voice_analysis": False,
+        "transcript_uploaded_audio_results": [],
+        "transcript_uploaded_audio_signatures": [],
+        "transcript_uploaded_audio_clip_count": 0,
+        "transcript_uploaded_audio_error": "",
+        "transcript_uploaded_audio_carousel_index": 0,
+        "transcript_pending_uploaded_audio_analysis": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -116,6 +123,15 @@ def _clear_recorder_state() -> None:
     )
 
 
+def _clear_uploaded_audio_state() -> None:
+    st.session_state["transcript_uploaded_audio_results"] = []
+    st.session_state["transcript_uploaded_audio_signatures"] = []
+    st.session_state["transcript_uploaded_audio_clip_count"] = 0
+    st.session_state["transcript_uploaded_audio_error"] = ""
+    st.session_state["transcript_uploaded_audio_carousel_index"] = 0
+    st.session_state["transcript_pending_uploaded_audio_analysis"] = False
+
+
 def _recording_chunks(
     audio: np.ndarray,
     sample_rate: int,
@@ -130,8 +146,9 @@ def _recording_chunks(
     return chunks or [audio.astype(np.float32)]
 
 
-def _process_recording(
-    audio_bytes: bytes,
+def _process_audio_array(
+    audio: np.ndarray,
+    sample_rate: int,
     *,
     chunk_seconds: int,
     transcript_source: str,
@@ -141,7 +158,12 @@ def _process_recording(
     text_classifier: Any | None,
     behavioral_classifier: Any | None,
 ) -> list[dict[str, object]]:
-    audio, sample_rate = wav_bytes_to_audio(audio_bytes, target_sample_rate=16_000)
+    audio = np.asarray(audio, dtype=np.float32)
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    if audio.size == 0:
+        raise ValueError("The audio file contained no usable samples.")
+
     processed = []
     for index, chunk in enumerate(_recording_chunks(audio, sample_rate, chunk_seconds)):
         if transcript_source == "Local Whisper":
@@ -165,6 +187,82 @@ def _process_recording(
             )
         )
     return processed
+
+
+def _process_recording(
+    audio_bytes: bytes,
+    *,
+    chunk_seconds: int,
+    transcript_source: str,
+    manual_transcript: str,
+    whisper_model: Any | None,
+    audio_classifier: Any | None,
+    text_classifier: Any | None,
+    behavioral_classifier: Any | None,
+) -> list[dict[str, object]]:
+    audio, sample_rate = wav_bytes_to_audio(audio_bytes, target_sample_rate=16_000)
+    return _process_audio_array(
+        audio,
+        sample_rate,
+        chunk_seconds=chunk_seconds,
+        transcript_source=transcript_source,
+        manual_transcript=manual_transcript,
+        whisper_model=whisper_model,
+        audio_classifier=audio_classifier,
+        text_classifier=text_classifier,
+        behavioral_classifier=behavioral_classifier,
+    )
+
+
+def _process_uploaded_audio(
+    audio_bytes: bytes,
+    suffix: str,
+    *,
+    chunk_seconds: int,
+    transcript_source: str,
+    manual_transcript: str,
+    whisper_model: Any | None,
+    audio_classifier: Any | None,
+    text_classifier: Any | None,
+    behavioral_classifier: Any | None,
+) -> list[dict[str, object]]:
+    try:
+        import librosa
+    except Exception as exc:
+        raise RuntimeError("librosa is required to decode uploaded audio files.") from exc
+
+    suffix = suffix if suffix in {".wav", ".mp3", ".flac"} else ".wav"
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            temp_file.write(audio_bytes)
+            temp_path = Path(temp_file.name)
+
+        audio, sample_rate = librosa.load(str(temp_path), sr=16_000, mono=True)
+        return _process_audio_array(
+            np.asarray(audio, dtype=np.float32),
+            int(sample_rate),
+            chunk_seconds=chunk_seconds,
+            transcript_source=transcript_source,
+            manual_transcript=manual_transcript,
+            whisper_model=whisper_model,
+            audio_classifier=audio_classifier,
+            text_classifier=text_classifier,
+            behavioral_classifier=behavioral_classifier,
+        )
+    except Exception as exc:
+        if suffix == ".mp3":
+            raise RuntimeError(
+                "MP3 decoding may require ffmpeg. Try uploading WAV or FLAC, "
+                "or install ffmpeg and add it to PATH."
+            ) from exc
+        raise
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def _timeline_figure(results: list[dict[str, object]], threshold: int) -> go.Figure:
@@ -677,6 +775,19 @@ def _recorder_transcript_text() -> str:
     """Return the usable transcript text generated from browser voice recordings."""
 
     results = st.session_state.get("transcript_recorder_results", [])
+    return _transcript_text_from_results(results)
+
+
+def _uploaded_audio_transcript_text() -> str:
+    """Return the usable transcript text generated from uploaded audio recordings."""
+
+    results = st.session_state.get("transcript_uploaded_audio_results", [])
+    return _transcript_text_from_results(results)
+
+
+def _transcript_text_from_results(results: object) -> str:
+    """Return combined transcript text from analysed audio chunk results."""
+
     if not isinstance(results, list):
         return ""
 
@@ -839,27 +950,43 @@ def _similarity_percent(left: str, right: str) -> float:
 def _render_combined_input_summary(
     *,
     use_voice: bool,
+    use_uploaded_audio: bool,
     use_text: bool,
     voice_text: str,
+    uploaded_audio_text: str,
     transcript_text: str,
     recorder_results: list[dict[str, object]],
+    uploaded_audio_results: list[dict[str, object]],
 ) -> None:
     """Show a compact summary of which sources are available before analysis."""
 
     voice_peak = max((float(item.get("risk", 0)) for item in recorder_results), default=0.0)
+    upload_peak = max((float(item.get("risk", 0)) for item in uploaded_audio_results), default=0.0)
     voice_chunks = len(recorder_results)
+    upload_chunks = len(uploaded_audio_results)
     transcript_words = len(transcript_text.split())
     voice_words = len(voice_text.split())
+    upload_words = len(uploaded_audio_text.split())
 
     rows = []
     if use_voice:
         rows.append(
             {
-                "Source": "Voice recording",
+                "Source": "Browser voice recording",
                 "Status": "Ready" if recorder_results else "Waiting for recording",
                 "Usable text": f"{voice_words} word(s)" if voice_text else "No transcript text yet",
                 "Audio chunks": voice_chunks,
                 "Peak voice risk": f"{voice_peak:.1f}%" if recorder_results else "-",
+            }
+        )
+    if use_uploaded_audio:
+        rows.append(
+            {
+                "Source": "Uploaded audio recording",
+                "Status": "Ready" if uploaded_audio_results else "Waiting for upload analysis",
+                "Usable text": f"{upload_words} word(s)" if uploaded_audio_text else "No transcript text yet",
+                "Audio chunks": upload_chunks,
+                "Peak voice risk": f"{upload_peak:.1f}%" if uploaded_audio_results else "-",
             }
         )
     if use_text:
@@ -876,10 +1003,13 @@ def _render_combined_input_summary(
     if rows:
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
-    if use_voice and use_text and voice_text.strip() and transcript_text.strip():
-        similarity = _similarity_percent(voice_text, transcript_text)
+    audio_text = "\n".join(
+        value for value in [voice_text.strip(), uploaded_audio_text.strip()] if value
+    )
+    if (use_voice or use_uploaded_audio) and use_text and audio_text and transcript_text.strip():
+        similarity = _similarity_percent(audio_text, transcript_text)
         st.info(
-            f"Voice-to-transcript similarity: {similarity:.1f}%. "
+            f"Audio-to-transcript similarity: {similarity:.1f}%. "
             "Use this as a rough check only; different wording, missing punctuation, or Whisper errors can lower the score."
         )
 
@@ -889,16 +1019,21 @@ def _render_analysis_outputs(
     root: Path,
     history: list[dict[str, object]],
     use_voice: bool,
+    use_uploaded_audio: bool,
     use_text: bool,
     voice_text: str,
+    uploaded_audio_text: str,
     transcript_text: str,
     recorder_results: list[dict[str, object]],
+    uploaded_audio_results: list[dict[str, object]],
     risk_threshold: int,
 ) -> None:
     """Render outputs for either voice, transcript, or both."""
 
     has_voice_results = bool(recorder_results)
     has_voice_text = bool(voice_text.strip())
+    has_uploaded_audio_results = bool(uploaded_audio_results)
+    has_uploaded_audio_text = bool(uploaded_audio_text.strip())
     has_transcript_text = bool(transcript_text.strip())
 
     if use_voice and has_voice_results:
@@ -915,20 +1050,36 @@ def _render_analysis_outputs(
     if use_voice and not has_voice_results:
         st.warning("Voice recording was selected, but no analysed voice sample is available yet.")
 
+    if use_uploaded_audio and has_uploaded_audio_results:
+        _render_recording_carousel(
+            uploaded_audio_results,
+            risk_threshold,
+            state_key="transcript_uploaded_audio_carousel_index",
+            title="Uploaded audio analysis",
+            transcript_heading="Uploaded audio transcript and chunks",
+            frequency_heading="Uploaded audio frequency spectrum",
+            latest_title="Latest uploaded audio chunk {chunk}",
+        )
+
+    if use_uploaded_audio and not has_uploaded_audio_results:
+        st.warning("Uploaded audio was selected, but no analysed audio file is available yet.")
+
     # Decide what text should be passed into transcript scam classification.
     # If both are supplied, keep the texts labelled and combined so the user can see both sources.
     text_blocks = []
     if use_voice and has_voice_text:
-        text_blocks.append("[Voice recording transcript]\n" + voice_text.strip())
+        text_blocks.append("[Browser voice transcript]\n" + voice_text.strip())
+    if use_uploaded_audio and has_uploaded_audio_text:
+        text_blocks.append("[Uploaded audio transcript]\n" + uploaded_audio_text.strip())
     if use_text and has_transcript_text:
         text_blocks.append("[Uploaded / pasted transcript]\n" + transcript_text.strip())
 
     combined_text = "\n\n".join(text_blocks).strip()
 
     if not combined_text:
-        if use_voice and has_voice_results:
+        if (use_voice and has_voice_results) or (use_uploaded_audio and has_uploaded_audio_results):
             st.info(
-                "Voice audio was analysed, but no speech transcript was available. "
+                "Audio was analysed for voice authenticity and behavioral signals, but no speech transcript was available. "
                 "Choose Local Whisper or Manual transcript if you also want transcript scam analysis."
             )
             return
@@ -951,8 +1102,8 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
     render_detection_tool_intro(
         title="Voice Transcript",
         description=(
-            "Record speech directly in the browser, upload/paste a transcript, or combine both "
-            "sources for transcript scam analysis."
+            "Record speech directly in the browser, upload an audio recording, upload/paste "
+            "a transcript, or combine sources for transcript scam analysis."
         ),
         icon="solar:microphone-3-bold-duotone",
         accent="purple",
@@ -971,13 +1122,18 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
         value=True,
         key="transcript_use_voice",
     )
+    use_uploaded_audio = st.checkbox(
+        "Use uploaded audio recording",
+        value=False,
+        key="transcript_use_uploaded_audio",
+    )
     use_text = st.checkbox(
         "Use uploaded / pasted transcript",
         value=False,
         key="transcript_use_text",
     )
 
-    if not use_voice and not use_text:
+    if not use_voice and not use_uploaded_audio and not use_text:
         st.warning("Select at least one source to analyse.")
 
     st.markdown("<hr style='border-color:rgba(148,163,184,.18);margin:0.8rem 0 1rem 0;'>", unsafe_allow_html=True)
@@ -987,9 +1143,9 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
     risk_threshold = 70
 
     with top_left:
-        if use_voice:
-            st.markdown("#### Voice recorder")
-            st.caption("Record a browser voice sample. Local Whisper creates transcript text when available.")
+        if use_voice or use_uploaded_audio:
+            st.markdown("#### Audio evidence")
+            st.caption("Record in the browser or upload an existing call/voice recording for the same audio analysis pipeline.")
 
             setting_a, setting_b = st.columns(2)
             with setting_a:
@@ -1035,120 +1191,216 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
                     key="transcript_recorder_manual_transcript",
                 )
 
-            recorded_audio = st.audio_input(
-                "Record voice sample",
-                sample_rate=16_000,
-                key=f"transcript_voice_recorder_{int(st.session_state['transcript_recorder_generation'])}",
-            )
-
-            action_a, action_b = st.columns(2)
-            with action_a:
-                if recorded_audio is not None and st.button(
-                    "Record another",
-                    use_container_width=True,
-                    key="transcript_record_another",
-                ):
-                    st.session_state["transcript_recorder_generation"] += 1
-                    st.rerun()
-            with action_b:
-                if st.button(
-                    "Clear recording",
-                    use_container_width=True,
-                    key="transcript_clear_recorder",
-                ):
-                    _clear_recorder_state()
-                    st.rerun()
-
             if not WHISPER_AVAILABLE:
                 st.caption("Whisper unavailable. Use Manual transcript or Audio only.")
 
-            if recorded_audio is not None:
-                audio_classifier = _load_audio_classifier(str(root))
-                behavioral_classifier = _load_behavioral_classifier(str(root))
-                text_classifier = _load_transcript_classifier_safe(str(root))
-                recorded_bytes = recorded_audio.getvalue()
-                settings = json.dumps(
-                    [chunk_seconds, transcript_source, whisper_size, manual_transcript],
-                    ensure_ascii=True,
-                ).encode("utf-8")
-                signature = hashlib.sha256(recorded_bytes + settings).hexdigest()
-                signatures = list(st.session_state["transcript_recorder_signatures"])
+            audio_classifier = _load_audio_classifier(str(root))
+            behavioral_classifier = _load_behavioral_classifier(str(root))
+            text_classifier = _load_transcript_classifier_safe(str(root))
 
-                if signature not in signatures:
-                    with st.spinner("Analysing voice recording..."):
-                        try:
-                            whisper_model = None
-                            if transcript_source == "Local Whisper":
-                                whisper_model = _load_whisper_model(whisper_size)
-                                if whisper_model is None:
-                                    raise RuntimeError("Local Whisper could not be loaded.")
+            if use_voice:
+                st.markdown("#### Voice recorder")
+                recorded_audio = st.audio_input(
+                    "Record voice sample",
+                    sample_rate=16_000,
+                    key=f"transcript_voice_recorder_{int(st.session_state['transcript_recorder_generation'])}",
+                )
 
-                            processed = _process_recording(
-                                recorded_bytes,
-                                chunk_seconds=chunk_seconds,
-                                transcript_source=transcript_source,
-                                manual_transcript=manual_transcript,
-                                whisper_model=whisper_model,
-                                audio_classifier=audio_classifier,
-                                text_classifier=text_classifier,
-                                behavioral_classifier=behavioral_classifier,
-                            )
-                        except Exception as exc:
-                            st.session_state["transcript_recorder_error"] = str(exc)
+                action_a, action_b = st.columns(2)
+                with action_a:
+                    if recorded_audio is not None and st.button(
+                        "Record another",
+                        use_container_width=True,
+                        key="transcript_record_another",
+                    ):
+                        st.session_state["transcript_recorder_generation"] += 1
+                        st.rerun()
+                with action_b:
+                    if st.button(
+                        "Clear recording",
+                        use_container_width=True,
+                        key="transcript_clear_recorder",
+                    ):
+                        _clear_recorder_state()
+                        st.rerun()
+
+                if recorded_audio is not None:
+                    recorded_bytes = recorded_audio.getvalue()
+                    settings = json.dumps(
+                        [chunk_seconds, transcript_source, whisper_size, manual_transcript],
+                        ensure_ascii=True,
+                    ).encode("utf-8")
+                    signature = hashlib.sha256(recorded_bytes + settings).hexdigest()
+                    signatures = list(st.session_state["transcript_recorder_signatures"])
+
+                    if signature not in signatures:
+                        with st.spinner("Analysing voice recording..."):
+                            try:
+                                whisper_model = None
+                                if transcript_source == "Local Whisper":
+                                    whisper_model = _load_whisper_model(whisper_size)
+                                    if whisper_model is None:
+                                        raise RuntimeError("Local Whisper could not be loaded.")
+
+                                processed = _process_recording(
+                                    recorded_bytes,
+                                    chunk_seconds=chunk_seconds,
+                                    transcript_source=transcript_source,
+                                    manual_transcript=manual_transcript,
+                                    whisper_model=whisper_model,
+                                    audio_classifier=audio_classifier,
+                                    text_classifier=text_classifier,
+                                    behavioral_classifier=behavioral_classifier,
+                                )
+                            except Exception as exc:
+                                st.session_state["transcript_recorder_error"] = str(exc)
+                            else:
+                                results = st.session_state["transcript_recorder_results"]
+                                clip = int(st.session_state["transcript_recorder_clip_count"]) + 1
+                                for chunk_index, result in enumerate(processed, 1):
+                                    result["clip"] = clip
+                                    result["clip_chunk"] = chunk_index
+                                    result["capture_mode"] = "Browser voice recorder"
+                                results.extend(processed)
+                                del results[:-60]
+                                signatures.append(signature)
+                                st.session_state["transcript_recorder_signatures"] = signatures[-60:]
+                                st.session_state["transcript_recorder_clip_count"] = clip
+                                st.session_state["transcript_recorder_carousel_index"] = max(
+                                    0,
+                                    len(_recording_groups(results)) - 1,
+                                )
+                                st.session_state["transcript_recorder_error"] = ""
+                                st.session_state["transcript_pending_voice_analysis"] = True
+                                render_analysis_ready(f"Voice sample {clip} analysed")
+
+                if st.session_state.get("transcript_recorder_error"):
+                    st.error(f"Recording analysis failed: {st.session_state['transcript_recorder_error']}")
+
+            if use_uploaded_audio:
+                st.markdown("#### Uploaded audio recording")
+                st.caption("Upload a recorded call or voice sample. WAV and FLAC are most reliable; MP3 may require ffmpeg.")
+                uploaded_audio = st.file_uploader(
+                    "Upload audio recording",
+                    type=["wav", "mp3", "flac"],
+                    key="transcript_audio_upload",
+                )
+
+                if uploaded_audio is not None:
+                    uploaded_audio_bytes = uploaded_audio.getvalue()
+                    suffix = Path(uploaded_audio.name).suffix.lower()
+                    mime_type = {
+                        ".wav": "audio/wav",
+                        ".mp3": "audio/mpeg",
+                        ".flac": "audio/flac",
+                    }.get(suffix, "audio/wav")
+
+                    st.audio(uploaded_audio_bytes, format=mime_type)
+                    st.caption(
+                        f"File: `{uploaded_audio.name}` | Type: `{suffix.lstrip('.').upper()}` | "
+                        f"Size: {len(uploaded_audio_bytes) / 1024:.1f} KB"
+                    )
+
+                    upload_action_a, upload_action_b = st.columns(2)
+                    with upload_action_a:
+                        analyze_uploaded_audio = st.button(
+                            "Analyze uploaded audio",
+                            use_container_width=True,
+                            type="primary",
+                            key="transcript_analyze_uploaded_audio",
+                        )
+                    with upload_action_b:
+                        if st.button(
+                            "Clear uploaded audio results",
+                            use_container_width=True,
+                            key="transcript_clear_uploaded_audio",
+                        ):
+                            _clear_uploaded_audio_state()
+                            st.rerun()
+
+                    if analyze_uploaded_audio:
+                        settings = json.dumps(
+                            [
+                                uploaded_audio.name,
+                                chunk_seconds,
+                                transcript_source,
+                                whisper_size,
+                                manual_transcript,
+                            ],
+                            ensure_ascii=True,
+                        ).encode("utf-8")
+                        signature = hashlib.sha256(uploaded_audio_bytes + settings).hexdigest()
+                        signatures = list(st.session_state["transcript_uploaded_audio_signatures"])
+
+                        if not uploaded_audio_bytes:
+                            st.session_state["transcript_uploaded_audio_error"] = "The uploaded audio file was empty."
+                        elif signature in signatures:
+                            st.session_state["transcript_pending_uploaded_audio_analysis"] = True
+                            render_analysis_ready("Uploaded audio already analysed")
                         else:
-                            results = st.session_state["transcript_recorder_results"]
-                            clip = int(st.session_state["transcript_recorder_clip_count"]) + 1
-                            for chunk_index, result in enumerate(processed, 1):
-                                result["clip"] = clip
-                                result["clip_chunk"] = chunk_index
-                                result["capture_mode"] = "Browser voice recorder"
-                            results.extend(processed)
-                            del results[:-60]
-                            signatures.append(signature)
-                            st.session_state["transcript_recorder_signatures"] = signatures[-60:]
-                            st.session_state["transcript_recorder_clip_count"] = clip
-                            st.session_state["transcript_recorder_carousel_index"] = max(
-                                0,
-                                len(_recording_groups(results)) - 1,
-                            )
-                            st.session_state["transcript_recorder_error"] = ""
-                            st.session_state["transcript_pending_voice_analysis"] = True
-                            render_analysis_ready(f"Voice sample {clip} analysed")
+                            with st.spinner("Analyzing uploaded audio..."):
+                                try:
+                                    whisper_model = None
+                                    if transcript_source == "Local Whisper":
+                                        whisper_model = _load_whisper_model(whisper_size)
+                                        if whisper_model is None:
+                                            raise RuntimeError("Local Whisper could not be loaded.")
 
-            if st.session_state.get("transcript_recorder_error"):
-                st.error(f"Recording analysis failed: {st.session_state['transcript_recorder_error']}")
+                                    processed = _process_uploaded_audio(
+                                        uploaded_audio_bytes,
+                                        suffix,
+                                        chunk_seconds=chunk_seconds,
+                                        transcript_source=transcript_source,
+                                        manual_transcript=manual_transcript,
+                                        whisper_model=whisper_model,
+                                        audio_classifier=audio_classifier,
+                                        text_classifier=text_classifier,
+                                        behavioral_classifier=behavioral_classifier,
+                                    )
+                                except Exception as exc:
+                                    st.session_state["transcript_uploaded_audio_error"] = str(exc)
+                                else:
+                                    uploaded_results = st.session_state["transcript_uploaded_audio_results"]
+                                    clip = int(st.session_state["transcript_uploaded_audio_clip_count"]) + 1
+                                    for chunk_index, result in enumerate(processed, 1):
+                                        result["clip"] = clip
+                                        result["clip_chunk"] = chunk_index
+                                        result["capture_mode"] = "Uploaded audio"
+                                        result["source_filename"] = uploaded_audio.name
+                                    uploaded_results.extend(processed)
+                                    del uploaded_results[:-60]
+                                    signatures.append(signature)
+                                    st.session_state["transcript_uploaded_audio_signatures"] = signatures[-60:]
+                                    st.session_state["transcript_uploaded_audio_clip_count"] = clip
+                                    st.session_state["transcript_uploaded_audio_carousel_index"] = max(
+                                        0,
+                                        len(_recording_groups(uploaded_results)) - 1,
+                                    )
+                                    st.session_state["transcript_uploaded_audio_error"] = ""
+                                    st.session_state["transcript_pending_uploaded_audio_analysis"] = True
+                                    render_analysis_ready("Uploaded audio analysis complete - results ready below")
+
+                if st.session_state.get("transcript_uploaded_audio_error"):
+                    st.error(f"Uploaded audio analysis failed: {st.session_state['transcript_uploaded_audio_error']}")
 
         else:
-            st.info("Voice recording is disabled for this analysis.")
+            st.info("Audio input is disabled for this analysis.")
 
     with top_right:
         st.markdown("#### Transcript text")
         st.caption("Paste/upload transcript text, or leave disabled for recording-only analysis.")
 
         uploaded_file = None
-        selected_example = None
 
         if use_text:
-            upload_col, demo_col = st.columns([0.45, 0.55])
-            with upload_col:
-                uploaded_file = st.file_uploader(
-                    "Upload TXT/CSV",
-                    type=["txt", "csv"],
-                    key="transcript_upload",
-                )
-            with demo_col:
-                examples = _load_demo_examples(str(root))
-                if examples is not None and not examples.empty:
-                    example_column = "transcript" if "transcript" in examples.columns else examples.columns[0]
-                    selected_example = st.selectbox(
-                        "Demo",
-                        ["None"] + examples[example_column].astype(str).head(20).tolist(),
-                    )
+            uploaded_file = st.file_uploader(
+                "Upload TXT/CSV",
+                type=["txt", "csv"],
+                key="transcript_upload",
+            )
 
             uploaded = _read_upload(uploaded_file)
-            if selected_example and selected_example != "None":
-                default_text = selected_example
-            elif isinstance(uploaded, str):
+            if isinstance(uploaded, str):
                 default_text = uploaded
             else:
                 default_text = ""
@@ -1173,21 +1425,28 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
         recorder_results = st.session_state.get("transcript_recorder_results", [])
         if not isinstance(recorder_results, list):
             recorder_results = []
+        uploaded_audio_results = st.session_state.get("transcript_uploaded_audio_results", [])
+        if not isinstance(uploaded_audio_results, list):
+            uploaded_audio_results = []
         voice_text_preview = _recorder_transcript_text()
+        uploaded_audio_text_preview = _uploaded_audio_transcript_text()
 
         _render_combined_input_summary(
             use_voice=use_voice,
+            use_uploaded_audio=use_uploaded_audio,
             use_text=use_text,
             voice_text=voice_text_preview,
+            uploaded_audio_text=uploaded_audio_text_preview,
             transcript_text=text,
             recorder_results=recorder_results,
+            uploaded_audio_results=uploaded_audio_results,
         )
 
         analyze_button = st.button(
             "Analyze selected source(s)",
             type="primary",
             use_container_width=True,
-            disabled=not (use_voice or use_text),
+            disabled=not (use_voice or use_uploaded_audio or use_text),
         )
 
     render_content_card_close()
@@ -1218,27 +1477,38 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
         render_content_card_close()
 
     should_auto_show_voice = (
-        use_voice
+        (use_voice or use_uploaded_audio)
         and not use_text
-        and bool(st.session_state.get("transcript_pending_voice_analysis"))
+        and (
+            bool(st.session_state.get("transcript_pending_voice_analysis"))
+            or bool(st.session_state.get("transcript_pending_uploaded_audio_analysis"))
+        )
     )
 
     if analyze_button or should_auto_show_voice:
         recorder_results = st.session_state.get("transcript_recorder_results", [])
         if not isinstance(recorder_results, list):
             recorder_results = []
+        uploaded_audio_results = st.session_state.get("transcript_uploaded_audio_results", [])
+        if not isinstance(uploaded_audio_results, list):
+            uploaded_audio_results = []
 
         voice_text = _recorder_transcript_text()
+        uploaded_audio_text = _uploaded_audio_transcript_text()
 
         _render_analysis_outputs(
             root=root,
             history=history,
             use_voice=use_voice,
+            use_uploaded_audio=use_uploaded_audio,
             use_text=use_text,
             voice_text=voice_text,
+            uploaded_audio_text=uploaded_audio_text,
             transcript_text=text,
             recorder_results=recorder_results,
+            uploaded_audio_results=uploaded_audio_results,
             risk_threshold=risk_threshold,
         )
 
         st.session_state["transcript_pending_voice_analysis"] = False
+        st.session_state["transcript_pending_uploaded_audio_analysis"] = False
