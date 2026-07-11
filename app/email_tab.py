@@ -341,21 +341,30 @@ def _inject_email_input_css() -> None:
         ========================================================= */
 
         .st-key-email_upload_area {
-            position:relative;
+            position:relative!important;
+            width:100%!important;
+            min-height:110px!important;
+            margin:0!important;
+            padding:0!important;
         }
 
         .email-upload-empty {
-            min-height:110px;
-            display:flex;
-            flex-direction:column;
-            align-items:center;
-            justify-content:center;
+            position:relative!important;
+            z-index:1!important;
+            width:100%!important;
+            min-height:110px!important;
+            margin:0!important;
+            padding:0!important;
+            display:flex!important;
+            flex-direction:column!important;
+            align-items:center!important;
+            justify-content:center!important;
             gap:.34rem;
-            border:1px dashed rgba(96,165,250,.45);
-            border-radius:14px;
+            border:1px dashed rgba(96,165,250,.48)!important;
+            border-radius:14px!important;
             background:
-                radial-gradient(circle at 50% 35%,rgba(37,99,235,.16),transparent 5.8rem),
-                rgba(15,23,42,.24);
+                radial-gradient(circle at 50% 34%,rgba(37,99,235,.14),transparent 5.5rem),
+                rgba(15,23,42,.22)!important;
             box-shadow:inset 0 1px 0 rgba(255,255,255,.035);
             transition:border-color .18s ease,background .18s ease,box-shadow .18s ease;
             pointer-events:none;
@@ -407,34 +416,54 @@ def _inject_email_input_css() -> None:
             letter-spacing:.025em;
         }
 
-        .email-upload-overlay,
-        .st-key-email_upload_area [data-testid="stFileUploader"] {
-            position:absolute;
-            inset:0;
-            z-index:3;
-            opacity:.01;
+        .st-key-email_upload_area .st-key-email_upload_widget_0,
+        .st-key-email_upload_area [class*="st-key-email_upload_widget_"],
+        .st-key-email_upload_area [class*="st-key-email_upload_widget_"][data-testid="stElementContainer"] {
+            position:absolute!important;
+            inset:0!important;
+            z-index:5!important;
+            width:100%!important;
             height:110px!important;
             margin:0!important;
             padding:0!important;
-            border:0!important;
+        }
+
+        .st-key-email_upload_area
+        [class*="st-key-email_upload_widget_"][data-testid="stElementContainer"][data-stale="false"] {
+            position:absolute!important;
+            inset:0!important;
+        }
+
+        .st-key-email_upload_area [data-testid="stFileUploader"] {
+            position:absolute!important;
+            inset:0!important;
+            width:100%!important;
+            height:110px!important;
+            margin:0!important;
+            padding:0!important;
+            border:none!important;
             background:transparent!important;
         }
 
-        .email-upload-overlay [data-testid="stFileUploaderDropzone"],
         .st-key-email_upload_area [data-testid="stFileUploaderDropzone"] {
+            position:absolute!important;
+            inset:0!important;
+            width:100%!important;
             height:110px!important;
             min-height:110px!important;
             margin:0!important;
             padding:0!important;
-            border:0!important;
+            border:none!important;
             background:transparent!important;
             cursor:pointer!important;
+            opacity:0!important;
         }
 
-        .email-upload-overlay [data-testid="stFileUploaderDropzone"] button,
-        .st-key-email_upload_area [data-testid="stFileUploaderDropzone"] button {
+        .st-key-email_upload_area [data-testid="stFileUploaderDropzoneInput"] {
+            position:absolute!important;
+            inset:0!important;
             width:100%!important;
-            height:110px!important;
+            height:100%!important;
             cursor:pointer!important;
         }
 
