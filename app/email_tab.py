@@ -5,12 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 from email import policy
 from email.parser import BytesParser
+import hashlib
 import html
-from io import BytesIO
+import io
 import math
 from pathlib import Path
 import re
-import time
 from typing import Any
 
 import pandas as pd
@@ -52,6 +52,7 @@ DISPLAY_MODELS = [
     "XGBoost",
 ]
 
+
 SUPPORTED_UPLOAD_TYPES = ["eml", "msg", "txt", "html", "htm", "pdf", "docx", "csv"]
 SUPPORTED_FORMAT_LABELS = ["EML", "MSG", "TXT", "HTML", "PDF", "DOCX", "CSV"]
 
@@ -90,179 +91,118 @@ def _available_models(root: Path) -> list[str]:
     return available
 
 
-def _decode_uploaded_bytes(raw: bytes) -> str:
-    for encoding in ("utf-8", "utf-16", "latin-1"):
-        try:
-            return raw.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return raw.decode("utf-8", errors="ignore")
-
-
-def _strip_html_content(value: str) -> str:
-    value = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", value)
-    value = re.sub(r"(?is)<br\s*/?>", "\n", value)
-    value = re.sub(r"(?is)</p\s*>", "\n", value)
-    value = re.sub(r"(?is)<[^>]+>", " ", value)
-    value = html.unescape(value)
-    value = re.sub(r"[ \t]+", " ", value)
-    value = re.sub(r"\n{3,}", "\n\n", value)
-    return value.strip()
-
-
-def _message_part_text(part: Any) -> str:
+def _strip_html(raw_html: str) -> str:
+    """Convert basic HTML into readable plain text."""
     try:
-        content_type = part.get_content_type()
+        from bs4 import BeautifulSoup
+
+        return BeautifulSoup(raw_html, "html.parser").get_text("\n", strip=True)
     except Exception:
-        content_type = ""
-
-    if content_type not in {"text/plain", "text/html"}:
-        return ""
-
-    try:
-        payload = part.get_content()
-    except Exception:
-        decoded = part.get_payload(decode=True)
-        payload = _decode_uploaded_bytes(decoded) if isinstance(decoded, bytes) else str(part.get_payload() or "")
-
-    text = str(payload or "")
-    if content_type == "text/html":
-        text = _strip_html_content(text)
-    return text.strip()
+        cleaned = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", raw_html)
+        cleaned = re.sub(r"(?s)<[^>]+>", " ", cleaned)
+        return html.unescape(re.sub(r"\s+", " ", cleaned)).strip()
 
 
-def _extract_eml_text(raw: bytes) -> str:
-    message = BytesParser(policy=policy.default).parsebytes(raw)
+def _extract_eml(data: bytes) -> str:
+    message = BytesParser(policy=policy.default).parsebytes(data)
     parts: list[str] = []
 
-    for key in ("From", "To", "Subject", "Date"):
-        value = message.get(key)
+    for header in ("from", "to", "cc", "subject", "date"):
+        value = message.get(header)
         if value:
-            parts.append(f"{key}: {value}")
+            parts.append(f"{header.title()}: {value}")
 
-    text_parts: list[str] = []
-    preferred_body = message.get_body(preferencelist=("plain", "html"))
-    if preferred_body is not None:
-        preferred_text = _message_part_text(preferred_body)
-        if preferred_text:
-            text_parts.append(preferred_text)
+    if message.is_multipart():
+        plain_parts: list[str] = []
+        html_parts: list[str] = []
+        for part in message.walk():
+            content_type = part.get_content_type()
+            disposition = str(part.get("Content-Disposition", "")).lower()
+            if "attachment" in disposition:
+                continue
+            try:
+                content = part.get_content()
+            except Exception:
+                payload = part.get_payload(decode=True) or b""
+                content = payload.decode(
+                    part.get_content_charset() or "utf-8",
+                    errors="ignore",
+                )
 
-    for part in message.walk():
-        if part.is_multipart():
-            continue
-        text = _message_part_text(part)
-        if text and text not in text_parts:
-            text_parts.append(text)
+            if content_type == "text/plain" and str(content).strip():
+                plain_parts.append(str(content))
+            elif content_type == "text/html" and str(content).strip():
+                html_parts.append(_strip_html(str(content)))
 
-    if not text_parts:
-        payload = message.get_payload(decode=True)
-        if isinstance(payload, bytes):
-            fallback_text = _decode_uploaded_bytes(payload).strip()
-            if fallback_text:
-                text_parts.append(fallback_text)
-
-    parts.extend(text_parts)
-
-    extracted = "\n\n".join(part.strip() for part in parts if str(part).strip())
-    if not extracted:
-        raise RuntimeError(
-            "EML text could not be extracted. The email may contain only attachments, "
-            "encrypted content, or an unsupported message structure."
+        body = "\n\n".join(plain_parts or html_parts)
+    else:
+        try:
+            content = message.get_content()
+        except Exception:
+            payload = message.get_payload(decode=True) or b""
+            content = payload.decode(
+                message.get_content_charset() or "utf-8",
+                errors="ignore",
+            )
+        body = (
+            _strip_html(str(content))
+            if message.get_content_type() == "text/html"
+            else str(content)
         )
-    return extracted
+
+    if body.strip():
+        parts.append(body.strip())
+
+    return "\n".join(parts).strip()
 
 
-def _extract_docx_text(raw: bytes) -> str:
-    try:
-        from docx import Document
-    except Exception as exc:
-        raise RuntimeError("Install `python-docx` to extract Word document text.") from exc
-
-    document = Document(BytesIO(raw))
-    paragraphs = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
-    table_cells: list[str] = []
-    for table in document.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                if cell.text.strip():
-                    table_cells.append(cell.text.strip())
-
-    return "\n".join([*paragraphs, *table_cells]).strip()
-
-
-def _extract_pdf_text(raw: bytes) -> str:
+def _extract_pdf(data: bytes) -> str:
     try:
         from pypdf import PdfReader
-    except Exception:
-        try:
-            from PyPDF2 import PdfReader
-        except Exception as exc:
-            raise RuntimeError("Install `pypdf` or `PyPDF2` to extract PDF text.") from exc
+    except ImportError as exc:
+        raise RuntimeError("PDF support requires `pip install pypdf`.") from exc
 
-    reader = PdfReader(BytesIO(raw))
-    pages = []
-    for page in reader.pages:
-        text = page.extract_text() or ""
-        if text.strip():
-            pages.append(text.strip())
-    extracted = "\n\n".join(pages).strip()
-    if not extracted:
-        raise RuntimeError(
-            "PDF text could not be extracted. This PDF may be image-only or scanned; "
-            "use OCR externally or paste the visible text into the preview box."
-        )
-    return extracted
+    reader = PdfReader(io.BytesIO(data))
+    return "\n".join((page.extract_text() or "") for page in reader.pages).strip()
 
 
-def _extract_msg_text(raw: bytes) -> str:
+def _extract_docx(data: bytes) -> str:
+    try:
+        from docx import Document
+    except ImportError as exc:
+        raise RuntimeError("DOCX support requires `pip install python-docx`.") from exc
+
+    document = Document(io.BytesIO(data))
+    return "\n".join(
+        paragraph.text for paragraph in document.paragraphs
+    ).strip()
+
+
+def _extract_msg(data: bytes) -> str:
     try:
         import extract_msg
-    except Exception as exc:
-        raise RuntimeError("Install `extract-msg` to extract Outlook .msg files.") from exc
+    except ImportError as exc:
+        raise RuntimeError("MSG support requires `pip install extract-msg`.") from exc
 
     import tempfile
 
-    temp_path = ""
+    temp_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".msg") as temp_file:
-            temp_file.write(raw)
-            temp_path = temp_file.name
+        with tempfile.NamedTemporaryFile(suffix=".msg", delete=False) as temp_file:
+            temp_file.write(data)
+            temp_path = Path(temp_file.name)
 
-        message = extract_msg.Message(temp_path)
-        try:
-            html_body = getattr(message, "htmlBody", None)
-            if isinstance(html_body, bytes):
-                html_body = _decode_uploaded_bytes(html_body)
-
-            body = message.body or ""
-            if not body and html_body:
-                body = _strip_html_content(str(html_body))
-
-            parts = [
-                f"From: {message.sender}" if message.sender else "",
-                f"To: {message.to}" if message.to else "",
-                f"CC: {message.cc}" if getattr(message, "cc", None) else "",
-                f"Subject: {message.subject}" if message.subject else "",
-                f"Date: {message.date}" if getattr(message, "date", None) else "",
-                body,
-            ]
-            extracted = "\n\n".join(part.strip() for part in parts if part and part.strip())
-            if not extracted:
-                raise RuntimeError(
-                    "Outlook .msg text could not be extracted. The file may be encrypted, "
-                    "corrupted, or contain only unsupported embedded content."
-                )
-            return extracted
-        finally:
-            close = getattr(message, "close", None)
-            if callable(close):
-                close()
+        message = extract_msg.Message(str(temp_path))
+        values = [
+            f"From: {message.sender}" if message.sender else "",
+            f"To: {message.to}" if message.to else "",
+            f"Subject: {message.subject}" if message.subject else "",
+            message.body or "",
+        ]
+        return "\n".join(value for value in values if value).strip()
     finally:
-        if temp_path:
-            try:
-                Path(temp_path).unlink(missing_ok=True)
-            except Exception:
-                pass
+        if temp_path and temp_path.exists():
+            temp_path.unlink(missing_ok=True)
 
 
 def _read_uploaded_text(uploaded_file) -> str | pd.DataFrame | None:
@@ -270,47 +210,872 @@ def _read_uploaded_text(uploaded_file) -> str | pd.DataFrame | None:
         return None
 
     suffix = Path(uploaded_file.name).suffix.lower()
-    raw = uploaded_file.getvalue()
+    data = uploaded_file.getvalue()
 
     try:
-        if suffix in {".txt"}:
-            return _decode_uploaded_bytes(raw)
-
-        if suffix == ".csv":
-            return pd.read_csv(BytesIO(raw))
-
-        if suffix == ".eml":
-            return _extract_eml_text(raw)
-
+        if suffix == ".txt":
+            return data.decode("utf-8", errors="ignore")
         if suffix in {".html", ".htm"}:
-            return _strip_html_content(_decode_uploaded_bytes(raw))
-
+            return _strip_html(data.decode("utf-8", errors="ignore"))
+        if suffix == ".eml":
+            return _extract_eml(data)
         if suffix == ".pdf":
-            return _extract_pdf_text(raw)
-
+            return _extract_pdf(data)
         if suffix == ".docx":
-            return _extract_docx_text(raw)
-
+            return _extract_docx(data)
         if suffix == ".msg":
-            return _extract_msg_text(raw)
-
-    except RuntimeError as exc:
-        st.warning(str(exc))
-        return None
+            return _extract_msg(data)
+        if suffix == ".csv":
+            return pd.read_csv(io.BytesIO(data))
     except Exception as exc:
-        st.warning(f"Could not extract text from `{uploaded_file.name}`: {exc}")
+        st.error(f"Could not extract content from {uploaded_file.name}: {exc}")
         return None
 
-    st.warning(f"Unsupported file type. Use {', '.join(SUPPORTED_FORMAT_LABELS)}.")
+    st.warning("Unsupported file type. Use EML, MSG, TXT, HTML, PDF, DOCX, or CSV.")
     return None
+
+
+def _upload_signature(uploaded_file: Any | None) -> str | None:
+    if uploaded_file is None:
+        return None
+    data = uploaded_file.getvalue()
+    digest = hashlib.sha256(data).hexdigest()[:16]
+    return f"{uploaded_file.name}:{len(data)}:{digest}"
+
+
+def _email_evidence_metadata(
+    text: str,
+    uploaded_file: Any | None,
+    uploaded: str | pd.DataFrame | None,
+) -> dict[str, object]:
+    if uploaded_file is not None and isinstance(uploaded, pd.DataFrame):
+        source = "CSV batch"
+        status = "Ready" if not uploaded.empty else "Empty"
+    elif uploaded_file is not None and isinstance(uploaded, str):
+        source = f"Uploaded {Path(uploaded_file.name).suffix.upper().lstrip('.')}"
+        status = "Ready" if text.strip() else "No text extracted"
+    elif text.strip():
+        source = "Pasted text"
+        status = "Ready"
+    else:
+        source = "No evidence"
+        status = "Missing"
+
+    return {
+        "source": source,
+        "filename": uploaded_file.name if uploaded_file is not None else "—",
+        "characters": len(text),
+        "words": len(text.split()),
+        "status": status,
+    }
+
+
+def _inject_email_input_css() -> None:
+    st.markdown(
+        """
+        <style>
+        .st-key-email_investigation_shell,
+        .st-key-email_investigation_shell > div[data-testid="stVerticalBlockBorderWrapper"] {
+            border-radius:18px!important;
+        }
+
+        .st-key-email_investigation_shell > div[data-testid="stVerticalBlockBorderWrapper"] {
+            border:1px solid rgba(96,165,250,.22)!important;
+            background:
+                radial-gradient(circle at 88% 7%,rgba(37,99,235,.07),transparent 18rem),
+                linear-gradient(145deg,rgba(17,24,39,.98),rgba(10,18,33,.98))!important;
+            box-shadow:0 16px 38px rgba(0,0,0,.22)!important;
+            padding:1rem!important;
+            overflow:hidden!important;
+        }
+
+        .email-step-head {
+            display:flex;
+            align-items:flex-start;
+            gap:.65rem;
+            margin:.05rem 0 .58rem;
+        }
+
+        .email-step-number {
+            width:24px;
+            height:24px;
+            flex:0 0 24px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            border-radius:50%;
+            background:rgba(37,99,235,.16);
+            border:1px solid rgba(96,165,250,.55);
+            color:#93C5FD;
+            font-family:'JetBrains Mono',monospace;
+            font-size:.66rem;
+            font-weight:800;
+            box-shadow:0 0 14px rgba(37,99,235,.15);
+        }
+
+        .email-step-copy strong {
+            display:block;
+            color:var(--text-primary);
+            font-size:.88rem;
+            font-weight:800;
+            line-height:1.25;
+        }
+
+        .email-step-copy span {
+            display:block;
+            color:var(--text-muted);
+            font-size:.7rem;
+            line-height:1.45;
+            margin-top:2px;
+        }
+
+        .email-step-divider {
+            height:1px;
+            background:rgba(148,163,184,.12);
+            margin:.78rem 0;
+        }
+
+        /* =========================================================
+        SINGLE-BORDER EMAIL UPLOADER
+        ========================================================= */
+
+        .st-key-email_upload {
+            position: relative !important;
+        }
+
+        /* Remove the outer uploader border that creates the second dashed box */
+        .st-key-email_upload [data-testid="stFileUploader"] {
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            background: transparent !important;
+        }
+
+        /* Keep only the real inner drop-zone border */
+        .st-key-email_upload [data-testid="stFileUploaderDropzone"] {
+            position: relative !important;
+            min-height: 108px !important;
+
+            border: 1px dashed rgba(96, 165, 250, 0.42) !important;
+            border-radius: 14px !important;
+
+            background:
+                radial-gradient(
+                    circle at 50% 35%,
+                    rgba(37, 99, 235, 0.13),
+                    transparent 5.5rem
+                ),
+                rgba(15, 23, 42, 0.24) !important;
+
+            padding: 0 !important;
+            overflow: hidden !important;
+
+            transition:
+                border-color 0.18s ease,
+                background 0.18s ease !important;
+        }
+
+        .st-key-email_upload [data-testid="stFileUploaderDropzone"]:hover {
+            border-color: rgba(96, 165, 250, 0.75) !important;
+
+            background:
+                radial-gradient(
+                    circle at 50% 35%,
+                    rgba(37, 99, 235, 0.19),
+                    transparent 6rem
+                ),
+                rgba(15, 23, 42, 0.30) !important;
+        }
+
+        /* Hide Streamlit's original uploader instructions */
+        .st-key-email_upload
+        [data-testid="stFileUploaderDropzoneInstructions"] {
+            visibility: hidden !important;
+            position: absolute !important;
+            inset: 0 !important;
+        }
+
+        /* Make the entire visible uploader clickable */
+        .st-key-email_upload
+        [data-testid="stFileUploaderDropzone"] button {
+            position: absolute !important;
+            inset: 0 !important;
+
+            width: 100% !important;
+            height: 100% !important;
+            min-height: 108px !important;
+
+            opacity: 0 !important;
+            cursor: pointer !important;
+            z-index: 5 !important;
+
+            margin: 0 !important;
+            border-radius: 14px !important;
+        }
+
+        /* Upload icon */
+        .st-key-email_upload
+        [data-testid="stFileUploaderDropzone"]::before {
+            content: "";
+            position: absolute;
+
+            left: 50%;
+            top: 21px;
+            transform: translateX(-50%);
+
+            width: 34px;
+            height: 34px;
+
+            border-radius: 50%;
+
+            background:
+                url(
+                    "https://api.iconify.design/solar/upload-minimalistic-bold-duotone.svg?color=%2393c5fd"
+                )
+                center / 20px 20px no-repeat,
+                linear-gradient(
+                    135deg,
+                    rgba(37, 99, 235, 0.30),
+                    rgba(59, 130, 246, 0.12)
+                );
+
+            border: 1px solid rgba(96, 165, 250, 0.30);
+            box-shadow: 0 0 16px rgba(37, 99, 235, 0.14);
+
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        /* Only the supported formats below the icon */
+        .st-key-email_upload
+        [data-testid="stFileUploaderDropzone"]::after {
+            content: "EML  •  MSG  •  TXT  •  HTML  •  PDF  •  DOCX  •  CSV";
+
+            position: absolute;
+            left: 50%;
+            top: 67px;
+            transform: translateX(-50%);
+
+            width: 92%;
+
+            color: #94A3B8;
+            text-align: center;
+
+            font-size: 0.65rem;
+            font-weight: 650;
+            letter-spacing: 0.04em;
+
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        /* Uploaded file card */
+        .st-key-email_upload [data-testid="stFileUploaderFile"] {
+            margin-top: 0.5rem !important;
+
+            border: 1px solid rgba(96, 165, 250, 0.18) !important;
+            border-radius: 10px !important;
+
+            background: rgba(7, 14, 27, 0.65) !important;
+        }
+
+        .st-key-email_upload [data-testid="stFileUploader"] {
+            margin:0!important;
+        }
+
+        .st-key-email_upload [data-testid="stFileUploaderDropzone"] {
+            position:relative!important;
+            min-height:108px!important;
+            border:1px dashed rgba(96,165,250,.38)!important;
+            border-radius:14px!important;
+            background:
+                radial-gradient(circle at 50% 33%,rgba(37,99,235,.13),transparent 5.5rem),
+                rgba(15,23,42,.24)!important;
+            padding:0!important;
+            overflow:hidden!important;
+            transition:border-color .18s ease,background .18s ease!important;
+        }
+
+        .st-key-email_upload [data-testid="stFileUploaderDropzone"]:hover {
+            border-color:rgba(96,165,250,.72)!important;
+            background:
+                radial-gradient(circle at 50% 33%,rgba(37,99,235,.19),transparent 6rem),
+                rgba(15,23,42,.30)!important;
+        }
+
+        .st-key-email_upload [data-testid="stFileUploaderDropzoneInstructions"] {
+            visibility:hidden!important;
+            position:absolute!important;
+            inset:0!important;
+        }
+
+        .st-key-email_upload [data-testid="stFileUploaderDropzone"] button {
+            position:absolute!important;
+            inset:0!important;
+            width:100%!important;
+            height:100%!important;
+            min-height:108px!important;
+            opacity:0!important;
+            z-index:5!important;
+            cursor:pointer!important;
+            margin:0!important;
+            border-radius:14px!important;
+        }
+
+        .st-key-email_upload [data-testid="stFileUploaderDropzone"]::before {
+            content:"";
+            position:absolute;
+            left:50%;
+            top:20px;
+            transform:translateX(-50%);
+            width:34px;
+            height:34px;
+            border-radius:50%;
+            color:#93C5FD;
+            background:
+                url("https://api.iconify.design/solar/upload-minimalistic-bold-duotone.svg?color=%2393c5fd")
+                center/20px 20px no-repeat,
+                linear-gradient(135deg,rgba(37,99,235,.30),rgba(59,130,246,.12));
+            border:1px solid rgba(96,165,250,.30);
+            box-shadow:0 0 16px rgba(37,99,235,.14);
+            pointer-events:none;
+            z-index:2;
+        }
+
+        .st-key-email_upload [data-testid="stFileUploaderDropzone"]::after {
+            content:"EML • MSG • TXT • HTML • PDF • DOCX • CSV";
+            white-space:pre;
+            position:absolute;
+            left:50%;
+            top:60px;
+            transform:translateX(-50%);
+            width:90%;
+            text-align:center;
+            color:#F8FAFC;
+            font-size:.72rem;
+            line-height:1.65;
+            font-weight:750;
+            pointer-events:none;
+            z-index:2;
+        }
+
+        .st-key-email_upload [data-testid="stFileUploaderFile"] {
+            margin-top:.5rem!important;
+            border:1px solid rgba(96,165,250,.18)!important;
+            border-radius:10px!important;
+            background:rgba(7,14,27,.65)!important;
+        }
+
+        .email-format-line {
+            color:var(--text-muted);
+            font-size:.62rem;
+            text-align:center;
+            margin:.32rem 0 0;
+            letter-spacing:.035em;
+        }
+
+        .email-preview-meta {
+            display:grid;
+            grid-template-columns:1.4fr repeat(3,1fr);
+            gap:0;
+            margin:.52rem 0 0;
+            border-top:1px solid rgba(148,163,184,.10);
+            border-bottom:1px solid rgba(148,163,184,.10);
+        }
+
+        .email-meta-item {
+            padding:.58rem .68rem;
+            border-right:1px solid rgba(148,163,184,.10);
+        }
+
+        .email-meta-item:last-child {
+            border-right:none;
+        }
+
+        .email-meta-label {
+            display:block;
+            color:var(--text-muted);
+            font-size:.57rem;
+            text-transform:uppercase;
+            letter-spacing:.06em;
+        }
+
+        .email-meta-value {
+            display:block;
+            color:var(--text-primary);
+            font-size:.71rem;
+            font-weight:700;
+            margin-top:.14rem;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+        }
+
+        .st-key-email_config_columns [data-testid="stHorizontalBlock"] {
+            gap:.65rem!important;
+            align-items:stretch!important;
+        }
+
+        .st-key-email_model_panel,
+        .st-key-email_engine_panel {
+            height:100%!important;
+        }
+
+        .st-key-email_model_panel > div[data-testid="stVerticalBlockBorderWrapper"],
+        .st-key-email_engine_panel > div[data-testid="stVerticalBlockBorderWrapper"] {
+            height:100%!important;
+            min-height:246px!important;
+            border:1px solid rgba(148,163,184,.16)!important;
+            border-radius:14px!important;
+            background:
+                linear-gradient(145deg,rgba(17,24,39,.96),rgba(13,22,38,.96))!important;
+            padding:.72rem!important;
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.025)!important;
+        }
+
+        .st-key-email_engine_panel > div[data-testid="stVerticalBlockBorderWrapper"] {
+            background:
+                radial-gradient(circle at 50% 40%,rgba(37,99,235,.17),transparent 5.3rem),
+                linear-gradient(145deg,rgba(17,24,39,.96),rgba(13,22,38,.96))!important;
+        }
+
+        .email-panel-head {
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:.5rem;
+            margin-bottom:.36rem;
+        }
+
+        .email-panel-head strong,
+        .email-engine-title {
+            color:var(--text-primary);
+            font-size:.78rem;
+            font-weight:800;
+        }
+
+        .email-rec-badge {
+            padding:.13rem .4rem;
+            border-radius:999px;
+            background:rgba(37,99,235,.14);
+            border:1px solid rgba(96,165,250,.30);
+            color:#93C5FD;
+            font-size:.54rem;
+            font-weight:800;
+        }
+
+        .email-config-note {
+            color:var(--text-muted);
+            font-size:.62rem;
+            line-height:1.4;
+            margin:0 0 .42rem;
+        }
+
+        .email-model-list {
+            margin-top:.1rem;
+        }
+
+        .email-model-label {
+            display:flex;
+            align-items:center;
+            gap:.45rem;
+            min-height:30px;
+            color:#D8E3F4;
+            font-size:.7rem;
+            font-weight:650;
+        }
+
+        .email-model-icon {
+            width:22px;
+            height:22px;
+            flex:0 0 22px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            border-radius:7px;
+            color:#93C5FD;
+            background:rgba(37,99,235,.10);
+            border:1px solid rgba(96,165,250,.16);
+        }
+
+        .email-model-icon::before {
+            content:"";
+            width:13px;
+            height:13px;
+            display:block;
+            background:currentColor;
+            -webkit-mask:url("https://api.iconify.design/solar/cpu-bolt-bold-duotone.svg") center/contain no-repeat;
+            mask:url("https://api.iconify.design/solar/cpu-bolt-bold-duotone.svg") center/contain no-repeat;
+        }
+
+        .st-key-email_model_panel [data-testid="stHorizontalBlock"] {
+            gap:.3rem!important;
+            align-items:center!important;
+            min-height:32px!important;
+            border-bottom:1px solid rgba(148,163,184,.075);
+        }
+
+        .st-key-email_model_panel [data-testid="stHorizontalBlock"]:last-child {
+            border-bottom:none;
+        }
+
+        .st-key-email_model_panel [data-testid="stToggle"] {
+            margin:0!important;
+            padding:0!important;
+            display:flex!important;
+            justify-content:flex-end!important;
+        }
+
+        .st-key-email_model_panel [data-testid="stWidgetLabel"] {
+            display:none!important;
+        }
+
+        .st-key-email_model_panel [role="switch"] {
+            transform:scale(.82);
+            transform-origin:right center;
+        }
+
+        .email-engine-title {
+            text-align:left;
+            margin-bottom:.18rem;
+        }
+
+        .email-engine-ring {
+            width:86px;
+            height:86px;
+            margin:.3rem auto .42rem;
+            border-radius:50%;
+            border:2px solid rgba(96,165,250,.46);
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            position:relative;
+            box-shadow:
+                0 0 24px rgba(37,99,235,.17),
+                inset 0 0 22px rgba(37,99,235,.12);
+        }
+
+        .email-engine-ring::before,
+        .email-engine-ring::after {
+            content:"";
+            position:absolute;
+            border-radius:50%;
+            border:1px solid rgba(96,165,250,.21);
+        }
+
+        .email-engine-ring::before { inset:8px; }
+        .email-engine-ring::after { inset:17px; }
+
+        .email-engine-center {
+            position:relative;
+            z-index:1;
+            color:#DBEAFE;
+            font-size:.72rem;
+            font-weight:800;
+            line-height:1.15;
+        }
+
+        .email-engine-center::before {
+            content:"✓";
+            display:block;
+            color:#60A5FA;
+            font-size:1.08rem;
+            margin-bottom:.1rem;
+        }
+
+        .email-engine-sub {
+            color:var(--text-muted);
+            font-size:.59rem;
+            margin:.05rem 0 .44rem;
+            text-align:center;
+        }
+
+        .email-engine-stats {
+            display:grid;
+            grid-template-columns:repeat(3,1fr);
+            border-top:1px solid rgba(148,163,184,.10);
+            margin-top:auto;
+        }
+
+        .email-engine-stat {
+            padding:.45rem .2rem 0;
+            border-right:1px solid rgba(148,163,184,.10);
+            text-align:center;
+        }
+
+        .email-engine-stat:last-child { border-right:none; }
+
+        .email-engine-stat b {
+            display:block;
+            color:var(--text-primary);
+            font-size:.79rem;
+        }
+
+        .email-engine-stat span {
+            display:block;
+            color:var(--text-muted);
+            font-size:.51rem;
+            text-transform:uppercase;
+            margin-top:.08rem;
+        }
+
+        .email-readiness-strip {
+            display:grid;
+            grid-template-columns:repeat(4,minmax(0,1fr));
+            gap:.42rem;
+            margin:.72rem 0 .58rem;
+        }
+
+        .email-ready-item {
+            padding:.44rem .56rem;
+            border:1px solid rgba(148,163,184,.11);
+            border-radius:9px;
+            background:rgba(15,23,42,.24);
+        }
+
+        .email-ready-item span {
+            display:block;
+            color:var(--text-muted);
+            font-size:.54rem;
+            text-transform:uppercase;
+            letter-spacing:.05em;
+        }
+
+        .email-ready-item b {
+            display:block;
+            color:var(--text-primary);
+            font-size:.69rem;
+            margin-top:.1rem;
+        }
+
+        @media(max-width:850px) {
+            .st-key-email_config_columns [data-testid="stHorizontalBlock"] {
+                flex-direction:column!important;
+            }
+
+            .email-preview-meta {
+                grid-template-columns:repeat(2,minmax(0,1fr));
+            }
+
+            .email-meta-item:nth-child(2n) {
+                border-right:none;
+            }
+
+            .email-readiness-strip {
+                grid-template-columns:repeat(2,minmax(0,1fr));
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _step_header(number: str, title: str, description: str) -> None:
+    st.markdown(
+        f"""
+        <div class="email-step-head">
+            <span class="email-step-number">{html.escape(number)}</span>
+            <div class="email-step-copy">
+                <strong>{html.escape(title)}</strong>
+                <span>{html.escape(description)}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_email_input_container(
+    root: Path,
+    model_options: list[str],
+) -> tuple[Any | None, str | pd.DataFrame | None, str, list[str], bool]:
+    _inject_email_input_css()
+
+    if "email_evidence_text" not in st.session_state:
+        st.session_state.email_evidence_text = ""
+    if "email_upload_signature" not in st.session_state:
+        st.session_state.email_upload_signature = None
+
+    for model_name in model_options:
+        model_key = f"email_model_{model_name.lower().replace(' ', '_')}"
+        if model_key not in st.session_state:
+            st.session_state[model_key] = True
+
+    with st.container(key="email_investigation_shell", border=True):
+        _step_header(
+            "01",
+            "Upload Evidence File",
+            "Upload an email or message file to extract its content.",
+        )
+
+        with st.container(key="email_upload"):
+            uploaded_file = st.file_uploader(
+                "Upload evidence file",
+                type=SUPPORTED_UPLOAD_TYPES,
+                key="email_upload_widget",
+                help="Supported: EML, MSG, TXT, HTML, PDF, DOCX, and CSV.",
+                label_visibility="collapsed",
+            )
+
+        uploaded = _read_uploaded_text(uploaded_file)
+        signature = _upload_signature(uploaded_file)
+
+        if uploaded_file is not None and isinstance(uploaded, str):
+            if signature != st.session_state.email_upload_signature:
+                st.session_state.email_evidence_text = uploaded
+                st.session_state.email_upload_signature = signature
+        elif uploaded_file is None:
+            st.session_state.email_upload_signature = None
+
+        st.markdown('<div class="email-step-divider"></div>', unsafe_allow_html=True)
+
+        _step_header(
+            "02",
+            "Review Extracted Content",
+            "Preview, edit or paste the extracted content before running analysis.",
+        )
+
+        text = st.text_area(
+            "Evidence preview",
+            key="email_evidence_text",
+            height=205,
+            placeholder="Extracted content will appear here...",
+            help="The text shown here is the exact content sent to the selected AI models.",
+            label_visibility="collapsed",
+        )
+
+        metadata = _email_evidence_metadata(text, uploaded_file, uploaded)
+        source_value = html.escape(str(metadata["source"]))
+        filename_value = html.escape(str(metadata["filename"]))
+        status_value = html.escape(str(metadata["status"]))
+
+        st.markdown(
+            '<div class="email-preview-meta">'
+            f'<div class="email-meta-item"><span class="email-meta-label">Source</span>'
+            f'<span class="email-meta-value">{source_value}<br>{filename_value}</span></div>'
+            f'<div class="email-meta-item"><span class="email-meta-label">Characters</span>'
+            f'<span class="email-meta-value">{metadata["characters"]:,}</span></div>'
+            f'<div class="email-meta-item"><span class="email-meta-label">Words</span>'
+            f'<span class="email-meta-value">{metadata["words"]:,}</span></div>'
+            f'<div class="email-meta-item"><span class="email-meta-label">Status</span>'
+            f'<span class="email-meta-value">{status_value}</span></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.markdown('<div class="email-step-divider"></div>', unsafe_allow_html=True)
+
+        _step_header(
+            "03",
+            "Configure Investigation",
+            "Choose the AI models to compare for this evidence.",
+        )
+
+        model_choices: list[str] = []
+
+        with st.container(key="email_config_columns"):
+            left_col, right_col = st.columns([0.46, 0.54], gap="small")
+
+            with left_col:
+                with st.container(key="email_model_panel", border=True):
+                    st.markdown(
+                        '<div class="email-panel-head">'
+                        '<strong>AI Models</strong>'
+                        '<span class="email-rec-badge">Recommended</span>'
+                        '</div>'
+                        '<div class="email-config-note">'
+                        'All models are selected by default. Disable any model you do not want to compare.'
+                        '</div>'
+                        '<div class="email-model-list">',
+                        unsafe_allow_html=True,
+                    )
+
+                    for model_name in model_options:
+                        model_key = f"email_model_{model_name.lower().replace(' ', '_')}"
+                        label_col, toggle_col = st.columns([0.78, 0.22], gap="small")
+
+                        with label_col:
+                            st.markdown(
+                                '<div class="email-model-label">'
+                                '<span class="email-model-icon"></span>'
+                                f'<span>{html.escape(model_name)}</span>'
+                                '</div>',
+                                unsafe_allow_html=True,
+                            )
+
+                        with toggle_col:
+                            selected = st.toggle(
+                                f"Use {model_name}",
+                                key=model_key,
+                                label_visibility="collapsed",
+                            )
+
+                        if selected:
+                            model_choices.append(model_name)
+
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+            available_count = len(model_options)
+            selected_count = len(model_choices)
+            missing_count = max(0, len(DISPLAY_MODELS) - available_count)
+            engine_ready = available_count > 0 and selected_count > 0
+
+            with right_col:
+                with st.container(key="email_engine_panel", border=True):
+                    st.markdown(
+                        '<div class="email-engine-title">AI Engine Status</div>'
+                        '<div class="email-engine-ring">'
+                        f'<div class="email-engine-center">'
+                        f'{"Ready" if engine_ready else "Incomplete"}'
+                        '</div>'
+                        '</div>'
+                        f'<div class="email-engine-sub">'
+                        f'{"All systems operational" if engine_ready else "Select at least one model"}'
+                        '</div>'
+                        '<div class="email-engine-stats">'
+                        f'<div class="email-engine-stat"><b>{available_count}</b>'
+                        '<span>Available</span></div>'
+                        f'<div class="email-engine-stat"><b>{selected_count}</b>'
+                        '<span>Selected</span></div>'
+                        f'<div class="email-engine-stat"><b>{missing_count}</b>'
+                        '<span>Missing</span></div>'
+                        '</div>',
+                        unsafe_allow_html=True,
+                    )
+
+        evidence_ready = bool(text.strip()) or isinstance(uploaded, pd.DataFrame)
+        source_label = str(metadata["source"])
+
+        st.markdown(
+            '<div class="email-readiness-strip">'
+            f'<div class="email-ready-item"><span>Evidence</span>'
+            f'<b>{"Ready" if evidence_ready else "Missing"}</b></div>'
+            f'<div class="email-ready-item"><span>Input Source</span>'
+            f'<b>{html.escape(source_label)}</b></div>'
+            f'<div class="email-ready-item"><span>Models</span>'
+            f'<b>{selected_count} selected</b></div>'
+            f'<div class="email-ready-item"><span>Engine</span>'
+            f'<b>{"Ready" if engine_ready else "Incomplete"}</b></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        analyze_button = st.button(
+            "✦  Analyze Evidence",
+            type="primary",
+            use_container_width=True,
+            disabled=not text.strip() or not model_choices,
+            key="email_analyze_evidence",
+        )
+
+    return uploaded_file, uploaded, text, model_choices, analyze_button
 
 
 def _predict_text(root: Path, text: str, model_choice: str) -> tuple[dict[str, object], Any | None]:
     try:
         classifier = _load_email_classifier(str(root), model_choice)
-        start_prediction = time.perf_counter()
         prediction = classifier.predict_one(text)
-        prediction_time_ms = (time.perf_counter() - start_prediction) * 1000
         findings = find_suspicious_phrases(text)
 
         return (
@@ -320,7 +1085,6 @@ def _predict_text(root: Path, text: str, model_choice: str) -> tuple[dict[str, o
                 "confidence": prediction.confidence,
                 "probabilities": prediction.probabilities,
                 "model_name": prediction.model_name,
-                "prediction_time_ms": prediction_time_ms,
                 "findings": findings,
             },
             classifier,
@@ -381,31 +1145,6 @@ def _model_comparison_chart(rows: list[dict[str, object]]) -> go.Figure:
 
     return apply_chart_theme(fig)
 
-
-def _metric_number(values: dict[str, object], *keys: str) -> float | None:
-    for key in keys:
-        if key not in values:
-            continue
-        value = values.get(key)
-        if value is None:
-            continue
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            continue
-    return None
-
-
-def _percent_metric(values: dict[str, object], *keys: str) -> float | None:
-    value = _metric_number(values, *keys)
-    return round(value * 100, 2) if value is not None else None
-
-
-def _seconds_metric(values: dict[str, object], *keys: str) -> float | None:
-    value = _metric_number(values, *keys)
-    return round(value, 3) if value is not None else None
-
-
 def _metrics_dataframe(root: Path) -> pd.DataFrame:
     metrics = _load_training_metrics(root)
     if not metrics or "models" not in metrics:
@@ -424,18 +1163,19 @@ def _metrics_dataframe(root: Path) -> pd.DataFrame:
         rows.append(
             {
                 "Model": model_name,
-                "Accuracy": _percent_metric(values, "accuracy"),
-                "Precision": _percent_metric(values, "precision"),
-                "Recall": _percent_metric(values, "recall"),
-                "F1 Score": _percent_metric(values, "f1", "f1_score"),
-                "ROC-AUC": _percent_metric(values, "roc_auc", "auc"),
-                "Training Time (s)": _seconds_metric(
-                    values,
-                    "training_time_seconds",
-                    "training_time",
-                    "train_time",
-                ),
-                "Saved Eval Prediction Time (ms)": _metric_number(values, "prediction_time_ms"),
+                "Accuracy": round(values.get("accuracy", 0) * 100, 2),
+                "Precision": round(values.get("precision", 0) * 100, 2),
+                "Recall": round(values.get("recall", 0) * 100, 2),
+                "F1 Score": round(values.get("f1", 0) * 100, 2),
+                "ROC-AUC": round(values.get("roc_auc", 0) * 100, 2)
+                if "roc_auc" in values
+                else None,
+                "Training Time (s)": round(values.get("training_time", 0), 3)
+                if "training_time" in values
+                else None,
+                "Prediction Time (ms)": round(values.get("prediction_time_ms", 0), 4)
+                if "prediction_time_ms" in values
+                else None,
                 "True Positive": tp,
                 "False Positive": fp,
                 "True Negative": tn,
@@ -525,19 +1265,26 @@ def _comparison_with_metrics(
                 "Prediction": row["Prediction"],
                 "Risk Score": row["Risk Score"],
                 "Confidence": row["Confidence"],
-                "Prediction Time (ms)": row.get("Prediction Time (ms)"),
-                "Accuracy": _percent_metric(values, "accuracy") if values else None,
-                "Precision": _percent_metric(values, "precision") if values else None,
-                "Recall": _percent_metric(values, "recall") if values else None,
-                "F1 Score": _percent_metric(values, "f1", "f1_score") if values else None,
-                "ROC-AUC": _percent_metric(values, "roc_auc", "auc") if values else None,
-                "Training Time (s)": _seconds_metric(
-                    values,
-                    "training_time_seconds",
-                    "training_time",
-                    "train_time",
-                )
+                "Accuracy": round(float(values.get("accuracy", 0)) * 100, 2)
                 if values
+                else None,
+                "Precision": round(float(values.get("precision", 0)) * 100, 2)
+                if values
+                else None,
+                "Recall": round(float(values.get("recall", 0)) * 100, 2)
+                if values
+                else None,
+                "F1 Score": round(float(values.get("f1", 0)) * 100, 2)
+                if values
+                else None,
+                "ROC-AUC": round(float(values.get("roc_auc", 0)) * 100, 2)
+                if values and "roc_auc" in values
+                else None,
+                "Training Time (s)": round(float(values.get("training_time", 0)), 3)
+                if values and "training_time" in values
+                else None,
+                "Prediction Time (ms)": round(float(values.get("prediction_time_ms", 0)), 4)
+                if values and "prediction_time_ms" in values
                 else None,
             }
         )
@@ -733,11 +1480,10 @@ def _render_evaluation_evidence(
 
     with metrics_tab:
         if metrics_df.empty:
-            st.warning("Metrics unavailable. Run the email training script first.")
+            st.warning("No saved training metrics found. Run the email training script first.")
         else:
             st.plotly_chart(_training_metrics_chart(metrics_df), use_container_width=True)
-            display_metrics_df = metrics_df.astype(object).where(pd.notna(metrics_df), "Metrics unavailable")
-            st.dataframe(display_metrics_df, hide_index=True, use_container_width=True)
+            st.dataframe(metrics_df, hide_index=True, use_container_width=True)
 
     with confusion_tab:
         figure = _confusion_matrix_figure(metrics, recommended_model)
@@ -752,7 +1498,7 @@ def _render_evaluation_evidence(
         if figure is None:
             st.warning(
                 "ROC-AUC data is not available yet. Retrain the email models after "
-                "updating `src/training/email_trainer.py`."
+                "updating `src/training/train_email_model.py`."
             )
         else:
             st.plotly_chart(figure, use_container_width=True)
@@ -1091,303 +1837,6 @@ def _load_training_metrics(root: Path) -> dict[str, object]:
     except Exception:
         return {}
 
-
-def _csv_text_columns(uploaded: pd.DataFrame) -> list[str]:
-    columns = [str(column) for column in uploaded.columns if uploaded[column].dtype == "object"]
-    return columns or [str(column) for column in uploaded.columns]
-
-
-def _csv_preview_text(uploaded: pd.DataFrame, text_column: str | None) -> str:
-    if uploaded.empty or not text_column or text_column not in uploaded.columns:
-        return ""
-
-    values = uploaded[text_column].fillna("").astype(str)
-    non_empty = [value.strip() for value in values if value.strip()]
-    if not non_empty:
-        return ""
-
-    preview_rows = non_empty[:5]
-    return "\n\n--- CSV row preview ---\n\n".join(preview_rows)
-
-
-def _uploaded_signature(uploaded_file: Any | None, uploaded: str | pd.DataFrame | None, csv_text_column: str | None) -> str:
-    if uploaded_file is None:
-        return "manual"
-
-    size = getattr(uploaded_file, "size", None)
-    name = getattr(uploaded_file, "name", "uploaded")
-    shape = uploaded.shape if isinstance(uploaded, pd.DataFrame) else ""
-    return f"upload-parser-v2:{name}:{size}:{shape}:{csv_text_column or ''}"
-
-
-def _sync_email_preview_state(
-    uploaded_file: Any | None,
-    uploaded: str | pd.DataFrame | None,
-    csv_text_column: str | None,
-) -> None:
-    if "email_evidence_text" not in st.session_state:
-        st.session_state.email_evidence_text = ""
-
-    if uploaded_file is None:
-        return
-
-    if uploaded is None:
-        return
-
-    signature = _uploaded_signature(uploaded_file, uploaded, csv_text_column)
-    if st.session_state.get("email_upload_signature") == signature:
-        return
-
-    if isinstance(uploaded, str):
-        st.session_state.email_evidence_text = uploaded
-    elif isinstance(uploaded, pd.DataFrame):
-        st.session_state.email_evidence_text = _csv_preview_text(uploaded, csv_text_column)
-
-    st.session_state.email_upload_signature = signature
-
-
-def _render_email_step_header(index: str, title: str, body: str) -> None:
-    st.markdown(
-        f"""
-        <div class="email-step-header">
-            <span>{html.escape(index)}</span>
-            <div>
-                <h3>{html.escape(title)}</h3>
-                <p>{html.escape(body)}</p>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _render_evidence_source() -> Any | None:
-    _render_email_step_header(
-        "01",
-        "Choose Evidence Source",
-        "Upload an evidence file or paste text directly into the preview editor below.",
-    )
-
-    render_content_card_open("violet")
-    source_col, paste_col = st.columns(2)
-
-    with source_col:
-        st.markdown(
-            """
-            <div class="email-source-card">
-                <div class="email-source-icon">FILE</div>
-                <div>
-                    <h4>Upload File</h4>
-                    <p>Extract content from email, document, webpage, or CSV evidence.</p>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        uploaded_file = st.file_uploader(
-            "Upload evidence file",
-            type=SUPPORTED_UPLOAD_TYPES,
-            key="email_upload",
-            label_visibility="collapsed",
-        )
-
-    with paste_col:
-        st.markdown(
-            """
-            <div class="email-source-card">
-                <div class="email-source-icon">TEXT</div>
-                <div>
-                    <h4>Paste Text</h4>
-                    <p>Use the preview editor for SMS, chat messages, copied emails, or cleaned transcript text.</p>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.caption("The editor remains editable after upload, so you can remove signatures or add missing message context.")
-
-    format_pills = "".join(f"<span>{html.escape(label)}</span>" for label in SUPPORTED_FORMAT_LABELS)
-    st.markdown(
-        f'<div class="email-format-row"><strong>Supported:</strong>{format_pills}</div>',
-        unsafe_allow_html=True,
-    )
-    render_content_card_close()
-
-    return uploaded_file
-
-
-def _render_evidence_preview(uploaded: str | pd.DataFrame | None, uploaded_file: Any | None) -> tuple[str, str | None]:
-    _render_email_step_header(
-        "02",
-        "Evidence Preview",
-        "Review or edit the extracted message before analysis.",
-    )
-
-    csv_text_column = None
-    if isinstance(uploaded, pd.DataFrame):
-        csv_columns = _csv_text_columns(uploaded)
-        csv_text_column = st.selectbox(
-            "CSV text column for preview and batch analysis",
-            csv_columns,
-            key="email_csv_text_column",
-        )
-
-    _sync_email_preview_state(uploaded_file, uploaded, csv_text_column)
-
-    text = st.text_area(
-        "Evidence Preview",
-        key="email_evidence_text",
-        height=285,
-        placeholder=(
-            "Paste an email, SMS, messaging conversation, scholarship offer, job offer, "
-            "banking message, or other suspicious written content here."
-        ),
-        label_visibility="collapsed",
-    )
-
-    if isinstance(uploaded, pd.DataFrame):
-        st.caption(
-            "CSV preview shows the first non-empty rows from the selected column. Use Batch CSV analysis below "
-            "to scan every row."
-        )
-
-    return text, csv_text_column
-
-
-def _render_ai_engine_status(available_models: list[str]) -> None:
-    ready_count = len([model for model in DISPLAY_MODELS if model in available_models])
-    status = "Ready" if ready_count else "Unavailable"
-    status_class = "ready" if ready_count else "missing"
-    model_items = "".join(
-        f'<span class="{"ready" if model in available_models else "missing"}>{html.escape(model)}</span>'
-        for model in DISPLAY_MODELS
-    )
-
-    st.markdown(
-        f"""
-        <div class="email-engine-card">
-            <div class="email-engine-title">AI Detection Engine</div>
-            <div class="email-engine-state {status_class}">
-                <span></span>{status}
-            </div>
-            <div class="email-engine-count">{ready_count} Models Available</div>
-            <div class="email-engine-models">{model_items}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _render_model_selection(available_models: list[str]) -> list[str]:
-    _render_email_step_header(
-        "03",
-        "Detection Models",
-        "Choose which trained models should participate in the live comparison.",
-    )
-
-    model_options = [model for model in DISPLAY_MODELS if model in available_models]
-    render_content_card_open("violet")
-    model_col, engine_col = st.columns([0.58, 0.42])
-
-    with model_col:
-        st.markdown('<div class="email-panel-title">Detection Models</div>', unsafe_allow_html=True)
-        st.caption("All available trained models are selected by default.")
-        selected_models: list[str] = []
-
-        if model_options:
-            for model_name in model_options:
-                if st.checkbox(model_name, value=True, key=f"email_model_choice_{model_name}"):
-                    selected_models.append(model_name)
-        else:
-            st.warning(
-                "No trained email models were found. Run `py scripts/04_train_email_model.py` first. "
-                "Email prediction requires trained ML model artifacts."
-            )
-
-    with engine_col:
-        _render_ai_engine_status(available_models)
-
-    render_content_card_close()
-    return selected_models
-
-
-def _render_analyze_panel(text: str, model_choices: list[str]) -> bool:
-    evidence_status = "1 message loaded" if text.strip() else "No evidence loaded"
-    model_status = f"{len(model_choices)} selected" if model_choices else "No model selected"
-
-    st.markdown(
-        f"""
-        <div class="email-analyze-card">
-            <div>
-                <div class="email-analyze-eyebrow">Ready to Analyze</div>
-                <h3>Evidence</h3>
-                <p>{html.escape(evidence_status)}</p>
-            </div>
-            <div>
-                <h3>Models</h3>
-                <p>{html.escape(model_status)}</p>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    return st.button(
-        "Analyze Evidence",
-        type="primary",
-        use_container_width=True,
-        key="email_analyze_button",
-    )
-
-
-def _render_batch_csv_analysis(
-    root: Path,
-    uploaded: pd.DataFrame,
-    model_choices: list[str],
-    csv_text_column: str | None,
-) -> None:
-    render_section_header("Batch CSV analysis", eyebrow="Multiple rows")
-    render_content_card_open("violet")
-
-    if not csv_text_column:
-        csv_columns = _csv_text_columns(uploaded)
-        csv_text_column = st.selectbox("Text column", csv_columns, key="email_batch_text_column")
-    else:
-        st.caption(f"Batch analysis will use `{csv_text_column}`.")
-
-    if st.button("Analyze CSV rows", use_container_width=True):
-        if not model_choices:
-            st.warning("Select at least one trained model first.")
-            render_content_card_close()
-            return
-
-        texts = uploaded[csv_text_column].fillna("").astype(str).tolist()
-        rows = []
-
-        for value in texts:
-            for selected_model in model_choices:
-                try:
-                    result, _classifier = _predict_text(root, value, selected_model)
-                except RuntimeError as exc:
-                    st.error(str(exc))
-                    render_content_card_close()
-                    return
-                rows.append(
-                    {
-                        "model": selected_model,
-                        "preview": value[:120],
-                        "prediction": result["label_name"],
-                        "risk_score": round(_risk_score(result), 2),
-                        "confidence": round(float(result["confidence"]) * 100, 2),
-                        "engine": result["model_name"],
-                    }
-                )
-
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-
-    render_content_card_close()
-
-
 def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
     render_detection_tool_intro(
         title="Emails and Messages",
@@ -1401,18 +1850,53 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
     )
 
     available_models = _available_models(root)
-    uploaded_file = _render_evidence_source()
-    uploaded = _read_uploaded_text(uploaded_file)
-    text, csv_text_column = _render_evidence_preview(uploaded, uploaded_file)
-    model_choices = _render_model_selection(available_models)
-    analyze_button = _render_analyze_panel(text, model_choices)
+    model_options = [model for model in DISPLAY_MODELS if model in available_models]
+
+    if not available_models:
+        st.warning(
+            "No trained email models were found. Run `py src/training/train_email_model.py` first. "
+            "Email prediction requires trained ML model artifacts."
+        )
+
+    uploaded_file, uploaded, text, model_choices, analyze_button = (
+        _render_email_input_container(root, model_options)
+    )
 
     if isinstance(uploaded, pd.DataFrame):
-        _render_batch_csv_analysis(root, uploaded, model_choices, csv_text_column)
+        render_section_header("Batch CSV analysis", eyebrow="Multiple rows")
+        render_content_card_open("violet")
+
+        text_column = st.selectbox("Text column", uploaded.columns)
+
+        if st.button("Analyze CSV rows", use_container_width=True):
+            texts = uploaded[text_column].fillna("").astype(str).tolist()
+            rows = []
+
+            for value in texts:
+                for selected_model in model_choices:
+                    try:
+                        result, _classifier = _predict_text(root, value, selected_model)
+                    except RuntimeError as exc:
+                        st.error(str(exc))
+                        return
+                    rows.append(
+                        {
+                            "model": selected_model,
+                            "preview": value[:120],
+                            "prediction": result["label_name"],
+                            "risk_score": round(_risk_score(result), 2),
+                            "confidence": round(float(result["confidence"]) * 100, 2),
+                            "engine": result["model_name"],
+                        }
+                    )
+
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+        render_content_card_close()
 
     if analyze_button:
         if not text.strip():
-            st.warning("Paste text or upload a supported evidence file first.")
+            st.warning("Paste message text or upload a supported file first.")
             return
 
         if not model_choices:
@@ -1440,7 +1924,6 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
                     "Prediction": result["label_name"],
                     "Risk Score": round(_risk_score(result), 2),
                     "Confidence": round(float(result["confidence"]) * 100, 2),
-                    "Prediction Time (ms)": round(float(result.get("prediction_time_ms", 0.0)), 4),
                     "Engine": result["model_name"],
                 }
             )
@@ -1510,15 +1993,14 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
         )
 
         st.dataframe(
-            df_compare_metrics.astype(object).where(pd.notna(df_compare_metrics), "Metrics unavailable"),
+            df_compare_metrics,
             hide_index=True,
             use_container_width=True,
         )
 
         st.caption(
-            "Risk Score, Confidence, and Prediction Time are live values for the current evidence. "
-            "Accuracy, Precision, Recall, F1, ROC-AUC, and Training Time are saved evaluation metrics "
-            "from the latest email training run."
+            "Higher agreement between independent models generally increases confidence in the prediction. "
+            "If models disagree significantly, the message should be reviewed manually."
         )
 
         render_content_card_close()
