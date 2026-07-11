@@ -11,9 +11,11 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from app.ui_components import (
+    apply_chart_theme,
     render_analysis_ready,
     render_content_card_close,
     render_content_card_open,
@@ -22,11 +24,9 @@ from app.ui_components import (
     render_result_card,
     render_section_header,
 )
-from src.phone.ipqs_client import lookup_ipqs_phone
 from src.phone.omkar_client import lookup_omkar_phone
-from src.phone.penipumy_client import PenipuApiError, PenipuClientError, fetch_phone_reputation
 from src.phone.phone_lookup import lookup_phone, normalise_phone_query, validate_phone_query
-from src.phone.phone_number import format_phone_for_ipqs, format_phone_for_omkar, format_phone_for_penipumy
+from src.phone.phone_number import format_phone_for_omkar
 
 
 def _secret_value(*keys: str) -> str:
@@ -78,18 +78,9 @@ def _key_result(key: str, source: str, variable: str) -> dict[str, object]:
 def _resolve_api_key(provider: str) -> dict[str, object]:
     """Resolve provider API key and safe source metadata."""
 
-    if provider == "ipqualityscore":
-        env_names = ["IPQS_API_KEY"]
-        direct_secret_names = ["IPQS_API_KEY"]
-        sections = [("ipqs", "api_key")]
-    elif provider == "omkar_carrier_lookup":
-        env_names = ["OMKAR_API_KEY", "OMKAR_CARRIER_API_KEY"]
-        direct_secret_names = ["OMKAR_API_KEY", "OMKAR_CARRIER_API_KEY"]
-        sections = [("omkar", "api_key"), ("carrier_lookup", "api_key")]
-    else:
-        env_names = ["PENIPUMY_API_KEY", "PENIPU_API_KEY"]
-        direct_secret_names = ["PENIPUMY_API_KEY", "PENIPU_API_KEY"]
-        sections = [("penipumy", "api_key"), ("penipu", "api_key")]
+    env_names = ["OMKAR_API_KEY", "OMKAR_CARRIER_API_KEY"]
+    direct_secret_names = ["OMKAR_API_KEY", "OMKAR_CARRIER_API_KEY"]
+    sections = [("omkar", "api_key"), ("carrier_lookup", "api_key")]
 
     for name in env_names:
         value = os.environ.get(name, "").strip()
@@ -110,15 +101,15 @@ def _resolve_api_key(provider: str) -> dict[str, object]:
 
 
 def _configured_penipumy_api_key() -> str:
-    """Read a PenipuMY API key from environment variables or Streamlit secrets."""
+    """Backward-compatible helper; PenipuMY is no longer visible in the UI."""
 
-    return str(_resolve_api_key("penipumy").get("key", ""))
+    return ""
 
 
 def _configured_ipqs_api_key() -> str:
-    """Read an IPQualityScore API key from environment variables or Streamlit secrets."""
+    """Backward-compatible helper; IPQS is no longer visible in the UI."""
 
-    return str(_resolve_api_key("ipqualityscore").get("key", ""))
+    return ""
 
 
 def _configured_omkar_api_key() -> str:
@@ -131,7 +122,7 @@ def _source_label(source: str) -> str:
     labels = {
         "penipumy_api": "PenipuMY API",
         "ipqualityscore_api": "IPQualityScore API",
-        "omkar_carrier_lookup_api": "Carrier Lookup API",
+        "omkar_carrier_lookup_api": "Omkar Carrier Lookup",
         "local_fallback": "Local fallback dataset",
         "demo_fallback": "Demo fallback dataset",
         "unknown_fallback": "Unknown fallback",
@@ -152,7 +143,7 @@ def _provider_label(provider_key: str) -> str:
     if provider_key == "ipqualityscore":
         return "IPQualityScore"
     if provider_key == "omkar_carrier_lookup":
-        return "Carrier Lookup"
+        return "Omkar Carrier Lookup"
     return "PenipuMY"
 
 
@@ -179,8 +170,8 @@ def _lookup_phone_compat(
 
     if provider != "penipumy":
         raise ValueError(
-            "The phone lookup backend loaded by Streamlit is still the older PenipuMY-only version. "
-            "Refresh or restart Streamlit once so IPQualityScore provider support is loaded."
+            "The phone lookup backend loaded by Streamlit is stale. "
+            "Refresh or restart Streamlit once so Omkar Carrier Lookup support is loaded."
         )
 
     return lookup_phone(phone_number, root, api_key=api_key)
@@ -205,25 +196,9 @@ def _render_api_setup(provider: str, root: Path) -> dict[str, object]:
     provider_label = _provider_label(provider)
     key_meta = _resolve_api_key(provider)
     configured_key = str(key_meta.get("key", ""))
-
-    docs_url_by_provider = {
-        "ipqualityscore": "https://www.ipqualityscore.com/documentation/phone-number-validation-api/overview",
-        "omkar_carrier_lookup": "https://github.com/omkarcloud/phone-lookup-api",
-        "penipumy": "https://penipu.my/api/v1/docs",
-    }
-    env_name_by_provider = {
-        "ipqualityscore": "IPQS_API_KEY",
-        "omkar_carrier_lookup": "OMKAR_API_KEY",
-        "penipumy": "PENIPUMY_API_KEY",
-    }
-    help_text_by_provider = {
-        "ipqualityscore": "The key is sent only to IPQualityScore in the request URL.",
-        "omkar_carrier_lookup": "The key is sent only to Omkar Carrier Lookup through the API-Key request header.",
-        "penipumy": "The key is sent only to PenipuMY through the X-API-Key request header.",
-    }
-    docs_url = docs_url_by_provider.get(provider, docs_url_by_provider["penipumy"])
-    env_name = env_name_by_provider.get(provider, "PENIPUMY_API_KEY")
-    help_text = help_text_by_provider.get(provider, help_text_by_provider["penipumy"])
+    docs_url = "https://github.com/omkarcloud/phone-lookup-api"
+    env_name = "OMKAR_API_KEY"
+    help_text = "The key is sent only to Omkar Carrier Lookup through the API-Key request header."
 
     with st.expander(f"{provider_label} API setup", expanded=not bool(configured_key)):
         if configured_key:
@@ -237,18 +212,29 @@ def _render_api_setup(provider: str, root: Path) -> dict[str, object]:
                 code="FALLBACK",
             )
 
+        render_info_banner(
+            "After registering an Omkar account, you must verify your phone number before the API key can perform live lookups.",
+            kind="warning",
+            code="VERIFY",
+        )
+
         st.link_button(
-            f"Open {provider_label} API Documentation",
+            "Open Omkar Carrier Lookup API Documentation",
             docs_url,
             use_container_width=True,
         )
+        st.link_button(
+            "Verify Omkar Account Phone Number",
+            "https://www.omkar.cloud/account/verify-phone",
+            use_container_width=True,
+        )
 
-        guide_path = root / "docs" / "phone_api_setup_guide.html"
+        guide_path = root / "docs" / "omkar_api_setup_guide.html"
         if guide_path.exists():
             st.download_button(
-                "Download API Setup Guide",
+                "Download Omkar API Setup Guide",
                 data=guide_path.read_bytes(),
-                file_name="phone_api_setup_guide.html",
+                file_name="omkar_api_setup_guide.html",
                 mime="text/html",
                 use_container_width=True,
             )
@@ -447,6 +433,216 @@ def _provider_response_statistics(provider: str, payload: dict[str, Any]) -> pd.
     )
 
 
+def _has_value(record: dict[str, Any], *keys: str) -> bool:
+    return any(_is_populated(record.get(key)) for key in keys)
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _has_reputation_evidence(record: dict[str, Any]) -> bool:
+    return any(
+        [
+            _safe_int(record.get("police_report_count")) > 0,
+            _safe_int(record.get("verified_report_count")) > 0,
+            _safe_int(record.get("spoofing_report_count")) > 0,
+            _safe_bool(record.get("spam")),
+            _safe_bool(record.get("fraud")),
+        ]
+    )
+
+
+def _evidence_coverage_chart(record: dict[str, Any]) -> go.Figure:
+    categories = [
+        ("Number validity", _has_value(record, "valid")),
+        ("Carrier information", _has_value(record, "carrier")),
+        ("Line type", _has_value(record, "line_type")),
+        ("Country information", _has_value(record, "country", "calling_country_code")),
+        ("Formatting metadata", _has_value(record, "formatted", "national_format", "phone")),
+        ("Owner identity", _has_value(record, "business_name", "name")),
+        ("Activity status", _has_value(record, "active", "active_status")),
+        ("Scam reputation", _has_reputation_evidence(record)),
+    ]
+    labels = [label for label, _available in categories]
+    values = [100 if available else 0 for _label, available in categories]
+    colors = ["#38BDF8" if value else "#334155" for value in values]
+
+    fig = go.Figure(
+        go.Bar(
+            x=values,
+            y=labels,
+            orientation="h",
+            marker_color=colors,
+            text=["Available" if value else "Unavailable" for value in values],
+            textposition="auto",
+            hovertemplate="%{y}: %{text}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        title="Lookup Evidence Coverage",
+        height=340,
+        margin=dict(l=10, r=20, t=45, b=25),
+        xaxis=dict(range=[0, 100], title="Metadata coverage, not risk"),
+        yaxis=dict(autorange="reversed"),
+        showlegend=False,
+    )
+    return apply_chart_theme(fig)
+
+
+def _claim_country_status(record: dict[str, Any], claimed_identity: str) -> tuple[str, int]:
+    claim = claimed_identity.lower()
+    country = str(record.get("country") or "").strip().lower()
+    country_aliases = {
+        "malaysia": {"my", "malaysia"},
+        "malaysian": {"my", "malaysia"},
+        "singapore": {"sg", "singapore"},
+        "indonesia": {"id", "indonesia"},
+        "thailand": {"th", "thailand"},
+    }
+    expected = next((aliases for token, aliases in country_aliases.items() if token in claim), None)
+    if not expected:
+        return "Unknown", 0
+    if not country:
+        return "Unknown", 0
+    return ("Match", 100) if country in expected else ("Review", 50)
+
+
+def _line_type_status(record: dict[str, Any], claimed_identity: str) -> tuple[str, int]:
+    claim = claimed_identity.lower()
+    line_type = str(record.get("line_type") or "").strip().lower()
+    if not line_type:
+        return "Unknown", 0
+    formal_claim = any(term in claim for term in ("bank", "government", "department", "office", "landline", "official"))
+    if formal_claim and any(term in line_type for term in ("voip", "mobile", "prepaid")):
+        return "Review", 50
+    return "Match", 100
+
+
+def _caller_claim_consistency_chart(record: dict[str, Any], claimed_identity: str) -> go.Figure | None:
+    if not claimed_identity.strip():
+        return None
+
+    country_label, country_value = _claim_country_status(record, claimed_identity)
+    line_label, line_value = _line_type_status(record, claimed_identity)
+    checks = [
+        ("Country matches claim", country_label, country_value),
+        ("Carrier metadata available", "Match" if _has_value(record, "carrier") else "Unknown", 100 if _has_value(record, "carrier") else 0),
+        ("Line type expected", line_label, line_value),
+        ("Number format valid", "Match" if record.get("valid") is True else ("Review" if record.get("valid") is False else "Unknown"), 100 if record.get("valid") is True else (50 if record.get("valid") is False else 0)),
+        ("Business identity confirmed", "Match" if _has_value(record, "business_name") else "Unknown", 100 if _has_value(record, "business_name") else 0),
+        ("Reputation evidence available", "Match" if _has_reputation_evidence(record) else "Unknown", 100 if _has_reputation_evidence(record) else 0),
+    ]
+    labels = [item[0] for item in checks]
+    states = [item[1] for item in checks]
+    values = [item[2] for item in checks]
+    color_map = {"Match": "#22C55E", "Review": "#F59E0B", "Unknown": "#334155"}
+
+    fig = go.Figure(
+        go.Bar(
+            x=values,
+            y=labels,
+            orientation="h",
+            marker_color=[color_map.get(state, "#334155") for state in states],
+            text=states,
+            textposition="auto",
+            hovertemplate="%{y}: %{text}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        title="Caller Claim Consistency",
+        height=300,
+        margin=dict(l=10, r=20, t=45, b=25),
+        xaxis=dict(range=[0, 100], title="Rule-based consistency checks, not an AI probability"),
+        yaxis=dict(autorange="reversed"),
+        showlegend=False,
+    )
+    return apply_chart_theme(fig)
+
+
+def _response_completeness_chart(record: dict[str, Any]) -> go.Figure:
+    omkar_supported_fields = [
+        "valid",
+        "carrier",
+        "line_type",
+        "country",
+        "formatted",
+        "national_format",
+        "calling_country_code",
+        "mobile_country_code",
+        "mobile_network_code",
+    ]
+    not_supplied_fields = [
+        "owner_identity",
+        "activity_status",
+        "scam_reputation",
+        "police_report_count",
+        "verified_report_count",
+        "fraud_score",
+    ]
+    populated = sum(1 for key in omkar_supported_fields if _is_populated(record.get(key)))
+    empty = len(omkar_supported_fields) - populated
+    unsupported = len(not_supplied_fields)
+
+    fig = go.Figure(
+        go.Bar(
+            x=["Populated fields", "Empty fields", "Not supplied by provider"],
+            y=[populated, empty, unsupported],
+            marker_color=["#38BDF8", "#F59E0B", "#64748B"],
+            text=[populated, empty, unsupported],
+            textposition="auto",
+            hovertemplate="%{x}: %{y}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        title="Provider Response Completeness",
+        height=300,
+        margin=dict(l=10, r=20, t=45, b=35),
+        yaxis_title="Field count",
+        showlegend=False,
+    )
+    return apply_chart_theme(fig)
+
+
+def _session_lookup_history_chart(history: list[dict[str, object]]) -> go.Figure | None:
+    phone_rows = [item for item in history if str(item.get("type", "")).lower() == "phone"]
+    if len(phone_rows) <= 1:
+        return None
+
+    live = sum(1 for item in phone_rows if "omkar" in str(item.get("source", "")).lower() or "carrier lookup" in str(item.get("source", "")).lower())
+    local = sum(1 for item in phone_rows if "fallback dataset" in str(item.get("source", "")).lower() or "local" in str(item.get("source", "")).lower())
+    unknown = sum(1 for item in phone_rows if "unknown" in str(item.get("source", "")).lower() or str(item.get("prediction", "")).lower() == "unknown")
+    provider_failures = max(0, local + unknown)
+
+    fig = go.Figure(
+        go.Bar(
+            x=["Live API successes", "Local fallback uses", "Unknown results", "Provider failures"],
+            y=[live, local, unknown, provider_failures],
+            marker_color=["#38BDF8", "#F59E0B", "#64748B", "#EF4444"],
+            text=[live, local, unknown, provider_failures],
+            textposition="auto",
+            hovertemplate="%{x}: %{y}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        title="Session Lookup History",
+        height=280,
+        margin=dict(l=10, r=20, t=45, b=35),
+        yaxis_title="Lookup count",
+        showlegend=False,
+    )
+    return apply_chart_theme(fig)
+
+
 def _run_provider_connection_test(provider: str, phone_number: str, key_meta: dict[str, object]) -> dict[str, Any]:
     api_key = str(key_meta.get("key", "") or "")
     configured = bool(api_key)
@@ -483,105 +679,32 @@ def _run_provider_connection_test(provider: str, phone_number: str, key_meta: di
         result["error_category"] = "missing_key"
         return result
 
-    if provider == "ipqualityscore":
-        live = lookup_ipqs_phone(format_phone_for_ipqs(normalized), api_key, timeout=10.0)
-        elapsed_ms = (time.perf_counter() - started) * 1000
-        payload = dict(live.get("record", {})) if isinstance(live.get("record"), dict) else {}
-        field_summary = _response_field_summary(payload)
-        result.update(
-            {
-                "connected": live.get("status_code") is not None,
-                "authenticated": bool(live.get("ok")),
-                "http_status": live.get("status_code"),
-                "provider_success": payload.get("success"),
-                "response_time_ms": elapsed_ms,
-                "request_id": str(payload.get("request_id") or ""),
-                "rate_limit": dict(live.get("rate_limit", {})),
-                "total_fields": field_summary["total_fields"],
-                "populated_fields": field_summary["populated_fields"],
-                "empty_fields": field_summary["empty_fields"],
-                "error": live.get("error"),
-                "payload": payload,
-            }
-        )
-        result["error_category"] = _diagnostic_category(
-            provider,
-            result["http_status"],
-            str(result["error"] or ""),
-            payload,
-        )
-        return result
-
-    if provider == "omkar_carrier_lookup":
-        live = lookup_omkar_phone(format_phone_for_omkar(normalized), api_key, timeout=10.0)
-        elapsed_ms = (time.perf_counter() - started) * 1000
-        payload = dict(live.get("record", {})) if isinstance(live.get("record"), dict) else {}
-        field_summary = _response_field_summary(payload)
-        result.update(
-            {
-                "connected": live.get("status_code") is not None,
-                "authenticated": bool(live.get("ok")),
-                "http_status": live.get("status_code"),
-                "provider_success": payload.get("is_valid_number"),
-                "response_time_ms": elapsed_ms,
-                "request_id": str(payload.get("request_id") or ""),
-                "rate_limit": dict(live.get("rate_limit", {})),
-                "total_fields": field_summary["total_fields"],
-                "populated_fields": field_summary["populated_fields"],
-                "empty_fields": field_summary["empty_fields"],
-                "error": live.get("error"),
-                "payload": payload,
-            }
-        )
-        result["error_category"] = _diagnostic_category(
-            provider,
-            result["http_status"],
-            str(result["error"] or ""),
-            payload,
-        )
-        return result
-
-    try:
-        live = fetch_phone_reputation(format_phone_for_penipumy(normalized), api_key)
-        elapsed_ms = (time.perf_counter() - started) * 1000
-        payload = dict(live.data)
-        field_summary = _response_field_summary(payload)
-        result.update(
-            {
-                "connected": True,
-                "authenticated": True,
-                "http_status": live.status_code,
-                "provider_success": True,
-                "response_time_ms": elapsed_ms,
-                "request_id": str(payload.get("request_id") or ""),
-                "rate_limit": live.rate_limit,
-                "total_fields": field_summary["total_fields"],
-                "populated_fields": field_summary["populated_fields"],
-                "empty_fields": field_summary["empty_fields"],
-                "error": None,
-                "error_category": "none",
-                "payload": payload,
-            }
-        )
-    except PenipuApiError as exc:
-        result.update(
-            {
-                "connected": True,
-                "http_status": exc.status_code,
-                "response_time_ms": (time.perf_counter() - started) * 1000,
-                "error": str(exc),
-                "error_category": _diagnostic_category(provider, exc.status_code, str(exc), {}),
-            }
-        )
-    except PenipuClientError as exc:
-        result.update(
-            {
-                "response_time_ms": (time.perf_counter() - started) * 1000,
-                "error": str(exc),
-                "error_category": _diagnostic_category(provider, None, str(exc), {}),
-            }
-        )
-
+    live = lookup_omkar_phone(format_phone_for_omkar(normalized), api_key, timeout=10.0)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    payload = dict(live.get("record", {})) if isinstance(live.get("record"), dict) else {}
+    field_summary = _response_field_summary(payload)
+    result.update(
+        {
+            "connected": live.get("status_code") is not None,
+            "authenticated": bool(live.get("ok")),
+            "http_status": live.get("status_code"),
+            "provider_success": payload.get("is_valid_number"),
+            "response_time_ms": elapsed_ms,
+            "request_id": str(payload.get("request_id") or ""),
+            "rate_limit": dict(live.get("rate_limit", {})),
+            "total_fields": field_summary["total_fields"],
+            "populated_fields": field_summary["populated_fields"],
+            "empty_fields": field_summary["empty_fields"],
+            "error": live.get("error"),
+            "payload": payload,
+        }
+    )
+    result["error_category"] = _diagnostic_category(
+        provider,
+        result["http_status"],
+        str(result["error"] or ""),
+        payload,
+    )
     return result
 
 
@@ -614,7 +737,7 @@ def _diagnostic_rows(diagnostic: dict[str, Any]) -> pd.DataFrame:
 
     return pd.DataFrame(
         [
-            {"Check": "Selected provider", "Result": _provider_label(str(diagnostic.get("provider"))), "Detail": "User selected"},
+            {"Check": "Live provider", "Result": _provider_label(str(diagnostic.get("provider"))), "Detail": "Omkar Carrier Lookup"},
             {"Check": "API key detected", "Result": success if diagnostic.get("configured") else failure, "Detail": str(diagnostic.get("configuration_source", ""))},
             {"Check": "Key variable", "Result": str(diagnostic.get("key_variable", "-")), "Detail": "Value hidden"},
             {"Check": "Provider reachable", "Result": "Success" if diagnostic.get("connected") else failure, "Detail": f"Status {diagnostic.get('http_status') or 'N/A'}"},
@@ -635,8 +758,8 @@ def _diagnostic_rows(diagnostic: dict[str, Any]) -> pd.DataFrame:
 
 def _render_provider_connection_check(provider: str, key_meta: dict[str, object]) -> None:
     render_section_header(
-        "Provider connection check",
-        "Test whether the selected provider is configured, reachable, authenticated, and returning usable fields.",
+        "Omkar connection check",
+        "Test whether Omkar Carrier Lookup is configured, reachable, authenticated, and returning usable fields.",
         "API diagnostics",
     )
     render_content_card_open("violet")
@@ -646,7 +769,7 @@ def _render_provider_connection_check(provider: str, key_meta: dict[str, object]
     st.dataframe(
         pd.DataFrame(
             [
-                {"Item": "Selected provider", "Value": _provider_label(provider)},
+                {"Item": "Live provider", "Value": _provider_label(provider)},
                 {"Item": "Configuration source", "Value": key_meta.get("source", "Not configured")},
                 {"Item": "API key status", "Value": "Detected" if key_meta.get("configured") else "Not configured"},
                 {"Item": "Masked key", "Value": key_meta.get("masked_key", "Not available")},
@@ -661,7 +784,7 @@ def _render_provider_connection_check(provider: str, key_meta: dict[str, object]
         "Connection test phone number",
         value=st.session_state.get("phone_connection_test_number", default_number),
         key="phone_connection_test_number",
-        help="Use a number you are comfortable sending to the selected provider for testing.",
+        help="Use a number you are comfortable sending to Omkar Carrier Lookup for testing.",
     )
 
     if st.button("Test Provider Connection", use_container_width=True, key="phone_test_provider_connection"):
@@ -771,7 +894,7 @@ def _record_phone_result(
             "type": "Phone",
             "prediction": risk.get("risk_level", "Unknown"),
             "confidence": float(risk.get("risk_score", 0)),
-            "model": f"{_provider_label(str(result.get('requested_provider', 'penipumy')))} + fallback reputation rules",
+            "model": f"{_provider_label(str(result.get('requested_provider', 'omkar_carrier_lookup')))} + fallback reputation rules",
             "source": _source_label(str(result.get("source", ""))),
             "preview": phone_number,
             "flags": flags,
@@ -787,18 +910,26 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
     explanation = dict(lookup_result.get("explanation", {}))
     metrics = dict(explanation.get("metrics", {}))
     source = str(lookup_result.get("source", "unknown_fallback"))
-    requested_provider = str(lookup_result.get("requested_provider", "penipumy"))
+    requested_provider = str(lookup_result.get("requested_provider", "omkar_carrier_lookup"))
     fallback_reason = str(lookup_result.get("fallback_reason") or "")
     phone = str(record.get("phone") or "")
     is_demo = bool(lookup_result.get("is_demo") or record.get("is_demo"))
     score = float(risk.get("risk_score", 0))
     risk_level = str(risk.get("risk_level", "Unknown"))
-    is_ipqs_result = source == "ipqualityscore_api"
     is_omkar_result = source == "omkar_carrier_lookup_api"
+    fallback_used = source != "omkar_carrier_lookup_api"
+    reputation_available = _has_reputation_evidence(record)
+    metadata_available = _has_value(record, "carrier", "line_type", "valid", "country", "formatted", "national_format")
 
-    render_analysis_ready("Phone reputation check complete - results ready below")
+    render_analysis_ready("Phone lookup complete - results ready below")
 
-    if risk_level == "Unknown":
+    if is_omkar_result and risk_level == "Unknown":
+        render_info_banner(
+            "Omkar returned carrier metadata. This confirms lookup context only; it does not provide scam reports or prove the caller is safe.",
+            kind="info",
+            code="METADATA",
+        )
+    elif risk_level == "Unknown":
         render_info_banner(
             "This number was not found in the live API or local dataset. This does not guarantee the number is safe.",
             kind="warning",
@@ -817,31 +948,23 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
             str(explanation.get("summary", "No explanation returned.")),
         )
 
-    _render_phone_step("03", "Review Evidence", "Inspect source, fallback status, reports, and recommended action.")
+    _render_phone_step("03", "Review Evidence", "Inspect source, fallback status, metadata, reputation evidence, and recommended action.")
 
     render_content_card_open("violet")
     cols = st.columns(3)
     cols[0].metric("Risk Level", risk_level)
     cols[1].metric("Source Used", _source_label(source))
-    if is_ipqs_result:
-        fraud_score = record.get("fraud_score")
-        cols[2].metric("Fraud Score", f"{float(fraud_score or 0):.0f}/100")
-    elif is_omkar_result:
+    if is_omkar_result:
         cols[2].metric("Line Type", str(record.get("line_type") or "N/A"))
     else:
-        cols[2].metric("Reports Found", int(record.get("police_report_count", 0) or 0) + int(record.get("verified_report_count", 0) or 0))
+        cols[2].metric("Reports Found", _safe_int(record.get("police_report_count")) + _safe_int(record.get("verified_report_count")))
 
     cols = st.columns(3)
     if is_omkar_result:
         cols[0].metric("Carrier", str(record.get("carrier") or "N/A"))
     else:
         cols[0].metric("Business Status", metrics.get("Business Status", "No match"))
-    live_source = f"{requested_provider}_api"
-    if requested_provider == "ipqualityscore":
-        live_source = "ipqualityscore_api"
-    elif requested_provider == "omkar_carrier_lookup":
-        live_source = "omkar_carrier_lookup_api"
-    cols[1].metric("Fallback Status", "Live API" if source == live_source else "Fallback used")
+    cols[1].metric("Fallback Status", "No fallback" if not fallback_used else "Fallback used")
     cols[2].metric("Review Required", "Yes" if risk.get("review_required", True) else "No")
 
     if fallback_reason:
@@ -861,6 +984,42 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
 
     if claimed_identity.strip():
         st.caption(f"Claimed caller identity: {claimed_identity.strip()}")
+
+    st.markdown("**Lookup provenance**")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"Item": "Live provider", "Value": "Omkar Carrier Lookup"},
+                {"Item": "Fallback used", "Value": "Yes" if fallback_used else "No"},
+                {
+                    "Item": "Provider returned",
+                    "Value": "Carrier or validation metadata" if metadata_available else "No usable carrier metadata",
+                },
+                {"Item": "Scam reputation available", "Value": "Yes" if reputation_available else "No"},
+            ]
+        ),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    chart_cols = st.columns(2)
+    with chart_cols[0]:
+        st.plotly_chart(_evidence_coverage_chart(record), use_container_width=True)
+    with chart_cols[1]:
+        st.plotly_chart(_response_completeness_chart(record), use_container_width=True)
+
+    claim_chart = _caller_claim_consistency_chart(record, claimed_identity)
+    if claim_chart is not None:
+        st.plotly_chart(claim_chart, use_container_width=True)
+        st.caption("Caller Claim Consistency uses transparent rules only. It is not an AI probability and does not modify the final lookup result.")
+
+    chart_history = [
+        {"type": "Phone", "source": _source_label(source), "prediction": risk_level},
+        *history,
+    ]
+    history_chart = _session_lookup_history_chart(chart_history)
+    if history_chart is not None:
+        st.plotly_chart(history_chart, use_container_width=True)
 
     st.markdown("**Explanation**")
     st.write(explanation.get("summary", "No explanation returned."))
@@ -900,43 +1059,33 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
 
 
 def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None:
+    provider = "omkar_carrier_lookup"
+
     render_detection_tool_intro(
         title="Phone Number",
         description=(
-            "Choose PenipuMY, IPQualityScore, or Carrier Lookup for live caller checks, then fall back to "
-            "a local processed dataset and transparent rules when the selected provider is unavailable."
+            "Check phone-number validity, carrier metadata, and local reputation evidence using Omkar Carrier "
+            "Lookup first, then a local fallback dataset when live metadata is unavailable."
         ),
         icon="solar:phone-calling-rounded-bold-duotone",
         accent="orange",
     )
 
     render_section_header(
-        "Phone number reputation lookup",
-        "Phone numbers are reputation lookups, not ML text classifiers. The system explains database evidence and fallback status.",
-        "Caller reputation",
+        "Phone number metadata lookup",
+        "Omkar provides carrier and validity metadata. Local fallback records provide reputation evidence when available.",
+        "Carrier lookup",
     )
 
-    provider_label = st.radio(
-        "Lookup provider",
-        ["PenipuMY", "IPQualityScore", "Carrier Lookup"],
-        horizontal=True,
-        key="phone_lookup_provider",
+    st.caption(
+        "Live provider: Omkar Carrier Lookup. Results use carrier metadata first, then local fallback evidence when available."
     )
-    provider = _provider_key(provider_label)
-
-    if provider == "penipumy":
-        st.caption("PenipuMY checks Malaysian community scam reports and business reputation.")
-    elif provider == "ipqualityscore":
-        st.caption("IPQualityScore checks phone validity, carrier metadata, line type, and fraud-risk signals.")
-    else:
-        st.caption("Carrier Lookup checks number validity, carrier, line type, country code, and formatting metadata.")
 
     render_info_banner(
-        "This page supports API keys for all providers, but each provider needs its own key: "
-        "PenipuMY uses PENIPUMY_API_KEY, IPQualityScore uses IPQS_API_KEY, and Carrier Lookup uses OMKAR_API_KEY. "
-        "The selected lookup only calls the selected provider.",
+        "Omkar metadata does not contain police reports, community scam reports, or scam probability. "
+        "A valid number is not automatically a safe caller.",
         kind="info",
-        code="API KEYS",
+        code="SCOPE",
     )
 
     demo_mode = st.checkbox(
@@ -986,7 +1135,7 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
         st.caption(f"Normalized lookup query: `{normalized}`")
     render_content_card_close()
 
-    _render_phone_step("02", "Check Reputation", f"Try {_provider_label(provider)} first, then local fallback, then unknown fallback.")
+    _render_phone_step("02", "Check Reputation", "Try Omkar Carrier Lookup first, then local fallback, then unknown fallback.")
     check_button = st.button("Check Phone Reputation", type="primary", use_container_width=True)
 
     render_info_banner(

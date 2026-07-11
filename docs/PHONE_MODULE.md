@@ -4,20 +4,18 @@
 
 ```text
 User phone number
-  -> user-selected live provider
-       -> PenipuMY
-       -> IPQualityScore
-       -> Carrier Lookup
+  -> normalize to canonical international format
+  -> Omkar Carrier Lookup
   -> local fallback CSV
   -> unknown result
   -> shared normalized record
-  -> shared rules and explanation
+  -> transparent rules and explanation
   -> Streamlit result/history
 ```
 
-The app calls only the provider selected by the user. It does not automatically
-call the other live providers, because PenipuMY, IPQualityScore, and Carrier
-Lookup return different evidence types and use separate API quotas.
+Omkar Carrier Lookup is the only visible live provider in the Phone Number tab.
+Older PenipuMY and IPQualityScore client files may remain in `src/phone/` for
+compatibility/history, but they are not part of the active UI flow.
 
 ## Phone Number Normalization
 
@@ -41,100 +39,76 @@ Canonical internal examples:
 +60312345678
 ```
 
-Provider-specific conversion happens after this step:
+Omkar receives the canonical E.164-style value, such as `+60123456789`. The app
+rejects clearly invalid text, repeated plus signs, and alphabetic input.
 
-- PenipuMY receives digits only, such as `60123456789`
-- IPQualityScore receives canonical E.164-style text, such as `+60123456789`
-- Carrier Lookup receives canonical E.164-style text, such as `+60123456789`
+## Live Provider
 
-The app rejects clearly invalid text, repeated plus signs, and alphabetic input.
+### Omkar Carrier Lookup
 
-## Live Providers
-
-### PenipuMY
-
-PenipuMY is used as a Malaysian scam-report and caller-reputation source.
-It can return police report counts, verified community reports, spam/fraud
-flags, business-directory information, and spoofing-related business context.
-
-Documentation: <https://penipu.my/api/v1/docs>
-
-### IPQualityScore
-
-IPQualityScore is used as a phone validation and fraud-risk metadata source.
-It can return validity, active status, fraud score, recent abuse, risky/spammer
-flags, carrier, line type, country, region, city, VoIP, prepaid, leaked, and
-Do Not Call metadata.
-
-Documentation: <https://www.ipqualityscore.com/documentation/phone-number-validation-api/overview>
-
-IPQS metadata is not treated as PenipuMY report evidence. For example, an IPQS
-fraud score is preserved as `fraud_score`; it is not converted into fake police
-or verified report counts.
-
-### Carrier Lookup
-
-Carrier Lookup is used as a carrier and number metadata provider. It can return
+Omkar is used as a carrier and number metadata provider. It can return
 validity, carrier, line type, E.164 phone number, national formatting, country
 code, calling country code, mobile country code, and mobile network code.
 
 Documentation: <https://github.com/omkarcloud/phone-lookup-api>
 
-Carrier Lookup metadata is not treated as scam reputation. For example, a VoIP
-line type is preserved as context; it is not converted into fake police reports,
-fraud flags, or IPQS-style fraud scores.
+Account verification: <https://www.omkar.cloud/account/verify-phone>
 
-## API Keys
+Carrier metadata is not scam reputation. A valid phone number does not prove a
+caller is safe, and a VoIP/mobile/landline classification does not prove fraud
+by itself.
 
-Configure keys through environment variables, Streamlit secrets, or the
+## API Key
+
+Configure the key through an environment variable, Streamlit secrets, or the
 temporary session input in the Phone Number tab.
 
 ```powershell
-$env:PENIPUMY_API_KEY="your-penipumy-key"
-$env:IPQS_API_KEY="your-ipqs-key"
 $env:OMKAR_API_KEY="your-omkar-key"
 ```
-
-`PENIPUMY_API_KEY` is the standard name. The app still checks the older
-`PENIPU_API_KEY` name as a temporary backward-compatible fallback.
 
 Streamlit secrets are also supported:
 
 ```toml
-PENIPUMY_API_KEY = "..."
-IPQS_API_KEY = "..."
 OMKAR_API_KEY = "..."
-
-[penipumy]
-api_key = "..."
-
-[ipqs]
-api_key = "..."
 
 [omkar]
 api_key = "..."
 ```
 
-Never commit `.env`, `.streamlit/secrets.toml`, or real API keys. The
-repository includes `.env.example` with blank placeholders only.
+Never commit `.env`, `.streamlit/secrets.toml`, or real API keys. The repository
+includes `.env.example` with a blank Omkar placeholder only.
 
 ## Setup Guide
 
-A standalone HTML setup guide is available at:
+A standalone Omkar setup guide is available at:
 
 ```text
-docs/phone_api_setup_guide.html
+docs/omkar_api_setup_guide.html
 ```
 
 The Phone Number tab offers this file as a download so the main page stays
 concise.
+
+## Account Verification Handling
+
+If Omkar returns a message asking you to verify your phone number, the provider
+is reachable and the key may be accepted, but the Omkar account has not enabled
+free-plan carrier lookups yet. Complete verification at:
+
+```text
+https://www.omkar.cloud/account/verify-phone
+```
+
+The app labels this as `account_phone_verification_required`, not invalid phone
+format.
 
 ## Local Fallback
 
 Path: `data/processed/phone/phone_dataset.csv`
 
 This file is for real, traceable fallback records only. Do not place synthetic
-demo records in this file. If no live provider succeeds and no real local row
+demo records in this file. If Omkar does not succeed and no real local row
 matches, the correct result is Unknown.
 
 Required columns:
@@ -168,36 +142,69 @@ as demonstration data and excluded from dashboard headline KPIs.
 Fallback order:
 
 ```text
-Selected live provider
+Omkar Carrier Lookup
   -> real local processed phone dataset
   -> demo phone dataset only when Demo Mode is enabled
   -> unknown result
 ```
 
-## Omkar Account Verification
+## Output Principles
 
-If Carrier Lookup returns a message asking you to verify your phone number, the
-provider is reachable and the key may be accepted, but the Omkar account has not
-enabled free-plan carrier lookups yet. Complete verification at:
+- `Valid` means number format/routing appears valid.
+- `Metadata available` means carrier or line information was returned.
+- `Unknown` means no reputation conclusion is available.
+- `High Risk` appears only when real reputation evidence or explicit fallback
+  records support it.
+
+The UI shows provenance for each result:
 
 ```text
-https://www.omkar.cloud/account/verify-phone
+Live provider: Omkar Carrier Lookup
+Fallback used: Yes/No
+Provider returned: Carrier or validation metadata / No usable carrier metadata
+Scam reputation available: Yes/No
 ```
 
-The app labels this as account verification required, not invalid phone format.
+## Charts
+
+The Phone Number tab may show:
+
+- Lookup Evidence Coverage
+- Caller Claim Consistency
+- Provider Response Completeness
+- Session Lookup History after multiple phone lookups
+
+These charts summarize available evidence. They are not ML probabilities and do
+not change the final lookup result.
+
+## No Additional Phone ML Model
+
+The phone module intentionally remains:
+
+```text
+Omkar API
++ normalization
++ local fallback
++ transparent consistency rules
++ explainability
+```
+
+Do not add a phone-specific machine-learning model unless a sufficiently large,
+labelled, traceable phone-metadata dataset becomes available. Adding a model
+without that dataset would create weak or misleading evidence.
 
 ## Unknown Result
 
-If neither the selected provider nor the local dataset contains the number, the
-module returns an unknown result. Unknown does not mean safe. The UI should
-continue to advise verification and never sharing OTPs, passwords, banking
-details, or personal information.
+If neither Omkar nor the local dataset contains the number, the module returns an
+Unknown result. Unknown does not mean safe. The UI should continue to advise
+verification and never sharing OTPs, passwords, banking details, or personal
+information.
 
 ## Module Responsibilities
 
-- `penipumy_client.py`: PenipuMY HTTP communication and response parsing
-- `ipqs_client.py`: IPQualityScore HTTP communication and response parsing
 - `omkar_client.py`: Omkar Carrier Lookup HTTP communication and response parsing
-- `phone_lookup.py`: selected-provider -> local -> unknown orchestration
-- `phone_rules.py`: evidence-based reputation level
+- `phone_lookup.py`: Omkar -> local -> demo/unknown orchestration
+- `phone_rules.py`: transparent evidence-based reputation/context level
 - `phone_explainability.py`: readable evidence and recommendations
+- `penipumy_client.py`: deprecated provider client kept out of the active UI
+- `ipqs_client.py`: deprecated provider client kept out of the active UI

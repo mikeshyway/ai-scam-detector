@@ -111,14 +111,13 @@ def evaluate_phone_risk(record: dict[str, Any]) -> dict[str, object]:
                 "recommended_action": "Treat the caller as unverified and confirm the number through an official source.",
             }
 
-        score = 28 if voip else 16
         return {
-            "risk_score": score,
-            "risk_level": LOW_RISK_LEVEL,
+            "risk_score": 0,
+            "risk_level": UNKNOWN_RISK_LEVEL,
             "review_required": True,
             "decision_basis": basis or ["carrier lookup returned validation metadata only"],
             "recommended_action": (
-                "Carrier data supports context only. It does not confirm caller identity or prove the caller is safe."
+                "Carrier data supports context only. It does not provide scam reputation or prove the caller is safe."
             ),
         }
 

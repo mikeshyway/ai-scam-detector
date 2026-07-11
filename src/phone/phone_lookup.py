@@ -280,7 +280,7 @@ def _build_result(
     found: bool,
     record: dict[str, Any],
     rate_limit: dict[str, str] | None = None,
-    requested_provider: str = "penipumy",
+    requested_provider: str = "omkar_carrier_lookup",
     live_provider_status: str = "",
     raw_provider_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -303,7 +303,7 @@ def _build_result(
 
 
 def _normalize_provider_key(provider: str) -> str:
-    key = str(provider or "penipumy").strip().lower().replace(" ", "")
+    key = str(provider or "omkar_carrier_lookup").strip().lower().replace(" ", "")
     aliases = {
         "penipu": "penipumy",
         "penipumy": "penipumy",
@@ -323,7 +323,7 @@ def lookup_phone(
     phone_number: str,
     root: Path,
     *,
-    provider: str = "penipumy",
+    provider: str = "omkar_carrier_lookup",
     api_key: str = "",
     demo_mode: bool = False,
 ) -> dict[str, Any]:

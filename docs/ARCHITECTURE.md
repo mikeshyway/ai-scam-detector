@@ -7,7 +7,7 @@
 | `app/` | Streamlit rendering, navigation, session state, and user actions |
 | `src/audio/` | Audio decoding, feature extraction, inference, and recording helpers |
 | `src/text/` | Text preprocessing, classifier loading, rules, and explainability |
-| `src/phone/` | PenipuMY client, fallback lookup, rules, and explanations |
+| `src/phone/` | Omkar carrier lookup, fallback lookup, rules, and explanations |
 | `src/reporting/` | Saved history and TXT/PDF/DOCX report generation |
 | `src/data/` | Synthetic/demo data helpers only |
 | `src/utils/` | Cross-cutting time and system diagnostic helpers |

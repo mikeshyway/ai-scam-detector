@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Omkar Carrier Lookup API Setup Guide</title>
+<style>
+body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#0b1220;color:#f8fafc;line-height:1.6}
+.wrap{max-width:980px;margin:0 auto;padding:40px 20px}
+.hero,.card{background:#111827;border:1px solid rgba(148,163,184,.22);border-radius:18px;padding:24px;box-shadow:0 14px 38px rgba(0,0,0,.24)}
+.hero{margin-bottom:20px}
+h1{margin:.2rem 0 .7rem} h2{margin-top:0}
+p,li{color:#a7b0bf}
+a{color:#7dd3fc;font-weight:700;text-decoration:none}
+a:hover{text-decoration:underline}
+code,pre{font-family:Consolas,monospace;background:#07101f;color:#dbeafe;border:1px solid rgba(148,163,184,.22);border-radius:8px}
+code{padding:.12rem .35rem} pre{padding:12px;overflow:auto}
+.badge{display:inline-block;padding:.25rem .65rem;border-radius:999px;font-size:.76rem;font-weight:800;margin-bottom:.7rem;background:rgba(124,108,255,.16);color:#c4b5fd}
+.notice{margin-top:16px;padding:14px;border-left:3px solid #f59e0b;background:rgba(245,158,11,.08);color:#fde68a;border-radius:10px}
+</style>
+</head>
+<body>
+<main class="wrap">
+<section class="hero">
+<span class="badge">Omkar Carrier Lookup</span>
+<h1>Omkar API Setup Guide</h1>
+<p>Configure Omkar Carrier Lookup for live phone-number metadata checks. Store the API key outside source code and fall back to the local processed dataset when live lookup is unavailable.</p>
+</section>
+
+<section class="card">
+<h2>Setup Steps</h2>
+<ol>
+<li>Create or sign in to your Omkar Cloud account.</li>
+<li>Verify the registered phone number before using live API requests.</li>
+<li>Open <a href="https://www.omkar.cloud/account/verify-phone" target="_blank" rel="noopener noreferrer">https://www.omkar.cloud/account/verify-phone</a> and complete verification.</li>
+<li>Copy the Carrier Lookup API key from your account.</li>
+<li>Add the key to your local <code>.env</code> file or Streamlit secrets.</li>
+<li>Restart Streamlit after changing environment variables.</li>
+</ol>
+<pre>OMKAR_API_KEY=your_omkar_key_here</pre>
+<p><a href="https://github.com/omkarcloud/phone-lookup-api" target="_blank" rel="noopener noreferrer">Open Omkar Carrier Lookup API documentation</a></p>
+<div class="notice">Never commit <code>.env</code>, <code>.streamlit/secrets.toml</code>, or real API keys to GitHub.</div>
+</section>
+
+<section class="card" style="margin-top:18px">
+<h2>Lookup Behavior</h2>
+<ol>
+<li>The app normalizes Malaysian phone numbers into one internal international format.</li>
+<li>The app calls Omkar Carrier Lookup only when an Omkar API key is configured.</li>
+<li>If Omkar returns an authentication, account-verification, rate-limit, timeout, network, or server error, the app uses the local processed fallback dataset.</li>
+<li>If no local record exists, the app returns <strong>Unknown</strong>, not Safe.</li>
+</ol>
+<p>Omkar returns carrier and phone metadata. It does not provide police reports, community scam reports, or a scam probability. Treat carrier metadata as context only and verify sensitive caller claims through official channels.</p>
+</section>
+</main>
+</body>
+</html>
