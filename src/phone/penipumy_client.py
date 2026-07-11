@@ -7,8 +7,14 @@ risk rules, and explainability live in sibling modules.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 from typing import Any
+
+from src.phone.phone_number import (
+    format_phone_for_penipumy,
+    normalise_phone_query,
+    phone_digits,
+    validate_phone_query,
+)
 
 
 PENIPU_API_BASE_URL = "https://penipu.my/api/v1"
@@ -40,33 +46,6 @@ class PenipuApiResponse:
     rate_limit: dict[str, str]
 
 
-def phone_digits(value: str) -> str:
-    """Return only digit characters from a phone number."""
-
-    return re.sub(r"\D+", "", str(value or ""))
-
-
-def normalise_phone_query(value: str) -> str:
-    """Normalize a phone number while preserving a leading plus sign."""
-
-    raw = str(value or "").strip()
-    digits = phone_digits(raw)
-    if raw.startswith("+") and digits:
-        return f"+{digits}"
-    return digits
-
-
-def validate_phone_query(value: str) -> tuple[bool, str]:
-    """Validate input against PenipuMY's phone lookup requirements."""
-
-    digits = phone_digits(value)
-    if not digits:
-        return False, "Enter a phone number before checking reputation."
-    if len(digits) < 8 or len(digits) > 15:
-        return False, "Phone number must contain 8 to 15 digits."
-    return True, ""
-
-
 def fetch_phone_reputation(
     phone_number: str,
     api_key: str,
@@ -89,7 +68,7 @@ def fetch_phone_reputation(
     except Exception as exc:
         raise PenipuClientError("Install `requests` to use the PenipuMY API integration.") from exc
 
-    query = normalise_phone_query(phone_number)
+    query = format_phone_for_penipumy(phone_number)
     endpoint = f"{base_url.rstrip('/')}/phone"
 
     try:
@@ -99,6 +78,10 @@ def fetch_phone_reputation(
             params={"q": query},
             timeout=timeout_seconds,
         )
+    except requests.Timeout as exc:
+        raise PenipuClientError("PenipuMY lookup timed out.") from exc
+    except requests.ConnectionError as exc:
+        raise PenipuClientError("PenipuMY network connection failed.") from exc
     except requests.RequestException as exc:
         raise PenipuClientError(f"PenipuMY lookup failed: {exc}") from exc
 

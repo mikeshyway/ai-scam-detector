@@ -60,9 +60,14 @@ for the optional Random Forest layer.
 
 ## Phone
 
-`data/processed/phone/phone_dataset.csv` is a fictional educational fallback,
-not ML training data. It is queried only when the PenipuMY API is unavailable,
+`data/processed/phone/phone_dataset.csv` is for real, traceable fallback
+records only. It is queried only when the selected live provider is unavailable,
 rate-limited, unauthorized, or has no matching record.
+
+Fictional presentation records belong in `data/demo/phone_demo_dataset.csv` and
+are queried only when the Phone Number tab's Demo Mode is explicitly enabled.
+Demo records must be labelled with `record_type=demo`, `is_demo=true`,
+`source_reference`, and `last_verified`.
 
 ## Data Safety
 

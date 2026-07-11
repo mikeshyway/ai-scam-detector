@@ -997,7 +997,8 @@ def render_kpi_row(history: list[dict[str, object]]) -> None:
     Compact dashboard KPI cards.
     """
 
-    total_files = len(history)
+    real_history = [item for item in history if not bool(item.get("is_demo"))]
+    total_files = len(real_history)
 
     threat_keywords = (
         "suspicious",
@@ -1009,7 +1010,7 @@ def render_kpi_row(history: list[dict[str, object]]) -> None:
 
     threats_detected = sum(
         1
-        for item in history
+        for item in real_history
         if any(
             keyword in str(item.get("prediction", "")).lower()
             for keyword in threat_keywords
@@ -1018,7 +1019,7 @@ def render_kpi_row(history: list[dict[str, object]]) -> None:
 
     confidence_values = [
         float(item.get("confidence", 0))
-        for item in history
+        for item in real_history
         if isinstance(item.get("confidence"), (int, float))
     ]
 

@@ -67,13 +67,21 @@ data/processed/audio/dev/
 
 ## Phone Fallback
 
-The educational fallback belongs at:
+Real, traceable fallback records belong at:
 
 ```text
 data/processed/phone/phone_dataset.csv
 ```
 
-Use fictional numbers only. See `docs/PHONE_MODULE.md` for the required schema.
+Do not place synthetic demo rows in the normal fallback file. Fictional
+presentation rows belong at:
+
+```text
+data/demo/phone_demo_dataset.csv
+```
+
+Demo records are used only when the Phone Number tab's Demo Mode is explicitly
+enabled. See `docs/PHONE_MODULE.md` for the required schemas.
 
 ## Repository Policy
 

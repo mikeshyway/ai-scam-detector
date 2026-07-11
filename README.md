@@ -118,16 +118,33 @@ directly in `scripts/`. See
 
 ## Phone API Configuration
 
-The phone module reads the PenipuMY API key from `PENIPU_API_KEY`.
+The Phone Number tab supports three user-selected live providers:
+
+- PenipuMY: Malaysian scam-report and caller-reputation evidence
+- IPQualityScore: phone validation, carrier, line-type, and fraud-risk metadata
+- Carrier Lookup: carrier, line-type, country-code, and formatting metadata
+
+Use these environment variable names:
 
 ```powershell
-$env:PENIPU_API_KEY="your-key"
+$env:PENIPUMY_API_KEY="your-penipumy-key"
+$env:IPQS_API_KEY="your-ipqs-key"
+$env:OMKAR_API_KEY="your-omkar-key"
 py -m streamlit run app\main.py
 ```
 
-Alternatively, store it in the untracked
-`.streamlit/secrets.toml` file. Never commit real API keys. The full fallback
-behavior is documented in [docs/PHONE_MODULE.md](docs/PHONE_MODULE.md).
+`PENIPUMY_API_KEY` is the standard name. The older `PENIPU_API_KEY` is still
+checked temporarily for backward compatibility. Alternatively, store keys in the
+untracked `.streamlit/secrets.toml` file. Never commit real API keys.
+
+The selected provider falls back to real records in
+`data/processed/phone/phone_dataset.csv` and then to an Unknown result. Fictional
+presentation rows belong in `data/demo/phone_demo_dataset.csv` and are searched
+only when Demo Mode is explicitly enabled. The app does not automatically call
+every live provider. Carrier Lookup is context metadata only, not scam-report
+evidence. The full behavior is documented in
+[docs/PHONE_MODULE.md](docs/PHONE_MODULE.md), and the downloadable setup guide
+is [docs/phone_api_setup_guide.html](docs/phone_api_setup_guide.html).
 
 ## Generated Artifacts
 

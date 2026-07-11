@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phone Lookup API Setup Guide</title>
+<style>
+body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#0b1220;color:#f8fafc;line-height:1.6}
+.wrap{max-width:980px;margin:0 auto;padding:40px 20px}
+.hero,.card{background:#111827;border:1px solid rgba(148,163,184,.22);border-radius:18px;padding:24px;box-shadow:0 14px 38px rgba(0,0,0,.24)}
+.hero{margin-bottom:20px}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px}
+h1{margin:.2rem 0 .7rem} h2{margin-top:0}
+p,li{color:#a7b0bf}
+a{color:#7dd3fc;font-weight:700;text-decoration:none}
+a:hover{text-decoration:underline}
+code,pre{font-family:Consolas,monospace;background:#07101f;color:#dbeafe;border:1px solid rgba(148,163,184,.22);border-radius:8px}
+code{padding:.12rem .35rem} pre{padding:12px;overflow:auto}
+.badge{display:inline-block;padding:.25rem .65rem;border-radius:999px;font-size:.76rem;font-weight:800;margin-bottom:.7rem}
+.penipu{background:rgba(59,130,246,.14);color:#93c5fd}
+.ipqs{background:rgba(16,185,129,.12);color:#6ee7b7}
+.omkar{background:rgba(168,85,247,.14);color:#d8b4fe}
+.notice{margin-top:16px;padding:14px;border-left:3px solid #f59e0b;background:rgba(245,158,11,.08);color:#fde68a;border-radius:10px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<section class="hero">
+<h1>Phone Lookup API Setup Guide</h1>
+<p>Configure PenipuMY, IPQualityScore, or Carrier Lookup for live phone-number checks. Store keys outside source code and fall back to the local processed dataset when a provider is unavailable.</p>
+</section>
+
+<section class="grid">
+<article class="card">
+<span class="badge penipu">PenipuMY</span>
+<h2>Setup</h2>
+<ol>
+<li>Create or sign in to your PenipuMY account.</li>
+<li>Generate an API key from account settings.</li>
+<li>Add the key to your local <code>.env</code> file.</li>
+<li>Restart Streamlit.</li>
+</ol>
+<pre>PENIPUMY_API_KEY=your_penipumy_key_here</pre>
+<p><a href="https://penipu.my/api/v1/docs" target="_blank" rel="noopener noreferrer">Open PenipuMY API documentation</a></p>
+</article>
+
+<article class="card">
+<span class="badge ipqs">IPQualityScore</span>
+<h2>Setup</h2>
+<ol>
+<li>Create an IPQS account and sign in.</li>
+<li>Open Settings and Account Management, then Account Settings.</li>
+<li>Copy the API key or private key.</li>
+<li>Add it to your local <code>.env</code> file and restart Streamlit.</li>
+</ol>
+<pre>IPQS_API_KEY=your_ipqs_key_here</pre>
+<p><a href="https://www.ipqualityscore.com/documentation/phone-number-validation-api/overview" target="_blank" rel="noopener noreferrer">Open IPQS Phone Number Validation API documentation</a></p>
+</article>
+
+<article class="card">
+<span class="badge omkar">Carrier Lookup</span>
+<h2>Setup</h2>
+<ol>
+<li>Create an Omkar Cloud account.</li>
+<li>Open the API key page and copy your Carrier Lookup key.</li>
+<li>Add it to your local <code>.env</code> file.</li>
+<li>Restart Streamlit.</li>
+</ol>
+<pre>OMKAR_API_KEY=your_omkar_key_here</pre>
+<p><a href="https://github.com/omkarcloud/phone-lookup-api" target="_blank" rel="noopener noreferrer">Open Carrier Lookup API documentation</a></p>
+</article>
+</section>
+
+<section class="card" style="margin-top:18px">
+<h2>Recommended .env example</h2>
+<pre>PENIPUMY_API_KEY=
+IPQS_API_KEY=
+OMKAR_API_KEY=</pre>
+<p>Leave unused keys blank. Never commit <code>.env</code> or Streamlit secrets to GitHub.</p>
+
+<h2>Recommended lookup behavior</h2>
+<ol>
+<li>User selects one live provider.</li>
+<li>The app calls only that provider.</li>
+<li>On authentication error, rate limit, timeout, network failure, or server error, use the local processed phone dataset.</li>
+<li>If no local record exists, return <strong>Unknown</strong>, not Safe.</li>
+</ol>
+
+<div class="notice">
+PenipuMY, IPQS, and Carrier Lookup return different kinds of evidence. PenipuMY focuses on scam reports and reputation, IPQS provides validation, fraud-risk, and abuse metadata, while Carrier Lookup provides carrier and line-type context. Always label the selected provider and evidence source clearly.
+</div>
+</section>
+</main>
+</body>
+</html>
