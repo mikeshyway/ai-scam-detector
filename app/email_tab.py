@@ -11,6 +11,7 @@ import io
 import math
 from pathlib import Path
 import re
+from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -336,234 +337,190 @@ def _inject_email_input_css() -> None:
         }
 
         /* =========================================================
-        SINGLE-BORDER EMAIL UPLOADER
+        EMAIL UPLOADER - PYTHON CONTROLLED TWO-STATE UI
         ========================================================= */
 
-        .st-key-email_upload {
-            position: relative !important;
+        .st-key-email_upload_area {
+            position:relative;
         }
 
-        /* Remove the outer uploader border that creates the second dashed box */
-        .st-key-email_upload [data-testid="stFileUploader"] {
-            margin: 0 !important;
-            padding: 0 !important;
-            border: none !important;
-            background: transparent !important;
-        }
-
-        /* Keep only the real inner drop-zone border */
-        .st-key-email_upload [data-testid="stFileUploaderDropzone"] {
-            position: relative !important;
-            min-height: 108px !important;
-
-            border: 1px dashed rgba(96, 165, 250, 0.42) !important;
-            border-radius: 14px !important;
-
+        .email-upload-empty {
+            min-height:110px;
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            justify-content:center;
+            gap:.34rem;
+            border:1px dashed rgba(96,165,250,.45);
+            border-radius:14px;
             background:
-                radial-gradient(
-                    circle at 50% 35%,
-                    rgba(37, 99, 235, 0.13),
-                    transparent 5.5rem
-                ),
-                rgba(15, 23, 42, 0.24) !important;
-
-            padding: 0 !important;
-            overflow: hidden !important;
-
-            transition:
-                border-color 0.18s ease,
-                background 0.18s ease !important;
+                radial-gradient(circle at 50% 35%,rgba(37,99,235,.16),transparent 5.8rem),
+                rgba(15,23,42,.24);
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.035);
+            transition:border-color .18s ease,background .18s ease,box-shadow .18s ease;
+            pointer-events:none;
         }
 
-        .st-key-email_upload [data-testid="stFileUploaderDropzone"]:hover {
-            border-color: rgba(96, 165, 250, 0.75) !important;
-
+        .st-key-email_upload_area:hover .email-upload-empty {
+            border-color:rgba(96,165,250,.75);
             background:
-                radial-gradient(
-                    circle at 50% 35%,
-                    rgba(37, 99, 235, 0.19),
-                    transparent 6rem
-                ),
-                rgba(15, 23, 42, 0.30) !important;
+                radial-gradient(circle at 50% 35%,rgba(37,99,235,.22),transparent 6rem),
+                rgba(15,23,42,.30);
+            box-shadow:0 0 20px rgba(37,99,235,.08), inset 0 1px 0 rgba(255,255,255,.04);
         }
 
-        /* Hide Streamlit's original uploader instructions */
-        .st-key-email_upload
-        [data-testid="stFileUploaderDropzoneInstructions"] {
-            visibility: hidden !important;
-            position: absolute !important;
-            inset: 0 !important;
-        }
-
-        /* Make the entire visible uploader clickable */
-        .st-key-email_upload
-        [data-testid="stFileUploaderDropzone"] button {
-            position: absolute !important;
-            inset: 0 !important;
-
-            width: 100% !important;
-            height: 100% !important;
-            min-height: 108px !important;
-
-            opacity: 0 !important;
-            cursor: pointer !important;
-            z-index: 5 !important;
-
-            margin: 0 !important;
-            border-radius: 14px !important;
-        }
-
-        /* Upload icon */
-        .st-key-email_upload
-        [data-testid="stFileUploaderDropzone"]::before {
-            content: "";
-            position: absolute;
-
-            left: 50%;
-            top: 21px;
-            transform: translateX(-50%);
-
-            width: 34px;
-            height: 34px;
-
-            border-radius: 50%;
-
-            background:
-                url(
-                    "https://api.iconify.design/solar/upload-minimalistic-bold-duotone.svg?color=%2393c5fd"
-                )
-                center / 20px 20px no-repeat,
-                linear-gradient(
-                    135deg,
-                    rgba(37, 99, 235, 0.30),
-                    rgba(59, 130, 246, 0.12)
-                );
-
-            border: 1px solid rgba(96, 165, 250, 0.30);
-            box-shadow: 0 0 16px rgba(37, 99, 235, 0.14);
-
-            pointer-events: none;
-            z-index: 2;
-        }
-
-        /* Only the supported formats below the icon */
-        .st-key-email_upload
-        [data-testid="stFileUploaderDropzone"]::after {
-            content: "EML  •  MSG  •  TXT  •  HTML  •  PDF  •  DOCX  •  CSV";
-
-            position: absolute;
-            left: 50%;
-            top: 67px;
-            transform: translateX(-50%);
-
-            width: 92%;
-
-            color: #94A3B8;
-            text-align: center;
-
-            font-size: 0.65rem;
-            font-weight: 650;
-            letter-spacing: 0.04em;
-
-            pointer-events: none;
-            z-index: 2;
-        }
-
-        /* Uploaded file card */
-        .st-key-email_upload [data-testid="stFileUploaderFile"] {
-            margin-top: 0.5rem !important;
-
-            border: 1px solid rgba(96, 165, 250, 0.18) !important;
-            border-radius: 10px !important;
-
-            background: rgba(7, 14, 27, 0.65) !important;
-        }
-
-        .st-key-email_upload [data-testid="stFileUploader"] {
-            margin:0!important;
-        }
-
-        .st-key-email_upload [data-testid="stFileUploaderDropzone"] {
-            position:relative!important;
-            min-height:108px!important;
-            border:1px dashed rgba(96,165,250,.38)!important;
-            border-radius:14px!important;
-            background:
-                radial-gradient(circle at 50% 33%,rgba(37,99,235,.13),transparent 5.5rem),
-                rgba(15,23,42,.24)!important;
-            padding:0!important;
-            overflow:hidden!important;
-            transition:border-color .18s ease,background .18s ease!important;
-        }
-
-        .st-key-email_upload [data-testid="stFileUploaderDropzone"]:hover {
-            border-color:rgba(96,165,250,.72)!important;
-            background:
-                radial-gradient(circle at 50% 33%,rgba(37,99,235,.19),transparent 6rem),
-                rgba(15,23,42,.30)!important;
-        }
-
-        .st-key-email_upload [data-testid="stFileUploaderDropzoneInstructions"] {
-            visibility:hidden!important;
-            position:absolute!important;
-            inset:0!important;
-        }
-
-        .st-key-email_upload [data-testid="stFileUploaderDropzone"] button {
-            position:absolute!important;
-            inset:0!important;
-            width:100%!important;
-            height:100%!important;
-            min-height:108px!important;
-            opacity:0!important;
-            z-index:5!important;
-            cursor:pointer!important;
-            margin:0!important;
-            border-radius:14px!important;
-        }
-
-        .st-key-email_upload [data-testid="stFileUploaderDropzone"]::before {
-            content:"";
-            position:absolute;
-            left:50%;
-            top:20px;
-            transform:translateX(-50%);
+        .email-upload-empty-icon {
             width:34px;
             height:34px;
             border-radius:50%;
+            display:flex;
+            align-items:center;
+            justify-content:center;
             color:#93C5FD;
-            background:
-                url("https://api.iconify.design/solar/upload-minimalistic-bold-duotone.svg?color=%2393c5fd")
-                center/20px 20px no-repeat,
-                linear-gradient(135deg,rgba(37,99,235,.30),rgba(59,130,246,.12));
+            background:linear-gradient(135deg,rgba(37,99,235,.30),rgba(59,130,246,.12));
             border:1px solid rgba(96,165,250,.30);
             box-shadow:0 0 16px rgba(37,99,235,.14);
-            pointer-events:none;
-            z-index:2;
         }
 
-        .st-key-email_upload [data-testid="stFileUploaderDropzone"]::after {
-            content:"EML • MSG • TXT • HTML • PDF • DOCX • CSV";
-            white-space:pre;
-            position:absolute;
-            left:50%;
-            top:60px;
-            transform:translateX(-50%);
-            width:90%;
-            text-align:center;
-            color:#F8FAFC;
-            font-size:.72rem;
-            line-height:1.65;
+        .email-upload-empty-icon::before,
+        .email-uploaded-file-icon::before {
+            content:"";
+            width:18px;
+            height:18px;
+            display:block;
+            background:currentColor;
+            -webkit-mask:url("https://api.iconify.design/solar/upload-minimalistic-bold-duotone.svg") center/contain no-repeat;
+            mask:url("https://api.iconify.design/solar/upload-minimalistic-bold-duotone.svg") center/contain no-repeat;
+        }
+
+        .email-upload-empty-title {
+            color:var(--text-primary);
+            font-size:.8rem;
+            font-weight:800;
+            line-height:1.2;
+        }
+
+        .email-upload-empty-formats {
+            color:var(--text-muted);
+            font-size:.66rem;
             font-weight:750;
-            pointer-events:none;
-            z-index:2;
+            letter-spacing:.025em;
         }
 
-        .st-key-email_upload [data-testid="stFileUploaderFile"] {
-            margin-top:.5rem!important;
-            border:1px solid rgba(96,165,250,.18)!important;
+        .email-upload-overlay,
+        .st-key-email_upload_area [data-testid="stFileUploader"] {
+            position:absolute;
+            inset:0;
+            z-index:3;
+            opacity:.01;
+            height:110px!important;
+            margin:0!important;
+            padding:0!important;
+            border:0!important;
+            background:transparent!important;
+        }
+
+        .email-upload-overlay [data-testid="stFileUploaderDropzone"],
+        .st-key-email_upload_area [data-testid="stFileUploaderDropzone"] {
+            height:110px!important;
+            min-height:110px!important;
+            margin:0!important;
+            padding:0!important;
+            border:0!important;
+            background:transparent!important;
+            cursor:pointer!important;
+        }
+
+        .email-upload-overlay [data-testid="stFileUploaderDropzone"] button,
+        .st-key-email_upload_area [data-testid="stFileUploaderDropzone"] button {
+            width:100%!important;
+            height:110px!important;
+            cursor:pointer!important;
+        }
+
+        .email-uploaded-card {
+            min-height:40px;
+            display:flex;
+            align-items:center;
+            gap:.72rem;
+            padding:0;
+            border:0;
+            background:transparent;
+            box-shadow:none;
+        }
+
+        .st-key-email_uploaded_card_shell {
+            min-height:72px;
+            padding:.75rem .9rem;
+            border:1px solid rgba(96,165,250,.26);
+            border-radius:14px;
+            background:
+                radial-gradient(circle at 8% 50%,rgba(37,99,235,.14),transparent 7rem),
+                rgba(15,23,42,.30);
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.035);
+        }
+
+        .st-key-email_uploaded_card_shell [data-testid="stHorizontalBlock"] {
+            align-items:center;
+        }
+
+        .email-uploaded-file-icon {
+            width:38px;
+            height:38px;
+            flex:0 0 38px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color:#BFDBFE;
+            border-radius:10px;
+            background:rgba(37,99,235,.13);
+            border:1px solid rgba(96,165,250,.20);
+        }
+
+        .email-uploaded-file-icon::before {
+            -webkit-mask:url("https://api.iconify.design/solar/file-text-bold-duotone.svg") center/contain no-repeat;
+            mask:url("https://api.iconify.design/solar/file-text-bold-duotone.svg") center/contain no-repeat;
+        }
+
+        .email-uploaded-file-copy {
+            min-width:0;
+            flex:1;
+        }
+
+        .email-uploaded-file-name {
+            color:var(--text-primary);
+            font-size:.84rem;
+            font-weight:800;
+            line-height:1.25;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+        }
+
+        .email-uploaded-file-meta {
+            margin-top:.12rem;
+            color:var(--text-muted);
+            font-size:.68rem;
+            font-weight:650;
+            letter-spacing:.01em;
+        }
+
+        .st-key-email_remove_upload button {
+            width:34px!important;
+            height:34px!important;
+            min-height:34px!important;
+            padding:0!important;
             border-radius:10px!important;
-            background:rgba(7,14,27,.65)!important;
+            color:#BFDBFE!important;
+            background:rgba(15,23,42,.45)!important;
+            border:1px solid rgba(96,165,250,.25)!important;
+            box-shadow:none!important;
+        }
+
+        .st-key-email_remove_upload button:hover {
+            color:#F8FAFC!important;
+            background:rgba(37,99,235,.20)!important;
+            border-color:rgba(96,165,250,.55)!important;
         }
 
         .email-format-line {
@@ -886,6 +843,60 @@ def _step_header(number: str, title: str, description: str) -> None:
     )
 
 
+def _format_file_size(size_bytes: int) -> str:
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+
+def _render_email_upload_empty_state() -> None:
+    st.markdown(
+        """
+        <div class="email-upload-empty">
+            <div class="email-upload-empty-icon"></div>
+            <div class="email-upload-empty-title">Drop file here or click to browse</div>
+            <div class="email-upload-empty-formats">EML / MSG / TXT / HTML / PDF / DOCX / CSV</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_email_uploaded_file_card(
+    filename: str,
+    size_bytes: int,
+    suffix: str,
+) -> bool:
+    with st.container(key="email_uploaded_card_shell"):
+        left_col, right_col = st.columns([0.92, 0.08], gap="small")
+
+        with left_col:
+            st.markdown(
+                f"""
+                <div class="email-uploaded-card">
+                    <div class="email-uploaded-file-icon"></div>
+                    <div class="email-uploaded-file-copy">
+                        <div class="email-uploaded-file-name">{html.escape(filename)}</div>
+                        <div class="email-uploaded-file-meta">
+                            {html.escape(_format_file_size(size_bytes))} / {html.escape(suffix.upper().lstrip(".") or "FILE")}
+                        </div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with right_col:
+            return st.button(
+                "X",
+                key="email_remove_upload",
+                help="Remove uploaded file",
+                use_container_width=True,
+            )
+
+
 def _render_email_input_container(
     root: Path,
     model_options: list[str],
@@ -896,6 +907,16 @@ def _render_email_input_container(
         st.session_state.email_evidence_text = ""
     if "email_upload_signature" not in st.session_state:
         st.session_state.email_upload_signature = None
+    if "email_upload_reset_counter" not in st.session_state:
+        st.session_state.email_upload_reset_counter = 0
+    if "email_uploaded_file_name" not in st.session_state:
+        st.session_state.email_uploaded_file_name = None
+    if "email_uploaded_file_size" not in st.session_state:
+        st.session_state.email_uploaded_file_size = 0
+    if "email_uploaded_file_type" not in st.session_state:
+        st.session_state.email_uploaded_file_type = ""
+    if "email_uploaded_dataframe" not in st.session_state:
+        st.session_state.email_uploaded_dataframe = None
 
     for model_name in model_options:
         model_key = f"email_model_{model_name.lower().replace(' ', '_')}"
@@ -909,24 +930,55 @@ def _render_email_input_container(
             "Upload an email or message file to extract its content.",
         )
 
-        with st.container(key="email_upload"):
-            uploaded_file = st.file_uploader(
-                "Upload evidence file",
-                type=SUPPORTED_UPLOAD_TYPES,
-                key="email_upload_widget",
-                help="Supported: EML, MSG, TXT, HTML, PDF, DOCX, and CSV.",
-                label_visibility="collapsed",
-            )
+        uploaded_file = None
+        uploaded = st.session_state.get("email_uploaded_dataframe")
+        stored_filename = st.session_state.get("email_uploaded_file_name")
 
-        uploaded = _read_uploaded_text(uploaded_file)
-        signature = _upload_signature(uploaded_file)
+        with st.container(key="email_upload_area"):
+            if stored_filename:
+                remove_clicked = _render_email_uploaded_file_card(
+                    str(stored_filename),
+                    int(st.session_state.get("email_uploaded_file_size") or 0),
+                    str(st.session_state.get("email_uploaded_file_type") or ""),
+                )
 
-        if uploaded_file is not None and isinstance(uploaded, str):
-            if signature != st.session_state.email_upload_signature:
-                st.session_state.email_evidence_text = uploaded
+                if remove_clicked:
+                    st.session_state.email_uploaded_file_name = None
+                    st.session_state.email_uploaded_file_size = 0
+                    st.session_state.email_uploaded_file_type = ""
+                    st.session_state.email_upload_signature = None
+                    st.session_state.email_uploaded_dataframe = None
+                    st.session_state.email_upload_reset_counter += 1
+                    st.rerun()
+            else:
+                _render_email_upload_empty_state()
+                uploaded_file = st.file_uploader(
+                    "Upload evidence file",
+                    type=SUPPORTED_UPLOAD_TYPES,
+                    key=f"email_upload_widget_{st.session_state.email_upload_reset_counter}",
+                    help="Supported: EML, MSG, TXT, HTML, PDF, DOCX, and CSV.",
+                    label_visibility="collapsed",
+                )
+
+        if uploaded_file is not None:
+            uploaded = _read_uploaded_text(uploaded_file)
+            signature = _upload_signature(uploaded_file)
+
+            if uploaded is not None and signature != st.session_state.email_upload_signature:
+                suffix = Path(uploaded_file.name).suffix.lower()
+                data = uploaded_file.getvalue()
+                st.session_state.email_uploaded_file_name = uploaded_file.name
+                st.session_state.email_uploaded_file_size = len(data)
+                st.session_state.email_uploaded_file_type = suffix
                 st.session_state.email_upload_signature = signature
-        elif uploaded_file is None:
-            st.session_state.email_upload_signature = None
+
+                if isinstance(uploaded, str):
+                    st.session_state.email_evidence_text = uploaded
+                    st.session_state.email_uploaded_dataframe = None
+                elif isinstance(uploaded, pd.DataFrame):
+                    st.session_state.email_uploaded_dataframe = uploaded
+
+                st.rerun()
 
         st.markdown('<div class="email-step-divider"></div>', unsafe_allow_html=True)
 
@@ -945,7 +997,11 @@ def _render_email_input_container(
             label_visibility="collapsed",
         )
 
-        metadata = _email_evidence_metadata(text, uploaded_file, uploaded)
+        metadata_upload = uploaded_file
+        if metadata_upload is None and st.session_state.get("email_uploaded_file_name"):
+            metadata_upload = SimpleNamespace(name=st.session_state.email_uploaded_file_name)
+
+        metadata = _email_evidence_metadata(text, metadata_upload, uploaded)
         source_value = html.escape(str(metadata["source"]))
         filename_value = html.escape(str(metadata["filename"]))
         status_value = html.escape(str(metadata["status"]))
