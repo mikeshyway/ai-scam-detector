@@ -186,8 +186,10 @@ def _extract_msg(data: bytes) -> str:
         raise RuntimeError("MSG support requires `pip install extract-msg`.") from exc
 
     import tempfile
+    import time
 
     temp_path: Path | None = None
+    message: Any | None = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".msg", delete=False) as temp_file:
             temp_file.write(data)
@@ -202,8 +204,23 @@ def _extract_msg(data: bytes) -> str:
         ]
         return "\n".join(value for value in values if value).strip()
     finally:
+        if message is not None:
+            close_message = getattr(message, "close", None)
+            if callable(close_message):
+                try:
+                    close_message()
+                except Exception:
+                    pass
+
         if temp_path and temp_path.exists():
-            temp_path.unlink(missing_ok=True)
+            for attempt in range(3):
+                try:
+                    temp_path.unlink(missing_ok=True)
+                    break
+                except PermissionError:
+                    if attempt == 2:
+                        break
+                    time.sleep(0.05)
 
 
 def _read_uploaded_text(uploaded_file) -> str | pd.DataFrame | None:
@@ -597,77 +614,47 @@ def _inject_email_input_css() -> None:
             text-overflow:ellipsis;
         }
 
-        .st-key-email_config_columns [data-testid="stHorizontalBlock"] {
-            gap:.65rem!important;
-            align-items:stretch!important;
+        /* =========================================================
+           CONFIGURE INVESTIGATION - FULL-WIDTH AI MODELS
+           ========================================================= */
+
+        .st-key-email_config_section {
+            width:100%!important;
+            margin:0!important;
+            padding:0!important;
         }
 
-        .st-key-email_model_panel,
-        .st-key-email_engine_panel {
-            height:100%!important;
-        }
-
-        .st-key-email_model_panel > div[data-testid="stVerticalBlockBorderWrapper"],
-        .st-key-email_engine_panel > div[data-testid="stVerticalBlockBorderWrapper"] {
-            height:100%!important;
-            min-height:246px!important;
+        .st-key-email_model_panel {
+            width:100%!important;
+            min-height:auto!important;
+            padding:.85rem!important;
             border:1px solid rgba(148,163,184,.16)!important;
             border-radius:14px!important;
             background:
-                linear-gradient(145deg,rgba(17,24,39,.96),rgba(13,22,38,.96))!important;
-            padding:.72rem!important;
-            box-shadow:inset 0 1px 0 rgba(255,255,255,.025)!important;
+                linear-gradient(
+                    145deg,
+                    rgba(17,24,39,.96),
+                    rgba(12,20,35,.96)
+                )!important;
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,.025),
+                0 8px 20px rgba(0,0,0,.12)!important;
         }
 
-        .st-key-email_engine_panel > div[data-testid="stVerticalBlockBorderWrapper"] {
-            background:
-                radial-gradient(circle at 50% 40%,rgba(37,99,235,.17),transparent 5.3rem),
-                linear-gradient(145deg,rgba(17,24,39,.96),rgba(13,22,38,.96))!important;
-        }
-
-        .email-panel-head {
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap:.5rem;
-            margin-bottom:.36rem;
-        }
-
-        .email-panel-head strong,
-        .email-engine-title {
+        .email-model-title {
             color:var(--text-primary);
             font-size:.78rem;
-            font-weight:800;
+            font-weight:850;
+            margin:0 0 .5rem;
         }
 
-        .email-rec-badge {
-            padding:.13rem .4rem;
-            border-radius:999px;
-            background:rgba(37,99,235,.14);
-            border:1px solid rgba(96,165,250,.30);
-            color:#93C5FD;
-            font-size:.54rem;
-            font-weight:800;
-        }
-
-        .email-config-note {
-            color:var(--text-muted);
-            font-size:.62rem;
-            line-height:1.4;
-            margin:0 0 .42rem;
-        }
-
-        .email-model-list {
-            margin-top:.1rem;
-        }
-
-        .email-model-label {
+        .email-model-row-label {
+            min-height:38px;
             display:flex;
             align-items:center;
-            gap:.45rem;
-            min-height:30px;
+            gap:.5rem;
             color:#D8E3F4;
-            font-size:.7rem;
+            font-size:.72rem;
             font-weight:650;
         }
 
@@ -680,8 +667,8 @@ def _inject_email_input_css() -> None:
             justify-content:center;
             border-radius:7px;
             color:#93C5FD;
-            background:rgba(37,99,235,.10);
-            border:1px solid rgba(96,165,250,.16);
+            background:rgba(37,99,235,.11);
+            border:1px solid rgba(96,165,250,.18);
         }
 
         .email-model-icon::before {
@@ -690,171 +677,84 @@ def _inject_email_input_css() -> None:
             height:13px;
             display:block;
             background:currentColor;
-            -webkit-mask:url("https://api.iconify.design/solar/cpu-bolt-bold-duotone.svg") center/contain no-repeat;
-            mask:url("https://api.iconify.design/solar/cpu-bolt-bold-duotone.svg") center/contain no-repeat;
+            -webkit-mask:var(--model-icon) center / contain no-repeat;
+            mask:var(--model-icon) center / contain no-repeat;
         }
 
         .st-key-email_model_panel [data-testid="stHorizontalBlock"] {
-            gap:.3rem!important;
+            width:100%!important;
+            min-height:40px!important;
+            gap:.25rem!important;
             align-items:center!important;
-            min-height:32px!important;
-            border-bottom:1px solid rgba(148,163,184,.075);
+            border-bottom:1px solid rgba(148,163,184,.07);
         }
 
         .st-key-email_model_panel [data-testid="stHorizontalBlock"]:last-child {
             border-bottom:none;
         }
 
+        .st-key-email_model_panel [data-testid="column"]:last-child {
+            display:flex!important;
+            justify-content:flex-end!important;
+            align-items:center!important;
+        }
+
         .st-key-email_model_panel [data-testid="stToggle"] {
+            width:100%!important;
+            display:flex!important;
+            justify-content:flex-end!important;
+            align-items:center!important;
             margin:0!important;
             padding:0!important;
+        }
+
+        .st-key-email_model_panel [data-testid="stToggle"] > div {
+            width:100%!important;
             display:flex!important;
             justify-content:flex-end!important;
         }
 
-        .st-key-email_model_panel [data-testid="stWidgetLabel"] {
-            display:none!important;
-        }
-
         .st-key-email_model_panel [role="switch"] {
+            margin-left:auto!important;
             transform:scale(.82);
             transform-origin:right center;
         }
 
-        .email-engine-title {
-            text-align:left;
-            margin-bottom:.18rem;
+        /* Analyze button */
+
+        .st-key-email_analyze_evidence {
+            width:100%!important;
+            margin-top:.65rem!important;
         }
 
-        .email-engine-ring {
-            width:86px;
-            height:86px;
-            margin:.3rem auto .42rem;
-            border-radius:50%;
-            border:2px solid rgba(96,165,250,.46);
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            position:relative;
-            box-shadow:
-                0 0 24px rgba(37,99,235,.17),
-                inset 0 0 22px rgba(37,99,235,.12);
+        .st-key-email_analyze_evidence button {
+            width:100%!important;
+            min-height:2.7rem!important;
+
+            background:
+                linear-gradient(
+                    135deg,
+                    #2563EB 0%,
+                    #3B82F6 100%
+                )!important;
+
+            border-radius:10px!important;
         }
 
-        .email-engine-ring::before,
-        .email-engine-ring::after {
-            content:"";
-            position:absolute;
-            border-radius:50%;
-            border:1px solid rgba(96,165,250,.21);
-        }
+                @media(max-width:850px) {
+                    .email-preview-meta {
+                        grid-template-columns:repeat(2,minmax(0,1fr));
+                    }
 
-        .email-engine-ring::before { inset:8px; }
-        .email-engine-ring::after { inset:17px; }
+                    .email-meta-item:nth-child(2n) {
+                        border-right:none;
+                    }
 
-        .email-engine-center {
-            position:relative;
-            z-index:1;
-            color:#DBEAFE;
-            font-size:.72rem;
-            font-weight:800;
-            line-height:1.15;
-        }
-
-        .email-engine-center::before {
-            content:"✓";
-            display:block;
-            color:#60A5FA;
-            font-size:1.08rem;
-            margin-bottom:.1rem;
-        }
-
-        .email-engine-sub {
-            color:var(--text-muted);
-            font-size:.59rem;
-            margin:.05rem 0 .44rem;
-            text-align:center;
-        }
-
-        .email-engine-stats {
-            display:grid;
-            grid-template-columns:repeat(3,1fr);
-            border-top:1px solid rgba(148,163,184,.10);
-            margin-top:auto;
-        }
-
-        .email-engine-stat {
-            padding:.45rem .2rem 0;
-            border-right:1px solid rgba(148,163,184,.10);
-            text-align:center;
-        }
-
-        .email-engine-stat:last-child { border-right:none; }
-
-        .email-engine-stat b {
-            display:block;
-            color:var(--text-primary);
-            font-size:.79rem;
-        }
-
-        .email-engine-stat span {
-            display:block;
-            color:var(--text-muted);
-            font-size:.51rem;
-            text-transform:uppercase;
-            margin-top:.08rem;
-        }
-
-        .email-readiness-strip {
-            display:grid;
-            grid-template-columns:repeat(4,minmax(0,1fr));
-            gap:.42rem;
-            margin:.72rem 0 .58rem;
-        }
-
-        .email-ready-item {
-            padding:.44rem .56rem;
-            border:1px solid rgba(148,163,184,.11);
-            border-radius:9px;
-            background:rgba(15,23,42,.24);
-        }
-
-        .email-ready-item span {
-            display:block;
-            color:var(--text-muted);
-            font-size:.54rem;
-            text-transform:uppercase;
-            letter-spacing:.05em;
-        }
-
-        .email-ready-item b {
-            display:block;
-            color:var(--text-primary);
-            font-size:.69rem;
-            margin-top:.1rem;
-        }
-
-        @media(max-width:850px) {
-            .st-key-email_config_columns [data-testid="stHorizontalBlock"] {
-                flex-direction:column!important;
-            }
-
-            .email-preview-meta {
-                grid-template-columns:repeat(2,minmax(0,1fr));
-            }
-
-            .email-meta-item:nth-child(2n) {
-                border-right:none;
-            }
-
-            .email-readiness-strip {
-                grid-template-columns:repeat(2,minmax(0,1fr));
-            }
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 def _step_header(number: str, title: str, description: str) -> None:
@@ -946,6 +846,14 @@ def _render_email_input_container(
         st.session_state.email_uploaded_file_type = ""
     if "email_uploaded_dataframe" not in st.session_state:
         st.session_state.email_uploaded_dataframe = None
+
+    model_icons = {
+        "Naive Bayes": "solar:calculator-minimalistic-bold-duotone",
+        "Decision Tree": "solar:branching-paths-down-bold-duotone",
+        "Support Vector Machine": "solar:graph-up-bold-duotone",
+        "Random Forest": "solar:leaf-bold-duotone",
+        "XGBoost": "solar:bolt-bold-duotone",
+    }
 
     for model_name in model_options:
         model_key = f"email_model_{model_name.lower().replace(' ', '_')}"
@@ -1059,95 +967,54 @@ def _render_email_input_container(
 
         model_choices: list[str] = []
 
-        with st.container(key="email_config_columns"):
-            left_col, right_col = st.columns([0.46, 0.54], gap="small")
+        with st.container(key="email_config_section"):
+            with st.container(key="email_model_panel", border=True):
+                st.markdown(
+                    '<div class="email-model-title">AI Models</div>',
+                    unsafe_allow_html=True,
+                )
 
-            with left_col:
-                with st.container(key="email_model_panel", border=True):
-                    st.markdown(
-                        '<div class="email-panel-head">'
-                        '<strong>AI Models</strong>'
-                        '<span class="email-rec-badge">Recommended</span>'
-                        '</div>'
-                        '<div class="email-config-note">'
-                        'All models are selected by default. Disable any model you do not want to compare.'
-                        '</div>'
-                        '<div class="email-model-list">',
-                        unsafe_allow_html=True,
+                for model_name in model_options:
+                    model_key = f"email_model_{model_name.lower().replace(' ', '_')}"
+                    row_label, row_toggle = st.columns(
+                        [0.90, 0.10],
+                        gap="small",
+                        vertical_alignment="center",
                     )
 
-                    for model_name in model_options:
-                        model_key = f"email_model_{model_name.lower().replace(' ', '_')}"
-                        label_col, toggle_col = st.columns([0.78, 0.22], gap="small")
+                    with row_label:
+                        icon_name = model_icons.get(
+                            model_name,
+                            "solar:settings-bold-duotone",
+                        )
 
-                        with label_col:
-                            st.markdown(
-                                '<div class="email-model-label">'
-                                '<span class="email-model-icon"></span>'
-                                f'<span>{html.escape(model_name)}</span>'
-                                '</div>',
-                                unsafe_allow_html=True,
-                            )
+                        icon_url = (
+                            "https://api.iconify.design/"
+                            + icon_name.replace(":", "/")
+                            + ".svg"
+                        )
 
-                        with toggle_col:
-                            selected = st.toggle(
-                                f"Use {model_name}",
-                                key=model_key,
-                                label_visibility="collapsed",
-                            )
+                        st.markdown(
+                            '<div class="email-model-row-label">'
+                            f'<span class="email-model-icon" '
+                            f'style="--model-icon:url(\'{icon_url}\')"></span>'
+                            f'<span>{html.escape(model_name)}</span>'
+                            '</div>',
+                            unsafe_allow_html=True,
+                        )
 
-                        if selected:
-                            model_choices.append(model_name)
+                    with row_toggle:
+                        selected = st.toggle(
+                            f"Use {model_name}",
+                            key=model_key,
+                            label_visibility="collapsed",
+                        )
 
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-            available_count = len(model_options)
-            selected_count = len(model_choices)
-            missing_count = max(0, len(DISPLAY_MODELS) - available_count)
-            engine_ready = available_count > 0 and selected_count > 0
-
-            with right_col:
-                with st.container(key="email_engine_panel", border=True):
-                    st.markdown(
-                        '<div class="email-engine-title">AI Engine Status</div>'
-                        '<div class="email-engine-ring">'
-                        f'<div class="email-engine-center">'
-                        f'{"Ready" if engine_ready else "Incomplete"}'
-                        '</div>'
-                        '</div>'
-                        f'<div class="email-engine-sub">'
-                        f'{"All systems operational" if engine_ready else "Select at least one model"}'
-                        '</div>'
-                        '<div class="email-engine-stats">'
-                        f'<div class="email-engine-stat"><b>{available_count}</b>'
-                        '<span>Available</span></div>'
-                        f'<div class="email-engine-stat"><b>{selected_count}</b>'
-                        '<span>Selected</span></div>'
-                        f'<div class="email-engine-stat"><b>{missing_count}</b>'
-                        '<span>Missing</span></div>'
-                        '</div>',
-                        unsafe_allow_html=True,
-                    )
-
-        evidence_ready = bool(text.strip()) or isinstance(uploaded, pd.DataFrame)
-        source_label = str(metadata["source"])
-
-        st.markdown(
-            '<div class="email-readiness-strip">'
-            f'<div class="email-ready-item"><span>Evidence</span>'
-            f'<b>{"Ready" if evidence_ready else "Missing"}</b></div>'
-            f'<div class="email-ready-item"><span>Input Source</span>'
-            f'<b>{html.escape(source_label)}</b></div>'
-            f'<div class="email-ready-item"><span>Models</span>'
-            f'<b>{selected_count} selected</b></div>'
-            f'<div class="email-ready-item"><span>Engine</span>'
-            f'<b>{"Ready" if engine_ready else "Incomplete"}</b></div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+                    if selected:
+                        model_choices.append(model_name)
 
         analyze_button = st.button(
-            "✦  Analyze Evidence",
+            "\u2726  Analyze Evidence",
             type="primary",
             use_container_width=True,
             disabled=not text.strip() or not model_choices,
