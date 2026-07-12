@@ -101,9 +101,11 @@ def _init_transcript_voice_state() -> None:
         "transcript_voice_sessions": [],
         "transcript_voice_active_session_id": None,
         "transcript_voice_active_index": 0,
+        "transcript_voice_selector_generation": 0,
         "transcript_voice_mode": "record",
         "transcript_recorder_generation": 0,
         "transcript_recorder_error": "",
+        "transcript_recorder_carousel_index": 0,
         "transcript_pending_voice_analysis": False,
         "transcript_uploaded_audio_file_name": None,
         "transcript_uploaded_audio_file_bytes": None,
@@ -136,6 +138,17 @@ def _on_uploaded_audio_source_change() -> None:
 
 def _on_voice_session_selected() -> None:
     """Show selected saved recording in the shared recorder display area."""
+
+    selector_generation = int(
+        st.session_state.get("transcript_voice_selector_generation", 0)
+    )
+    selector_key = f"transcript_voice_session_selector_{selector_generation}"
+    selected_session_id = st.session_state.get(selector_key)
+
+    if selected_session_id:
+        st.session_state["transcript_voice_active_session_id"] = str(
+            selected_session_id
+        )
 
     st.session_state["transcript_voice_mode"] = "saved"
     st.session_state["transcript_recorder_carousel_index"] = 0
@@ -245,6 +258,9 @@ def _delete_active_voice_session() -> None:
             int(st.session_state.get("transcript_recorder_generation", 0)) + 1
         )
 
+    st.session_state["transcript_voice_selector_generation"] = (
+        int(st.session_state.get("transcript_voice_selector_generation", 0)) + 1
+    )
     st.session_state["transcript_recorder_carousel_index"] = 0
 
 
@@ -255,6 +271,9 @@ def _clear_recorder_state() -> None:
     st.session_state["transcript_voice_mode"] = "record"
     st.session_state["transcript_recorder_error"] = ""
     st.session_state["transcript_recorder_carousel_index"] = 0
+    st.session_state["transcript_voice_selector_generation"] = (
+        int(st.session_state.get("transcript_voice_selector_generation", 0)) + 1
+    )
     st.session_state["transcript_recorder_generation"] = (
         int(st.session_state.get("transcript_recorder_generation", 0)) + 1
     )
@@ -1740,6 +1759,10 @@ def _render_voice_session_manager() -> None:
         for session in sessions
     ]
     active_id = str(active_session.get("session_id", ""))
+    selector_generation = int(
+        st.session_state.get("transcript_voice_selector_generation", 0)
+    )
+    selector_key = f"transcript_voice_session_selector_{selector_generation}"
 
     st.markdown(
         '<div class="transcript-session-label">Temporarily saved recordings</div>',
@@ -1758,16 +1781,10 @@ def _render_voice_session_manager() -> None:
             ),
             "Recorded voice",
         ),
-        key="transcript_voice_active_session_id",
+        key=selector_key,
         on_change=_on_voice_session_selected,
         help="Choose which saved recording should be used by Analyze Selected Evidence.",
     )
-
-    if selected_session_id != active_id:
-        st.session_state["transcript_voice_active_session_id"] = selected_session_id
-        st.session_state["transcript_voice_mode"] = "saved"
-        st.session_state["transcript_recorder_carousel_index"] = 0
-        st.rerun()
 
     selected_index = next(
         (
