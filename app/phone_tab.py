@@ -499,7 +499,7 @@ def _evidence_coverage_chart(record: dict[str, Any]) -> go.Figure:
         )
     )
     fig.update_layout(
-        title="Lookup Evidence Coverage",
+        title="Evidence Availability",
         height=340,
         margin=dict(l=10, r=20, t=45, b=25),
         xaxis=dict(range=[0, 100], title="Metadata coverage, not risk"),
@@ -1515,6 +1515,1025 @@ def _build_phone_investigation(
     }
 
 
+CONCERN_WEIGHTS = {
+    "police_report": 8,
+    "police_report_cap": 32,
+    "verified_report": 10,
+    "verified_report_cap": 30,
+    "fraud_flag": 25,
+    "spam_flag": 15,
+    "spoofing_report": 5,
+    "spoofing_report_cap": 20,
+    "scam_advisory": 10,
+    "multiple_categories": 10,
+    "recent_reports": 10,
+    "claimed_identity_unverified": 10,
+    "invalid_number": 15,
+    "local_fallback_match": 20,
+}
+
+
+OMKAR_PROFILE_FIELDS = {
+    "Number": [
+        ("Number status", "valid"),
+        ("Phone number", "phone_number"),
+        ("National format", "national_format"),
+    ],
+    "Network": [
+        ("Carrier", "carrier"),
+        ("Line type", "line_type"),
+        ("Mobile country code", "mobile_country_code"),
+        ("Mobile network code", "mobile_network_code"),
+    ],
+    "Region": [
+        ("Country code", "country_code"),
+        ("Calling country code", "calling_country_code"),
+    ],
+}
+
+
+PENIPUMY_REPUTATION_FIELDS = [
+    ("Police reports", "police_report_count"),
+    ("Verified reports", "verified_report_count"),
+    ("Fraud flag", "fraud"),
+    ("Spam flag", "spam"),
+    ("Police report status", "police_report_status"),
+    ("Spoofing reports", "spoofing_report_count"),
+]
+
+
+BUSINESS_RECORD_FIELDS = [
+    ("Display name", "display_name"),
+    ("Business tier", "tier"),
+    ("Brand", "brand_name"),
+    ("Branch", "branch_name"),
+    ("Address", "address"),
+    ("Website", "website"),
+    ("Maps listing", "place_url"),
+    ("Rating", "rating"),
+    ("Reviews", "review_count"),
+    ("Opening status", "opening_hours_status"),
+    ("Scam advisory", "scam_alert_banner"),
+    ("Spoofing reports", "spoofing_report_count"),
+]
+
+
+OUTPUT_FIELD_OWNERS = {
+    "raw_number": "input",
+    "normalized_number": "input",
+    "claimed_identity": "input",
+    "is_valid_number": "omkar",
+    "phone_number": "omkar",
+    "national_format": "omkar",
+    "country_code": "omkar",
+    "calling_country_code": "omkar",
+    "carrier": "omkar",
+    "line_type": "omkar",
+    "mobile_country_code": "omkar",
+    "mobile_network_code": "omkar",
+    "police_report_count": "penipumy",
+    "verified_report_count": "penipumy",
+    "spam": "penipumy",
+    "fraud": "penipumy",
+    "police_report_status": "penipumy",
+    "business": "penipumy",
+    "spoofing_report_count": "penipumy",
+}
+
+
+def _as_list(value: object) -> list[object]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple) or isinstance(value, set):
+        return list(value)
+    if isinstance(value, str) and value.strip():
+        if "," in value:
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return [value.strip()]
+    return []
+
+
+def _extract_categories(data: dict[str, Any]) -> list[str]:
+    categories: list[str] = []
+    for key in ("categories", "report_categories", "scam_categories", "tags", "category"):
+        value = data.get(key)
+        for item in _as_list(value):
+            text = str(item).strip()
+            if text and text.lower() not in {existing.lower() for existing in categories}:
+                categories.append(text)
+    return categories
+
+
+def _extract_report_count(data: dict[str, Any]) -> int:
+    count = 0
+    for key in (
+        "report_count",
+        "reports_count",
+        "total_reports",
+        "verified_report_count",
+        "police_report_count",
+        "complaint_count",
+    ):
+        count += _safe_int(data.get(key))
+
+    reports = data.get("reports")
+    if isinstance(reports, list):
+        count = max(count, len(reports))
+
+    return count
+
+
+def _bool_display(value: object) -> str:
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if value in (None, ""):
+        return ""
+    lowered = str(value).strip().lower()
+    if lowered in {"1", "true", "yes", "y"}:
+        return "Yes"
+    if lowered in {"0", "false", "no", "n"}:
+        return "No"
+    return str(value)
+
+
+def _profile_valid_value(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return None
+    lowered = str(value).strip().lower()
+    if lowered in {"1", "true", "yes", "y", "valid"}:
+        return True
+    if lowered in {"0", "false", "no", "n", "invalid"}:
+        return False
+    return None
+
+
+def _business_from_reputation_data(data: dict[str, Any]) -> dict[str, Any]:
+    business = data.get("business")
+    if isinstance(business, dict):
+        return dict(business)
+
+    direct = {
+        "display_name": data.get("business_name") or data.get("display_name"),
+        "tier": data.get("business_tier") or data.get("tier"),
+        "spoofing_report_count": data.get("spoofing_report_count"),
+    }
+    return {key: value for key, value in direct.items() if _is_populated(value)}
+
+
+def build_caller_output_view(investigation: dict[str, Any]) -> dict[str, Any]:
+    metadata = dict(investigation.get("metadata", {}))
+    reputation = dict(investigation.get("reputation", {}))
+    fallback = dict(investigation.get("fallback", {}))
+    input_data = dict(investigation.get("input", {}))
+
+    omkar_data = dict(metadata.get("data", {}))
+    penipumy_data = dict(reputation.get("data", {}))
+    fallback_data = dict(fallback.get("data", {}))
+    reputation_source = "penipumy"
+    reputation_status = str(reputation.get("status", "unavailable"))
+    reputation_data = penipumy_data
+
+    if not reputation_data and fallback.get("used") and fallback_data:
+        reputation_source = "local"
+        reputation_status = str(fallback.get("status", "fallback"))
+        reputation_data = fallback_data
+
+    business = _business_from_reputation_data(reputation_data)
+    spoofing_count = _safe_int(
+        reputation_data.get("spoofing_report_count")
+        or business.get("spoofing_report_count")
+    )
+
+    caller_profile = {
+        "source": "omkar",
+        "status": metadata.get("status", "unavailable"),
+        "valid": _profile_valid_value(omkar_data.get("is_valid_number", omkar_data.get("valid"))),
+        "phone_number": omkar_data.get("phone_number"),
+        "national_format": omkar_data.get("national_format"),
+        "country_code": omkar_data.get("country_code") or omkar_data.get("country"),
+        "calling_country_code": omkar_data.get("calling_country_code"),
+        "carrier": omkar_data.get("carrier"),
+        "line_type": omkar_data.get("line_type"),
+        "mobile_country_code": omkar_data.get("mobile_country_code"),
+        "mobile_network_code": omkar_data.get("mobile_network_code"),
+    }
+
+    reputation_view = {
+        "source": reputation_source,
+        "status": reputation_status,
+        "police_report_count": _safe_int(reputation_data.get("police_report_count")),
+        "verified_report_count": _safe_int(reputation_data.get("verified_report_count")),
+        "spam": reputation_data.get("spam"),
+        "fraud": reputation_data.get("fraud"),
+        "police_report_status": reputation_data.get("police_report_status"),
+        "spoofing_report_count": spoofing_count,
+        "categories": _extract_categories(reputation_data),
+        "scam_alert_banner": business.get("scam_alert_banner"),
+    }
+
+    reported_identity = {
+        "source": reputation_source,
+        "available": bool(business),
+        "display_name": business.get("display_name") or business.get("business_name"),
+        "tier": business.get("tier"),
+        "brand_name": business.get("brand_name"),
+        "branch_name": business.get("branch_name"),
+        "address": business.get("address"),
+        "website": business.get("website"),
+        "place_url": business.get("place_url"),
+        "rating": business.get("rating"),
+        "review_count": business.get("review_count"),
+        "opening_hours_status": business.get("opening_hours_status"),
+        "scam_alert_banner": business.get("scam_alert_banner"),
+        "spoofing_report_count": spoofing_count,
+    }
+
+    return {
+        "input": input_data,
+        "caller_profile": caller_profile,
+        "reputation": reputation_view,
+        "reported_identity": reported_identity,
+        "coverage": {
+            "omkar": metadata.get("status", "unavailable"),
+            "penipumy": reputation.get("status", "unavailable"),
+            "fallback": "used" if fallback.get("used") else "not_used",
+        },
+    }
+
+
+def _combined_record_for_visuals(output_view: dict[str, Any]) -> dict[str, Any]:
+    profile = dict(output_view.get("caller_profile", {}))
+    reputation = dict(output_view.get("reputation", {}))
+    identity = dict(output_view.get("reported_identity", {}))
+    return {
+        "valid": profile.get("valid"),
+        "phone": profile.get("phone_number"),
+        "formatted": profile.get("phone_number"),
+        "national_format": profile.get("national_format"),
+        "country": profile.get("country_code"),
+        "calling_country_code": profile.get("calling_country_code"),
+        "carrier": profile.get("carrier"),
+        "line_type": profile.get("line_type"),
+        "mobile_country_code": profile.get("mobile_country_code"),
+        "mobile_network_code": profile.get("mobile_network_code"),
+        "business_name": identity.get("display_name"),
+        "police_report_count": reputation.get("police_report_count"),
+        "verified_report_count": reputation.get("verified_report_count"),
+        "spoofing_report_count": reputation.get("spoofing_report_count"),
+        "spam": reputation.get("spam"),
+        "fraud": reputation.get("fraud"),
+    }
+
+
+def _metadata_validity(metadata: dict[str, Any]) -> tuple[str, bool | None]:
+    data = dict(metadata.get("data", {}))
+    value = data.get("is_valid_number", data.get("valid"))
+    parsed = _safe_bool(value) if value not in (None, "") else None
+    if parsed is True:
+        return "Valid number", True
+    if parsed is False:
+        return "Invalid number", False
+    return "Validity unknown", None
+
+
+def _provider_completed(investigation: dict[str, Any]) -> str:
+    coverage = dict(investigation.get("provider_coverage", {}))
+    requested = _safe_int(coverage.get("requested"))
+    completed = _safe_int(coverage.get("completed"))
+    if requested <= 0:
+        return "0/0 providers completed"
+    return f"{completed}/{requested} providers completed"
+
+
+def _live_provider_metric(investigation: dict[str, Any]) -> str:
+    coverage = dict(investigation.get("provider_coverage", {}))
+    requested = _safe_int(coverage.get("requested"))
+    completed = _safe_int(coverage.get("completed"))
+    if requested <= 0:
+        return "0/0 live providers"
+    return f"{completed}/{requested} live providers"
+
+
+def _phone_priority(score: int | None) -> tuple[str, str]:
+    if score is None:
+        return (
+            "Reputation unknown",
+            "There is not enough reputation evidence to calculate a concern level.",
+        )
+    if score >= 80:
+        return (
+            "Critical review",
+            "End the call and verify immediately.",
+        )
+    if score >= 60:
+        return (
+            "High concern",
+            "Pause the interaction and verify independently.",
+        )
+    if score >= 30:
+        return (
+            "Needs verification",
+            "Verify before continuing.",
+        )
+    return (
+        "Lower concern",
+        "Continue with normal caution.",
+    )
+
+
+def _phone_recommendation(priority: str) -> str:
+    if priority == "Critical review":
+        return (
+            "Community reputation evidence strongly raises concern. Do not transfer money, install software, "
+            "click links, disclose sensitive information, or provide remote access."
+        )
+    if priority == "High concern":
+        return (
+            "Do not provide OTPs, passwords, banking details, or payment. End or pause the call and verify "
+            "the organization using an official contact number."
+        )
+    if priority == "Needs verification":
+        return (
+            "Ask for the caller's name and department, end the call, then contact the organization using "
+            "a number from its official website."
+        )
+    if priority == "Lower concern":
+        return (
+            "No strong reputation evidence was found. Unexpected requests should still be verified through "
+            "an official channel."
+        )
+    return (
+        "There was not enough reputation evidence to calculate a concern level. Verify unexpected requests "
+        "independently before sharing personal, banking, OTP, or account information."
+    )
+
+
+def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
+    output_view = build_caller_output_view(investigation)
+    metadata = {"data": dict(output_view.get("caller_profile", {}))}
+    reputation = dict(investigation.get("reputation", {}))
+    fallback = dict(investigation.get("fallback", {}))
+    input_data = dict(output_view.get("input", {}))
+
+    profile = dict(output_view.get("caller_profile", {}))
+    reputation_view = dict(output_view.get("reputation", {}))
+    claimed_identity = str(input_data.get("claimed_identity", "")).strip()
+
+    contributions: list[dict[str, object]] = []
+    neutral: list[dict[str, object]] = []
+
+    police_count = _safe_int(reputation_view.get("police_report_count"))
+    verified_count = _safe_int(reputation_view.get("verified_report_count"))
+    spoofing_count = _safe_int(reputation_view.get("spoofing_report_count"))
+    categories = [str(item) for item in _as_list(reputation_view.get("categories"))]
+    fraud_flag = _safe_bool(reputation_view.get("fraud"))
+    spam_flag = _safe_bool(reputation_view.get("spam"))
+
+    if police_count > 0:
+        contributions.append(
+            {
+                "indicator": f"{police_count} police report(s) found",
+                "source": "PenipuMY" if reputation_view.get("source") == "penipumy" else "Local fallback dataset",
+                "points": min(
+                    police_count * CONCERN_WEIGHTS["police_report"],
+                    CONCERN_WEIGHTS["police_report_cap"],
+                ),
+                "effect": "raises_concern",
+            }
+        )
+
+    if verified_count > 0:
+        contributions.append(
+            {
+                "indicator": f"{verified_count} verified report(s) found",
+                "source": "PenipuMY" if reputation_view.get("source") == "penipumy" else "Local fallback dataset",
+                "points": min(
+                    verified_count * CONCERN_WEIGHTS["verified_report"],
+                    CONCERN_WEIGHTS["verified_report_cap"],
+                ),
+                "effect": "raises_concern",
+            }
+        )
+
+    if fraud_flag:
+        contributions.append(
+            {
+                "indicator": "Fraud flag returned",
+                "source": "PenipuMY" if reputation_view.get("source") == "penipumy" else "Local fallback dataset",
+                "points": CONCERN_WEIGHTS["fraud_flag"],
+                "effect": "raises_concern",
+            }
+        )
+
+    if spam_flag:
+        contributions.append(
+            {
+                "indicator": "Spam flag returned",
+                "source": "PenipuMY" if reputation_view.get("source") == "penipumy" else "Local fallback dataset",
+                "points": CONCERN_WEIGHTS["spam_flag"],
+                "effect": "raises_concern",
+            }
+        )
+
+    if spoofing_count > 0:
+        contributions.append(
+            {
+                "indicator": f"{spoofing_count} spoofing report(s) found",
+                "source": "PenipuMY" if reputation_view.get("source") == "penipumy" else "Local fallback dataset",
+                "points": min(
+                    spoofing_count * CONCERN_WEIGHTS["spoofing_report"],
+                    CONCERN_WEIGHTS["spoofing_report_cap"],
+                ),
+                "effect": "raises_concern",
+            }
+        )
+
+    if _is_populated(reputation_view.get("scam_alert_banner")):
+        contributions.append(
+            {
+                "indicator": "Scam advisory returned",
+                "source": "PenipuMY",
+                "points": CONCERN_WEIGHTS["scam_advisory"],
+                "effect": "raises_concern",
+            }
+        )
+
+    combined_report_count = police_count + verified_count + spoofing_count
+    if len(categories) >= 2:
+        contributions.append(
+            {
+                "indicator": "Multiple report categories",
+                "source": "Reputation evidence",
+                "points": CONCERN_WEIGHTS["multiple_categories"],
+                "effect": "raises_concern",
+            }
+        )
+
+    if any(
+        _is_populated(dict(reputation.get("data", {})).get(key))
+        for key in ("latest_report", "latest_report_date", "last_report_date")
+    ):
+        contributions.append(
+            {
+                "indicator": "Recent report detail returned",
+                "source": "PenipuMY",
+                "points": CONCERN_WEIGHTS["recent_reports"],
+                "effect": "raises_concern",
+            }
+        )
+
+    if claimed_identity:
+        contributions.append(
+            {
+                "indicator": "Claimed identity requires checking",
+                "source": "Investigation input",
+                "points": CONCERN_WEIGHTS["claimed_identity_unverified"],
+                "effect": "raises_concern",
+            }
+        )
+
+    validity_label, is_valid = _metadata_validity(metadata)
+    if is_valid is False:
+        contributions.append(
+            {
+                "indicator": "Provider marked number invalid",
+                "source": "Omkar",
+                "points": CONCERN_WEIGHTS["invalid_number"],
+                "effect": "raises_concern",
+            }
+        )
+    elif is_valid is True:
+        neutral.append(
+            {
+                "indicator": validity_label,
+                "source": "Omkar",
+                "points": 0,
+                "effect": "neutral",
+            }
+        )
+
+    if _is_populated(profile.get("carrier")):
+        neutral.append(
+            {
+                "indicator": f"Carrier identified: {profile.get('carrier')}",
+                "source": "Omkar",
+                "points": 0,
+                "effect": "neutral",
+            }
+        )
+
+    if _is_populated(profile.get("line_type")):
+        neutral.append(
+            {
+                "indicator": f"Line type identified: {profile.get('line_type')}",
+                "source": "Omkar",
+                "points": 0,
+                "effect": "neutral",
+            }
+        )
+
+    if _is_populated(profile.get("country_code")):
+        neutral.append(
+            {
+                "indicator": f"Country identified: {profile.get('country_code')}",
+                "source": "Omkar",
+                "points": 0,
+                "effect": "neutral",
+            }
+        )
+
+    if bool(fallback.get("used")) and bool(dict(fallback.get("data", {}))):
+        contributions.append(
+            {
+                "indicator": "Local fallback reputation match",
+                "source": "Local fallback dataset",
+                "points": CONCERN_WEIGHTS["local_fallback_match"],
+                "effect": "raises_concern",
+            }
+        )
+
+    reputation_status = str(reputation_view.get("status") or "")
+    reputation_was_checked = reputation_status in {"success", "no_match"} or str(fallback.get("status") or "") in {
+        "success",
+        "no_match",
+    }
+    reputation_evidence_available = bool(contributions) or combined_report_count > 0
+    score = min(100, sum(int(item.get("points", 0)) for item in contributions))
+    score_value: int | None = score if reputation_evidence_available or reputation_was_checked or contributions else None
+    priority, interpretation = _phone_priority(score_value)
+
+    if score_value is not None and not contributions:
+        priority, interpretation = _phone_priority(0)
+
+    return {
+        "score_type": "evidence_concern",
+        "score": score_value,
+        "priority": priority,
+        "interpretation": interpretation,
+        "contributions": contributions,
+        "neutral_information": neutral,
+        "recommended_action": _phone_recommendation(priority),
+        "report_count": combined_report_count,
+        "categories": categories,
+    }
+
+
+def _concern_meter(score: int | None, priority: str) -> go.Figure:
+    value = 0 if score is None else score
+    title = "Evidence unavailable" if score is None else f"{score} / 100"
+    fig = go.Figure(
+        go.Indicator(
+            mode="gauge" if score is None else "gauge+number",
+            value=value,
+            number={"suffix": "" if score is None else " / 100", "font": {"size": 30}},
+            title={"text": f"Evidence Concern<br><span style='font-size:0.8em'>{html.escape(priority)}</span>"},
+            gauge={
+                "axis": {"range": [0, 100], "tickwidth": 1},
+                "bar": {"color": "#F97316"},
+                "bgcolor": "rgba(15,23,42,0.25)",
+                "borderwidth": 1,
+                "bordercolor": "rgba(148,163,184,0.25)",
+                "steps": [
+                    {"range": [0, 30], "color": "rgba(34,197,94,0.18)"},
+                    {"range": [30, 60], "color": "rgba(250,204,21,0.20)"},
+                    {"range": [60, 80], "color": "rgba(249,115,22,0.24)"},
+                    {"range": [80, 100], "color": "rgba(239,68,68,0.26)"},
+                ],
+            },
+        )
+    )
+    fig.update_layout(
+        height=300,
+        margin=dict(l=12, r=12, t=42, b=10),
+        annotations=[
+            {
+                "text": title,
+                "xref": "paper",
+                "yref": "paper",
+                "x": 0.5,
+                "y": 0.05,
+                "showarrow": False,
+                "font": {"size": 12, "color": "#94A3B8"},
+            }
+        ],
+    )
+    return apply_chart_theme(fig)
+
+
+def _contribution_chart(contributions: list[dict[str, object]]) -> go.Figure | None:
+    positive = [item for item in contributions if int(item.get("points", 0)) > 0]
+    if not positive:
+        return None
+
+    labels = [str(item.get("indicator", "")) for item in positive]
+    values = [int(item.get("points", 0)) for item in positive]
+    sources = [str(item.get("source", "")) for item in positive]
+
+    fig = go.Figure(
+        go.Bar(
+            x=values,
+            y=labels,
+            orientation="h",
+            marker_color="#F97316",
+            text=[f"+{value}" for value in values],
+            textposition="auto",
+            customdata=sources,
+            hovertemplate="%{y}<br>Source: %{customdata}<br>Contribution: +%{x}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        height=max(260, 52 * len(labels)),
+        margin=dict(l=10, r=20, t=20, b=30),
+        xaxis_title="Concern contribution",
+        yaxis=dict(autorange="reversed"),
+        showlegend=False,
+    )
+    return apply_chart_theme(fig)
+
+
+def _display_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if value in (None, "", [], {}):
+        return ""
+    return str(value)
+
+
+def _coverage_summary(output_view: dict[str, Any]) -> str:
+    coverage = dict(output_view.get("coverage", {}))
+    omkar_complete = coverage.get("omkar") == "success"
+    reputation_complete = coverage.get("penipumy") in {"success", "no_match"}
+    fallback_used = coverage.get("fallback") == "used"
+
+    if omkar_complete and reputation_complete:
+        return "Metadata + reputation complete"
+    if omkar_complete and fallback_used:
+        return "Metadata + local reputation complete"
+    if omkar_complete:
+        return "Metadata complete"
+    if reputation_complete:
+        return "Reputation lookup complete"
+    if fallback_used:
+        return "Local fallback evidence used"
+    return "No provider evidence complete"
+
+
+def _line_profile_summary(profile: dict[str, Any]) -> tuple[str, str]:
+    if not any(_is_populated(profile.get(key)) for key in ("line_type", "carrier", "country_code", "phone_number")):
+        return "Line profile unavailable", "Omkar metadata unavailable"
+    title = str(profile.get("line_type") or "Line type unknown").title()
+    detail_parts = [
+        str(profile.get("carrier") or "").strip(),
+        str(profile.get("country_code") or "").strip(),
+    ]
+    detail = " - ".join(part for part in detail_parts if part) or "Carrier metadata returned"
+    return title, detail
+
+
+def _reputation_summary(reputation: dict[str, Any]) -> tuple[str, str]:
+    total = (
+        _safe_int(reputation.get("police_report_count"))
+        + _safe_int(reputation.get("verified_report_count"))
+        + _safe_int(reputation.get("spoofing_report_count"))
+    )
+    if total <= 0 and not (_safe_bool(reputation.get("fraud")) or _safe_bool(reputation.get("spam"))):
+        status = str(reputation.get("status") or "unavailable")
+        if status == "no_match":
+            return "No matching record", "This does not confirm the caller is safe"
+        return "Reputation unavailable", "No live report evidence returned"
+
+    flags = []
+    if _safe_bool(reputation.get("fraud")):
+        flags.append("Fraud flag")
+    if _safe_bool(reputation.get("spam")):
+        flags.append("Spam flag")
+    flag_text = " and ".join(flags) + " found" if flags else "Report indicators found"
+    return f"{total} report indicators", flag_text
+
+
+def _profile_rows(profile: dict[str, Any]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for group, fields in OMKAR_PROFILE_FIELDS.items():
+        for label, key in fields:
+            value = profile.get(key)
+            if key == "valid" and value is not None:
+                value = "Valid" if value is True else "Invalid"
+            value_text = _display_value(value)
+            if value_text:
+                rows.append({"Group": group, "Field": label, "Value": value_text})
+    return rows
+
+
+def _reputation_rows(reputation: dict[str, Any]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for label, key in PENIPUMY_REPUTATION_FIELDS:
+        value_text = _display_value(reputation.get(key))
+        if value_text:
+            rows.append({"Field": label, "Value": value_text})
+    return rows
+
+
+def _identity_rows(identity: dict[str, Any]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for label, key in BUSINESS_RECORD_FIELDS:
+        value_text = _display_value(identity.get(key))
+        if value_text:
+            rows.append({"Field": label, "Value": value_text})
+    return rows
+
+
+def _render_phone_line_profile(output_view: dict[str, Any]) -> None:
+    profile = dict(output_view.get("caller_profile", {}))
+    rows = _profile_rows(profile)
+
+    _render_phone_step(
+        "05",
+        "Phone Line Profile",
+        "Omkar Carrier Lookup number and network metadata only.",
+    )
+    with st.container(border=True):
+        st.caption("Source: Omkar Carrier Lookup")
+        if rows:
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        else:
+            st.info("Phone line profile metadata is unavailable.")
+        st.caption(
+            "Carrier metadata confirms characteristics of the number and network. "
+            "It does not verify who is currently calling or whether the caller is safe."
+        )
+
+
+def _render_scam_reputation(output_view: dict[str, Any]) -> None:
+    reputation = dict(output_view.get("reputation", {}))
+    rows = _reputation_rows(reputation)
+    total_reports = (
+        _safe_int(reputation.get("police_report_count"))
+        + _safe_int(reputation.get("verified_report_count"))
+        + _safe_int(reputation.get("spoofing_report_count"))
+    )
+
+    _render_phone_step(
+        "06",
+        "Scam Reputation & Reports",
+        "PenipuMY reputation fields, report counts, and flags only.",
+    )
+    with st.container(border=True):
+        source = "PenipuMY" if reputation.get("source") == "penipumy" else "Local fallback dataset"
+        st.caption(f"Source: {source}")
+        _status_chip(str(reputation.get("status") or "Data unavailable").replace("_", " ").title())
+        if total_reports:
+            st.metric("Total report indicators", total_reports)
+        if rows:
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        else:
+            st.info("No matching reputation record found. This does not confirm that the caller is safe.")
+
+
+def _render_reported_identity(output_view: dict[str, Any]) -> None:
+    identity = dict(output_view.get("reported_identity", {}))
+    if not identity.get("available"):
+        return
+
+    rows = _identity_rows(identity)
+    if not rows:
+        return
+
+    _render_phone_step(
+        "07",
+        "Reported Identity or Business Record",
+        "Provider-reported business association, shown only when returned.",
+    )
+    with st.container(border=True):
+        source = "PenipuMY" if identity.get("source") == "penipumy" else "Local fallback dataset"
+        st.caption(f"Source: {source}")
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.caption(
+            "This record indicates an association reported by the provider. "
+            "It does not verify that the current caller represents the organization."
+        )
+
+
+def _combined_evidence_rows(output_view: dict[str, Any], assessment: dict[str, Any]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    profile = dict(output_view.get("caller_profile", {}))
+
+    if profile.get("valid") is True:
+        rows.append(
+            {
+                "Finding": "Number is structurally valid",
+                "Source": "Omkar",
+                "Role": "Number metadata",
+                "Effect": "Neutral",
+            }
+        )
+    elif profile.get("valid") is False:
+        rows.append(
+            {
+                "Finding": "Provider marked number invalid",
+                "Source": "Omkar",
+                "Role": "Number metadata",
+                "Effect": "Raises concern",
+            }
+        )
+
+    if _is_populated(profile.get("carrier")):
+        rows.append(
+            {
+                "Finding": f"Carrier identified as {profile.get('carrier')}",
+                "Source": "Omkar",
+                "Role": "Network metadata",
+                "Effect": "Neutral",
+            }
+        )
+
+    if _is_populated(profile.get("line_type")):
+        rows.append(
+            {
+                "Finding": f"Line type is {profile.get('line_type')}",
+                "Source": "Omkar",
+                "Role": "Network metadata",
+                "Effect": "Neutral",
+            }
+        )
+
+    for contribution in assessment.get("contributions", []):
+        rows.append(
+            {
+                "Finding": str(contribution.get("indicator", "")),
+                "Source": str(contribution.get("source", "")),
+                "Role": "Reputation evidence"
+                if str(contribution.get("source", "")).lower() != "investigation input"
+                else "Caller context",
+                "Effect": "Raises concern",
+            }
+        )
+
+    deduped = []
+    seen = set()
+    for row in rows:
+        key = (row["Finding"], row["Source"], row["Role"], row["Effect"])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(row)
+    return deduped
+
+
+def _render_combined_evidence(output_view: dict[str, Any], assessment: dict[str, Any]) -> None:
+    rows = _combined_evidence_rows(output_view, assessment)
+    _render_phone_step(
+        "08",
+        "Combined Evidence",
+        "One deduplicated table separating neutral metadata from concern-producing reputation evidence.",
+    )
+    with st.container(border=True):
+        if rows:
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        else:
+            st.info("No combined evidence rows are available yet.")
+
+
+def _render_evidence_availability(output_view: dict[str, Any]) -> None:
+    record = _combined_record_for_visuals(output_view)
+    _render_phone_step(
+        "09",
+        "Evidence Availability",
+        "Which metadata and reputation categories are available for this caller investigation.",
+    )
+    with st.container(border=True):
+        st.plotly_chart(_evidence_coverage_chart(record), use_container_width=True)
+        with st.expander("View Provider Diagnostics", expanded=False):
+            st.plotly_chart(_response_completeness_chart(record), use_container_width=True)
+
+
+def _render_claim_consistency(output_view: dict[str, Any]) -> None:
+    input_data = dict(output_view.get("input", {}))
+    claimed_identity = str(input_data.get("claimed_identity") or "").strip()
+    if not claimed_identity:
+        return
+
+    record = _combined_record_for_visuals(output_view)
+    claim_chart = _caller_claim_consistency_chart(record, claimed_identity)
+    if claim_chart is None:
+        return
+
+    _render_phone_step(
+        "10",
+        "Caller Claim Consistency",
+        "Transparent rule-based checks against the claimed identity, not an AI probability.",
+    )
+    with st.container(border=True):
+        st.plotly_chart(claim_chart, use_container_width=True)
+        st.caption("Caller Claim Consistency uses transparent rules only and does not modify the concern score.")
+
+
+def _render_recommended_response(assessment: dict[str, Any]) -> None:
+    _render_phone_step(
+        "11",
+        "Recommended Response",
+        "Direct safety action based on the available evidence.",
+    )
+    with st.container(border=True):
+        st.markdown(f"### {html.escape(str(assessment.get('priority') or 'Reputation unknown'))}")
+        st.write(assessment.get("recommended_action", "Verify the caller through an official channel."))
+
+
+def _render_caller_investigation_summary(investigation: dict[str, Any]) -> None:
+    output_view = build_caller_output_view(investigation)
+    assessment = dict(investigation.get("assessment") or _build_phone_assessment(investigation))
+    investigation["assessment"] = assessment
+    investigation["caller_profile"] = output_view.get("caller_profile", {})
+    investigation["reported_identity"] = output_view.get("reported_identity", {})
+    investigation["coverage"] = output_view.get("coverage", {})
+    st.session_state["phone_investigation_result"] = investigation
+
+    score = assessment.get("score")
+    score_value = int(score) if isinstance(score, (int, float)) else None
+    priority = str(assessment.get("priority") or "Reputation unknown")
+    contributions = list(assessment.get("contributions", []))
+    neutral = list(assessment.get("neutral_information", []))
+    input_data = dict(output_view.get("input", {}))
+    profile = dict(output_view.get("caller_profile", {}))
+    reputation_view = dict(output_view.get("reputation", {}))
+    identity = dict(output_view.get("reported_identity", {}))
+
+    _render_phone_step(
+        "04",
+        "Caller Investigation Summary",
+        "Review a transparent evidence-concern assessment and recommended next action.",
+    )
+
+    summary_col, action_col = st.columns([0.42, 0.58], gap="medium", vertical_alignment="top")
+    with summary_col:
+        with st.container(border=True):
+            st.plotly_chart(_concern_meter(score_value, priority), use_container_width=True)
+            st.caption(
+                "This is an evidence concern score, not a trained-model scam probability. "
+                "Carrier validity is treated as neutral information."
+            )
+
+    with action_col:
+        with st.container(border=True):
+            st.markdown(f"### {html.escape(priority)}")
+            st.write(assessment.get("interpretation", "Review the caller evidence before continuing."))
+            top_reasons = [str(item.get("indicator")) for item in contributions[:4]]
+            if top_reasons:
+                st.markdown("**What requires attention**")
+                for reason in top_reasons:
+                    st.markdown(f"- {html.escape(reason)}")
+            else:
+                st.info("No strong reputation evidence was collected. Unknown does not mean safe.")
+            st.markdown("**Recommended action**")
+            st.write(assessment.get("recommended_action", "Verify the caller through an official channel."))
+
+    line_value, line_detail = _line_profile_summary(profile)
+    reputation_value, reputation_detail = _reputation_summary(reputation_view)
+    quick_cols = st.columns(3)
+    quick_cols[0].metric("Phone Line", line_value)
+    quick_cols[0].caption(line_detail)
+    quick_cols[1].metric("Reputation", reputation_value)
+    quick_cols[1].caption(reputation_detail)
+    quick_cols[2].metric("Evidence Coverage", _live_provider_metric(investigation))
+    quick_cols[2].caption(_coverage_summary(output_view))
+
+    profile_bits = [
+        str(input_data.get("normalized_number") or "").strip(),
+        str(profile.get("country_code") or "").strip(),
+        str(profile.get("line_type") or "").strip().title(),
+        str(profile.get("carrier") or "").strip(),
+    ]
+    if _is_populated(profile.get("national_format")):
+        profile_bits.append(f"National format: {profile.get('national_format')}")
+    profile_line = " - ".join(bit for bit in profile_bits if bit)
+    if profile_line:
+        st.caption(profile_line)
+
+    if identity.get("available") and _is_populated(identity.get("display_name")):
+        association = f"Reported association: {identity.get('display_name')}"
+        spoofing_count = _safe_int(identity.get("spoofing_report_count"))
+        if spoofing_count:
+            association += f" - Spoofing reports: {spoofing_count}"
+        st.caption(association)
+
+    chart = _contribution_chart(contributions)
+    if chart is not None:
+        st.markdown("**What raised the concern level?**")
+        st.plotly_chart(chart, use_container_width=True)
+
+    if neutral:
+        st.markdown("**Neutral information**")
+        st.dataframe(pd.DataFrame(neutral), hide_index=True, use_container_width=True)
+
+    _render_phone_line_profile(output_view)
+    _render_scam_reputation(output_view)
+    _render_reported_identity(output_view)
+    _render_combined_evidence(output_view, assessment)
+    _render_evidence_availability(output_view)
+    _render_claim_consistency(output_view)
+    _render_recommended_response(assessment)
+
+
 def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None:
     _init_phone_input_state()
     _inject_phone_input_css()
@@ -1670,6 +2689,11 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
             )
         render_analysis_ready("Phone investigation evidence collected")
         st.caption("The unified investigation object is saved in session state for the next output phase.")
+
+    investigation_result = st.session_state.get("phone_investigation_result")
+    if isinstance(investigation_result, dict):
+        st.divider()
+        _render_caller_investigation_summary(investigation_result)
 
     st.markdown("</div>", unsafe_allow_html=True)
     return
