@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import html
 import inspect
 import json
 import os
@@ -27,6 +28,15 @@ from app.ui_components import (
 from src.phone.omkar_client import lookup_omkar_phone
 from src.phone.phone_lookup import lookup_phone, normalise_phone_query, validate_phone_query
 from src.phone.phone_number import format_phone_for_omkar
+from src.phone.providers import (
+    get_local_dataset_status,
+    lookup_local_reputation,
+    lookup_omkar_metadata,
+    lookup_penipumy_reputation,
+    test_omkar_connection,
+    test_penipumy_connection,
+)
+from src.phone.providers.models import diagnostic_rows
 
 
 def _secret_value(*keys: str) -> str:
@@ -1058,7 +1068,612 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
     _record_phone_result(history, phone, lookup_result)
 
 
+PHONE_ACCENT = "#F97316"
+
+
+def _inject_phone_input_css() -> None:
+    st.markdown(
+        """
+        <style>
+        .phone-workflow-shell {
+            border: 1px solid rgba(148, 163, 184, 0.20);
+            border-radius: 18px;
+            padding: 1.05rem;
+            background:
+                radial-gradient(circle at 78% 0%, rgba(249,115,22,.10), transparent 22rem),
+                rgba(15, 23, 42, 0.40);
+        }
+
+        .phone-provider-heading {
+            display: flex;
+            align-items: center;
+            gap: .72rem;
+            margin-bottom: .6rem;
+        }
+
+        .phone-provider-heading iconify-icon {
+            color: #F97316;
+            font-size: 2rem;
+        }
+
+        .phone-provider-heading strong {
+            display: block;
+            color: #F8FAFC;
+            font-size: .98rem;
+        }
+
+        .phone-provider-heading span {
+            display: block;
+            color: #94A3B8;
+            font-size: .78rem;
+            margin-top: .08rem;
+        }
+
+        .phone-status-chip {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: .25rem .62rem;
+            font-size: .76rem;
+            font-weight: 800;
+            color: #FDBA74;
+            border: 1px solid rgba(249,115,22,.30);
+            background: rgba(249,115,22,.10);
+            margin: .2rem 0 .7rem;
+        }
+
+        .phone-normalized-preview {
+            border: 1px solid rgba(34,197,94,.24);
+            border-radius: 14px;
+            padding: .95rem 1rem;
+            background: rgba(34,197,94,.08);
+            min-height: 6rem;
+        }
+
+        .phone-normalized-preview span {
+            display: block;
+            color: #94A3B8;
+            font-size: .78rem;
+            margin-bottom: .35rem;
+        }
+
+        .phone-normalized-preview strong {
+            color: #4ADE80;
+            font-size: 1.2rem;
+        }
+
+        .st-key-phone_investigate_button button {
+            min-height: 3rem !important;
+            border-radius: 12px !important;
+            background: linear-gradient(135deg, #F97316, #EA580C) !important;
+            border: 1px solid rgba(251,146,60,.42) !important;
+            color: #FFF7ED !important;
+            font-weight: 850 !important;
+        }
+
+        .st-key-phone_investigate_button button:disabled {
+            opacity: .48 !important;
+            cursor: not-allowed !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _init_phone_input_state() -> None:
+    defaults: dict[str, Any] = {
+        "phone_omkar_enabled": True,
+        "phone_penipumy_enabled": True,
+        "phone_local_fallback_enabled": True,
+        "phone_auto_fallback_enabled": True,
+        "phone_omkar_api_key": "",
+        "phone_penipumy_api_key": "",
+        "phone_omkar_test_number": "016-240 4384",
+        "phone_penipumy_test_number": "016-240 4384",
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def _phone_provider_key_config(provider_id: str) -> dict[str, object]:
+    if provider_id == "penipumy":
+        return {
+            "env_names": ["PENIPUMY_API_KEY", "PENIPU_API_KEY"],
+            "secret_names": ["PENIPUMY_API_KEY", "PENIPU_API_KEY"],
+            "sections": [("penipumy", "api_key"), ("penipu", "api_key")],
+        }
+    return {
+        "env_names": ["OMKAR_API_KEY", "OMKAR_CARRIER_API_KEY"],
+        "secret_names": ["OMKAR_API_KEY", "OMKAR_CARRIER_API_KEY"],
+        "sections": [("omkar", "api_key"), ("carrier_lookup", "api_key")],
+    }
+
+
+def _resolve_phone_provider_key(provider_id: str, session_value: str = "") -> dict[str, object]:
+    config = _phone_provider_key_config(provider_id)
+    session_value = str(session_value or "").strip()
+    if session_value:
+        return _key_result(session_value, "Session input", "session")
+
+    for name in list(config["env_names"]):
+        value = os.environ.get(str(name), "").strip()
+        if value:
+            return _key_result(value, f"Environment variable: {name}", str(name))
+
+    for name in list(config["secret_names"]):
+        value = _secret_value(str(name))
+        if value:
+            return _key_result(value, f"Streamlit secret: {name}", str(name))
+
+    for section_name, field_name in list(config["sections"]):
+        value = _section_secret(str(section_name), str(field_name))
+        if value:
+            return _key_result(value, f"Streamlit secret: [{section_name}].{field_name}", str(field_name))
+
+    return _key_result("", "Not configured", "-")
+
+
+def _status_chip(label: str) -> None:
+    st.markdown(
+        f'<div class="phone-status-chip">{html.escape(label)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _provider_status_label(
+    enabled: bool,
+    key_meta: dict[str, object],
+    diagnostic: dict[str, Any] | None,
+) -> str:
+    if not enabled:
+        return "Disabled"
+    if diagnostic:
+        error_code = str(diagnostic.get("error_code") or "none")
+        if error_code == "none" and diagnostic.get("provider_success") is not False:
+            return "Tested successfully"
+        if error_code == "missing_key":
+            return "Not configured"
+        if error_code == "authentication_failed":
+            return "Authentication rejected"
+        if error_code == "rate_limited":
+            return "Rate limited"
+        return "Connection failed"
+    return "Ready" if key_meta.get("configured") else "Not configured"
+
+
+def _render_diagnostics_expander(title: str, diagnostic_key: str) -> None:
+    diagnostic = st.session_state.get(diagnostic_key)
+    if not isinstance(diagnostic, dict):
+        st.caption("Run the connection test to view provider diagnostics.")
+        return
+
+    with st.expander(title, expanded=False):
+        st.dataframe(
+            pd.DataFrame(diagnostic_rows(diagnostic)),
+            hide_index=True,
+            use_container_width=True,
+        )
+        fields = diagnostic.get("raw_field_names") or []
+        if fields:
+            st.caption(f"Fields returned: {', '.join(str(item) for item in fields)}")
+
+
+def _render_live_provider_card(
+    *,
+    provider_id: str,
+    title: str,
+    purpose: str,
+    icon: str,
+    enabled_key: str,
+    session_key: str,
+    test_number_key: str,
+    diagnostic_key: str,
+) -> dict[str, object]:
+    with st.container(border=True):
+        st.markdown(
+            f"""
+            <div class="phone-provider-heading">
+                <iconify-icon icon="{icon}"></iconify-icon>
+                <div>
+                    <strong>{html.escape(title)}</strong>
+                    <span>{html.escape(purpose)}</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        enabled = st.toggle("Enable provider", key=enabled_key)
+        session_value = st.text_input(
+            "API key",
+            type="password",
+            key=session_key,
+            disabled=not enabled,
+            placeholder=f"Paste {title} API key for this session",
+        )
+        key_meta = _resolve_phone_provider_key(provider_id, session_value)
+        st.caption(f"Key source: {key_meta.get('source', 'Not configured')}")
+
+        test_number = st.text_input(
+            "Test number (optional)",
+            value=str(st.session_state.get(test_number_key, "016-240 4384")),
+            key=test_number_key,
+            disabled=not enabled,
+        )
+
+        if st.button(
+            f"Test {title} Connection",
+            key=f"{provider_id}_connection_test",
+            use_container_width=True,
+            disabled=not enabled,
+        ):
+            with st.spinner(f"Testing {title}..."):
+                if provider_id == "penipumy":
+                    diagnostic = test_penipumy_connection(
+                        test_number,
+                        str(key_meta.get("key", "")),
+                        key_source=str(key_meta.get("source", "Not configured")),
+                        key_variable=str(key_meta.get("variable", "-")),
+                    )
+                else:
+                    diagnostic = test_omkar_connection(
+                        test_number,
+                        str(key_meta.get("key", "")),
+                        key_source=str(key_meta.get("source", "Not configured")),
+                        key_variable=str(key_meta.get("variable", "-")),
+                    )
+                st.session_state[diagnostic_key] = diagnostic.as_dict()
+
+        diagnostic = st.session_state.get(diagnostic_key)
+        _status_chip(_provider_status_label(enabled, key_meta, diagnostic if isinstance(diagnostic, dict) else None))
+        _render_diagnostics_expander(f"View {title} Diagnostics", diagnostic_key)
+        return {"enabled": enabled, "key_meta": key_meta}
+
+
+def _render_local_fallback_card(root: Path) -> dict[str, Any]:
+    with st.container(border=True):
+        st.markdown(
+            """
+            <div class="phone-provider-heading">
+                <iconify-icon icon="solar:database-bold-duotone"></iconify-icon>
+                <div>
+                    <strong>Local Fallback Dataset</strong>
+                    <span>Offline educational reputation evidence</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        enabled = st.toggle(
+            "Enable fallback dataset",
+            key="phone_local_fallback_enabled",
+        )
+        auto_fallback = st.toggle(
+            "Automatic fallback",
+            key="phone_auto_fallback_enabled",
+            disabled=not enabled,
+        )
+        status = get_local_dataset_status(root)
+        if st.button("Validate Dataset", key="phone_validate_local_dataset", use_container_width=True, disabled=not enabled):
+            status = get_local_dataset_status(root)
+            st.session_state["phone_local_dataset_status"] = status.as_dict()
+
+        dataset_usable = enabled and status.schema_valid and status.record_count > 0
+        label = (
+            "Ready"
+            if dataset_usable
+            else "Empty dataset"
+            if enabled and status.schema_valid
+            else "Missing"
+            if not status.exists
+            else "Invalid schema"
+        )
+        _status_chip(label)
+        st.caption(f"{status.record_count:,} records loaded" if status.schema_valid else status.error_message)
+        st.caption(f"Source: {status.source_filename}")
+        return {"enabled": enabled, "auto_fallback": auto_fallback, "status": status}
+
+
+def _render_status_row(
+    omkar_enabled: bool,
+    omkar_key: dict[str, object],
+    penipu_enabled: bool,
+    penipu_key: dict[str, object],
+    local_info: dict[str, Any],
+) -> None:
+    local_status = local_info["status"]
+    rows = [
+        {
+            "Provider": "Omkar",
+            "Status": "Ready" if omkar_enabled and omkar_key.get("configured") else "Not configured" if omkar_enabled else "Disabled",
+        },
+        {
+            "Provider": "PenipuMY",
+            "Status": "Ready" if penipu_enabled and penipu_key.get("configured") else "Not configured" if penipu_enabled else "Disabled",
+        },
+        {
+            "Provider": "Local dataset",
+            "Status": (
+                "Ready"
+                if local_info.get("enabled") and local_status.schema_valid and local_status.record_count > 0
+                else "Missing / Invalid"
+            ),
+        },
+    ]
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+
+def _provider_result_block(result: dict[str, Any], *, default_provider: str, enabled: bool) -> dict[str, Any]:
+    return {
+        "provider": default_provider,
+        "enabled": enabled,
+        "status": str(result.get("status", "unavailable")),
+        "data": result.get("data", {}),
+        "error_code": result.get("error_code"),
+        "error_message": result.get("error_message"),
+    }
+
+
+def _build_phone_investigation(
+    *,
+    root: Path,
+    raw_number: str,
+    normalized_number: str,
+    claimed_identity: str,
+    omkar_enabled: bool,
+    omkar_key: str,
+    penipumy_enabled: bool,
+    penipumy_key: str,
+    fallback_enabled: bool,
+    auto_fallback: bool,
+) -> dict[str, Any]:
+    metadata = {
+        "provider": "omkar",
+        "enabled": omkar_enabled,
+        "status": "not_configured" if omkar_enabled else "unavailable",
+        "data": {},
+        "error_code": "missing_key" if omkar_enabled and not omkar_key else None,
+        "error_message": "Omkar Carrier Lookup API key is not configured." if omkar_enabled and not omkar_key else None,
+    }
+    reputation = {
+        "provider": "penipumy",
+        "enabled": penipumy_enabled,
+        "status": "not_configured" if penipumy_enabled else "unavailable",
+        "data": {},
+        "error_code": "missing_key" if penipumy_enabled and not penipumy_key else None,
+        "error_message": "PenipuMY API key is not configured." if penipumy_enabled and not penipumy_key else None,
+    }
+    fallback = {
+        "provider": "local",
+        "enabled": fallback_enabled,
+        "used": False,
+        "reason": None,
+        "data": {},
+    }
+
+    requested = 0
+    completed = 0
+    failed = 0
+
+    if omkar_enabled:
+        requested += 1
+        if omkar_key:
+            omkar_result = lookup_omkar_metadata(normalized_number, omkar_key).as_dict()
+            metadata = _provider_result_block(omkar_result, default_provider="omkar", enabled=True)
+            completed += 1 if omkar_result.get("success") else 0
+            failed += 0 if omkar_result.get("success") else 1
+
+    should_try_fallback = False
+    fallback_reason = None
+    if penipumy_enabled:
+        requested += 1
+        if penipumy_key:
+            penipu_result = lookup_penipumy_reputation(normalized_number, penipumy_key).as_dict()
+            reputation = _provider_result_block(penipu_result, default_provider="penipumy", enabled=True)
+            if penipu_result.get("success"):
+                completed += 1
+            else:
+                failed += 1
+                should_try_fallback = bool(auto_fallback)
+                fallback_reason = reputation.get("error_message") or reputation.get("error_code")
+        else:
+            should_try_fallback = bool(auto_fallback)
+            fallback_reason = "PenipuMY API key is not configured."
+    elif fallback_enabled:
+        should_try_fallback = True
+        fallback_reason = "PenipuMY disabled; local fallback used as reputation channel."
+
+    if fallback_enabled and should_try_fallback:
+        local_result = lookup_local_reputation(root, normalized_number).as_dict()
+        fallback.update(
+            {
+                "used": True,
+                "reason": fallback_reason,
+                "data": local_result.get("data", {}),
+                "status": local_result.get("status"),
+                "error_code": local_result.get("error_code"),
+                "error_message": local_result.get("error_message"),
+            }
+        )
+
+    return {
+        "input": {
+            "raw_number": raw_number,
+            "normalized_number": normalized_number,
+            "claimed_identity": claimed_identity,
+        },
+        "metadata": metadata,
+        "reputation": reputation,
+        "fallback": fallback,
+        "provider_coverage": {
+            "requested": requested,
+            "completed": completed,
+            "failed": failed,
+        },
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
 def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None:
+    _init_phone_input_state()
+    _inject_phone_input_css()
+
+    render_detection_tool_intro(
+        title="Phone Number",
+        description=(
+            "Investigate caller numbers with independent carrier metadata, community reputation checks, "
+            "and local fallback evidence when live reputation data is unavailable."
+        ),
+        icon="solar:phone-calling-rounded-bold-duotone",
+        accent="orange",
+    )
+
+    st.markdown('<div class="phone-workflow-shell">', unsafe_allow_html=True)
+
+    _render_phone_step(
+        "01",
+        "Enter Phone Number",
+        "Provide the caller number and any identity claimed during the call.",
+    )
+
+    number_col, identity_col, preview_col = st.columns([0.36, 0.38, 0.26], gap="small")
+    with number_col:
+        number = st.text_input(
+            "Phone number",
+            placeholder="012-345 6789 or +60 12-345 6789",
+            help="Accepted examples: 012-345 6789, +60 12-345 6789, or (03) 1234 5678.",
+            key="phone_investigation_number",
+        )
+        st.caption("Examples: 012-345 6789, +60 12-345 6789, (03) 1234 5678")
+
+    with identity_col:
+        claimed_identity = st.text_input(
+            "Claimed caller identity (optional)",
+            placeholder="e.g., bank officer, courier, university support",
+            key="phone_claimed_identity",
+        )
+        st.caption("Helps interpret the context of the call.")
+
+    ok, validation_message = validate_phone_query(number)
+    normalized = normalise_phone_query(number)
+    with preview_col:
+        if ok and normalized:
+            st.markdown(
+                f"""
+                <div class="phone-normalized-preview">
+                    <span>Normalized number</span>
+                    <strong>{html.escape(normalized)}</strong>
+                    <span style="margin-top:.55rem">Malaysia - E.164-style</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        elif number.strip():
+            st.warning(validation_message)
+        else:
+            st.info("Enter a number to preview normalization.")
+
+    st.divider()
+
+    _render_phone_step(
+        "02",
+        "Provider Configuration & Status",
+        "Configure providers, test connections, and view their current status.",
+    )
+
+    provider_cols = st.columns(3, gap="small")
+    with provider_cols[0]:
+        omkar_info = _render_live_provider_card(
+            provider_id="omkar_carrier_lookup",
+            title="Omkar Carrier Lookup",
+            purpose="Carrier and number metadata",
+            icon="solar:radio-bold-duotone",
+            enabled_key="phone_omkar_enabled",
+            session_key="phone_omkar_api_key",
+            test_number_key="phone_omkar_test_number",
+            diagnostic_key="phone_omkar_diagnostic",
+        )
+
+    with provider_cols[1]:
+        penipu_info = _render_live_provider_card(
+            provider_id="penipumy",
+            title="PenipuMY",
+            purpose="Malaysian scam reports and community reputation",
+            icon="solar:users-group-rounded-bold-duotone",
+            enabled_key="phone_penipumy_enabled",
+            session_key="phone_penipumy_api_key",
+            test_number_key="phone_penipumy_test_number",
+            diagnostic_key="phone_penipumy_diagnostic",
+        )
+
+    with provider_cols[2]:
+        local_info = _render_local_fallback_card(root)
+
+    _render_status_row(
+        bool(omkar_info["enabled"]),
+        dict(omkar_info["key_meta"]),
+        bool(penipu_info["enabled"]),
+        dict(penipu_info["key_meta"]),
+        local_info,
+    )
+
+    st.divider()
+
+    _render_phone_step(
+        "03",
+        "Start Investigation",
+        "Run enabled provider checks and prepare combined caller evidence.",
+    )
+
+    local_status = local_info["status"]
+    has_usable_provider = any(
+        [
+            bool(omkar_info["enabled"]) and bool(omkar_info["key_meta"].get("configured")),
+            bool(penipu_info["enabled"]) and bool(penipu_info["key_meta"].get("configured")),
+            bool(local_info["enabled"]) and bool(local_status.schema_valid) and int(local_status.record_count) > 0,
+        ]
+    )
+    disabled_reason = ""
+    if not ok:
+        disabled_reason = validation_message or "Enter a valid phone number first."
+    elif not has_usable_provider:
+        disabled_reason = "Enable at least one configured live provider or a valid local fallback dataset."
+
+    with st.container(key="phone_investigate_button"):
+        investigate = st.button(
+            "Investigate Phone Number",
+            use_container_width=True,
+            disabled=bool(disabled_reason),
+        )
+
+    if disabled_reason:
+        st.caption(disabled_reason)
+
+    if investigate:
+        with st.spinner("Collecting phone evidence..."):
+            st.session_state["phone_investigation_result"] = _build_phone_investigation(
+                root=root,
+                raw_number=number,
+                normalized_number=normalized,
+                claimed_identity=claimed_identity,
+                omkar_enabled=bool(omkar_info["enabled"]),
+                omkar_key=str(omkar_info["key_meta"].get("key", "")),
+                penipumy_enabled=bool(penipu_info["enabled"]),
+                penipumy_key=str(penipu_info["key_meta"].get("key", "")),
+                fallback_enabled=(
+                    bool(local_info["enabled"])
+                    and bool(local_status.schema_valid)
+                    and int(local_status.record_count) > 0
+                ),
+                auto_fallback=bool(local_info["auto_fallback"]),
+            )
+        render_analysis_ready("Phone investigation evidence collected")
+        st.caption("The unified investigation object is saved in session state for the next output phase.")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+    return
+
     provider = "omkar_carrier_lookup"
 
     render_detection_tool_intro(
