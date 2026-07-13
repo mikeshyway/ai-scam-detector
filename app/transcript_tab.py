@@ -1820,11 +1820,24 @@ def _render_voice_session_manager() -> None:
         sessions[selected_index]["title"] = cleaned_title
         st.session_state["transcript_voice_sessions"] = sessions
 
-    remove_col, information_col = st.columns(
-        [0.30, 0.70],
+    record_col, remove_col, information_col = st.columns(
+        [0.24, 0.24, 0.52],
         gap="small",
         vertical_alignment="center",
     )
+
+    with record_col:
+        if st.button(
+            "Record another",
+            key="transcript_record_another",
+            use_container_width=True,
+        ):
+            st.session_state["transcript_voice_mode"] = "record"
+            st.session_state["transcript_recorder_generation"] = (
+                int(st.session_state.get("transcript_recorder_generation", 0)) + 1
+            )
+            st.rerun()
+
     with remove_col:
         if st.button(
             "Remove recording",
@@ -2003,35 +2016,6 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
                                 st.audio(selected_audio_bytes, format="audio/wav")
                             else:
                                 st.info("The selected saved recording contains no playable audio.")
-
-                        if sessions:
-                            record_col, clear_col = st.columns(2)
-                            with record_col:
-                                if st.button(
-                                    "Record another",
-                                    use_container_width=True,
-                                    key="transcript_record_another",
-                                ):
-                                    st.session_state["transcript_voice_mode"] = "record"
-                                    st.session_state["transcript_recorder_generation"] = (
-                                        int(
-                                            st.session_state.get(
-                                                "transcript_recorder_generation",
-                                                0,
-                                            )
-                                        )
-                                        + 1
-                                    )
-                                    st.rerun()
-
-                            with clear_col:
-                                if st.button(
-                                    "Clear recordings",
-                                    use_container_width=True,
-                                    key="transcript_clear_recorder",
-                                ):
-                                    _clear_recorder_state()
-                                    st.rerun()
 
                         if recorded_audio is not None:
                             recorded_bytes = recorded_audio.getvalue()
