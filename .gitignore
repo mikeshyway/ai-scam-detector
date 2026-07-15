@@ -78,14 +78,12 @@ temp/
 
 # ----------------------------------------------------------
 # Processed datasets
-# Ignore everything by default, but allow runtime-only data
+# Allow processed data for deployment testing
 # ----------------------------------------------------------
-data/processed/*
 
-# Keep the runtime folder and its deployable contents
-!data/processed/runtime/
-!data/processed/runtime/**
-!data/processed/.gitkeep
+# Keep processed datasets in Git for now
+!data/processed/
+!data/processed/**
 
 # ----------------------------------------------------------
 # Trained ML models and preprocessing artifacts
