@@ -1,6 +1,14 @@
 # ==========================================================
-# Python
+# AI-FDS Deployment .gitignore
+# Purpose:
+# - Exclude raw/large training datasets and local-only files
+# - Keep trained ML artifacts available for Streamlit deployment
+# - Allow only runtime processed data that the live app actually needs
 # ==========================================================
+
+# ----------------------------------------------------------
+# Python cache / compiled files
+# ----------------------------------------------------------
 __pycache__/
 *.py[cod]
 *.pyo
@@ -11,113 +19,168 @@ __pycache__/
 .numba_cache/
 **/.numba_cache/
 
+# ----------------------------------------------------------
+# Virtual environments
+# ----------------------------------------------------------
 .venv/
 venv/
 env/
+ENV/
 
-.ipynb_checkpoints/
-.streamlit/secrets.toml
-
-# ==========================================================
-# IDE / OS
-# ==========================================================
+# ----------------------------------------------------------
+# IDE / operating system files
+# ----------------------------------------------------------
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# ==========================================================
-# Environment
-# ==========================================================
+# ----------------------------------------------------------
+# Environment variables and secrets
+# ----------------------------------------------------------
 .env
+.env.*
+!.env.example
+.streamlit/secrets.toml
 
-# ==========================================================
-# Raw datasets
-# ==========================================================
+# ----------------------------------------------------------
+# Notebook checkpoints
+# ----------------------------------------------------------
+.ipynb_checkpoints/
+
+# ----------------------------------------------------------
+# Raw datasets — never deploy or commit
+# ----------------------------------------------------------
 data/raw/
+datasets/
+dataset/
+raw_data/
+asvspoof_subset/
 
-# Keep placeholder files
+# Keep directory placeholders where needed
 !data/raw/**/.gitkeep
 
-# ==========================================================
-# Processed datasets
-# ==========================================================
-data/processed/
-
-!data/processed/**/.gitkeep
-
-# ==========================================================
-# Extracted features (future)
-# ==========================================================
+# ----------------------------------------------------------
+# Intermediate training data / extracted features
+# ----------------------------------------------------------
+data/interim/
 data/features/
-
-!data/features/**/.gitkeep
-
-# ==========================================================
-# Prediction cache (future)
-# ==========================================================
 data/predictions/
+data/cache/
+cache/
+tmp/
+temp/
 
+!data/interim/**/.gitkeep
+!data/features/**/.gitkeep
 !data/predictions/**/.gitkeep
 
-# ==========================================================
-# Trained models
-# ==========================================================
-models/
+# ----------------------------------------------------------
+# Processed datasets
+# Ignore everything by default, but allow runtime-only data
+# ----------------------------------------------------------
+data/processed/*
 
-!models/.gitkeep
+# Keep the runtime folder and its deployable contents
+!data/processed/runtime/
+!data/processed/runtime/**
+!data/processed/.gitkeep
 
-# ==========================================================
-# Generated reports
-# ==========================================================
+# ----------------------------------------------------------
+# Trained ML models and preprocessing artifacts
+# IMPORTANT: these are intentionally NOT ignored
+# Examples kept:
+#   models/*.pkl
+#   models/*.joblib
+#   models/*.pickle
+#   models/*.json
+#   models/*.bin
+#   models/*.onnx
+# ----------------------------------------------------------
+
+# ----------------------------------------------------------
+# Generated reports and training outputs
+# ----------------------------------------------------------
 reports/metrics/
+reports/training_runs/
+reports/figures/
+reports/cache/
 
 !reports/metrics/.gitkeep
 
-# ==========================================================
-# Audio / Dataset files
-# ==========================================================
+# ----------------------------------------------------------
+# Large media / audio datasets
+# Ignore globally, but allow app assets if explicitly placed
+# under static/ or app/assets/
+# ----------------------------------------------------------
 *.flac
 *.wav
 *.mp3
 *.ogg
 *.m4a
 
-# ==========================================================
-# Machine Learning artifacts
-# ==========================================================
-*.pkl
-*.pickle
-*.joblib
-*.npy
-*.npz
+!static/**/*.wav
+!static/**/*.mp3
+!static/**/*.ogg
+!static/**/*.m4a
+!app/assets/**/*.wav
+!app/assets/**/*.mp3
+!app/assets/**/*.ogg
+!app/assets/**/*.m4a
 
-# ==========================================================
-# Large datasets
-# ==========================================================
+# ----------------------------------------------------------
+# Large dataset formats
+# Ignore globally, but allow runtime processed data
+# ----------------------------------------------------------
 *.csv
 *.tsv
 *.parquet
 *.feather
 
-# ==========================================================
+!data/processed/runtime/**/*.csv
+!data/processed/runtime/**/*.tsv
+!data/processed/runtime/**/*.parquet
+!data/processed/runtime/**/*.feather
+
+# ----------------------------------------------------------
+# NumPy training artifacts / feature dumps
+# ----------------------------------------------------------
+*.npy
+*.npz
+
+# ----------------------------------------------------------
 # Local databases
-# ==========================================================
+# ----------------------------------------------------------
 *.db
 *.db-journal
 *.sqlite
 *.sqlite3
 
-# ==========================================================
+# ----------------------------------------------------------
 # Logs
-# ==========================================================
+# ----------------------------------------------------------
 *.log
 logs/
 
-# ==========================================================
-# Temporary files
-# ==========================================================
+# ----------------------------------------------------------
+# Temporary / backup files
+# ----------------------------------------------------------
 *.tmp
 *.temp
 *.bak
 *.swp
+*.swo
+*~
+
+# ----------------------------------------------------------
+# Build / packaging output
+# ----------------------------------------------------------
+build/
+dist/
+*.egg-info/
+
+# ----------------------------------------------------------
+# Streamlit local state
+# ----------------------------------------------------------
+.streamlit/cache/
