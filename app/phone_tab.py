@@ -1177,6 +1177,39 @@ def _init_phone_input_state() -> None:
             st.session_state[key] = value
 
 
+def _phone_widget_key(session_key: str, suffix: str) -> str:
+    return f"_{session_key}_{suffix}"
+
+
+def _hydrate_phone_widget_from_session(widget_key: str, session_key: str) -> None:
+    session_value = str(st.session_state.get(session_key, "") or "")
+    if session_value and not st.session_state.get(widget_key):
+        st.session_state[widget_key] = session_value
+
+
+def _sync_phone_provider_enabled(
+    widget_key: str,
+    enabled_key: str,
+    session_key: str,
+    api_widget_key: str,
+    diagnostic_key: str,
+) -> None:
+    enabled = bool(st.session_state.get(widget_key, True))
+    st.session_state[enabled_key] = enabled
+    if not enabled:
+        st.session_state[session_key] = ""
+        st.session_state[api_widget_key] = ""
+        st.session_state.pop(diagnostic_key, None)
+
+
+def _sync_phone_session_api_key(widget_key: str, session_key: str, diagnostic_key: str) -> None:
+    value = str(st.session_state.get(widget_key, "") or "").strip()
+    previous = str(st.session_state.get(session_key, "") or "").strip()
+    st.session_state[session_key] = value
+    if value != previous:
+        st.session_state.pop(diagnostic_key, None)
+
+
 def _phone_provider_key_config(provider_id: str) -> dict[str, object]:
     if provider_id == "penipumy":
         return {
@@ -1284,14 +1317,40 @@ def _render_live_provider_card(
             """,
             unsafe_allow_html=True,
         )
-        enabled = st.toggle("Enable provider", key=enabled_key)
-        session_value = st.text_input(
-            "API key",
+        enabled_widget_key = _phone_widget_key(enabled_key, "toggle")
+        if enabled_widget_key not in st.session_state:
+            st.session_state[enabled_widget_key] = bool(st.session_state.get(enabled_key, True))
+
+        api_widget_key = _phone_widget_key(session_key, "input")
+
+        enabled = st.toggle(
+            "Enable provider",
+            key=enabled_widget_key,
+            on_change=_sync_phone_provider_enabled,
+            args=(enabled_widget_key, enabled_key, session_key, api_widget_key, diagnostic_key),
+        )
+        st.session_state[enabled_key] = bool(enabled)
+
+        if not enabled:
+            st.session_state[session_key] = ""
+            st.session_state[api_widget_key] = ""
+            st.session_state.pop(diagnostic_key, None)
+        else:
+            _hydrate_phone_widget_from_session(api_widget_key, session_key)
+
+        api_widget_value = st.text_input(
+            f"{title} API key",
             type="password",
-            key=session_key,
+            key=api_widget_key,
             disabled=not enabled,
             placeholder=f"Paste {title} API key for this session",
+            on_change=_sync_phone_session_api_key,
+            args=(api_widget_key, session_key, diagnostic_key),
         )
+        session_value = str(api_widget_value or "").strip()
+        if enabled:
+            st.session_state[session_key] = session_value
+
         key_meta = _resolve_phone_provider_key(provider_id, session_value)
         st.caption(f"Key source: {key_meta.get('source', 'Not configured')}")
 

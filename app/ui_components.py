@@ -1801,7 +1801,9 @@ def _group_status_item(
 
 
 def _phone_api_status_item(name: str, provider_id: str) -> dict[str, str]:
-    enabled = bool(st.session_state.get(f"phone_{provider_id}_enabled", True))
+    enabled_key = f"phone_{provider_id}_enabled"
+    enabled_widget_key = f"_{enabled_key}_toggle"
+    enabled = bool(st.session_state.get(enabled_key, st.session_state.get(enabled_widget_key, True)))
     configured = bool(_configured_phone_provider_key(provider_id))
     if not enabled:
         status = "inactive"
@@ -1829,6 +1831,8 @@ def _configured_phone_provider_key(provider_id: str) -> str:
         secret_sections = ("omkar", "carrier_lookup")
 
     session_value = str(st.session_state.get(session_key, "") or "").strip()
+    if not session_value:
+        session_value = str(st.session_state.get(f"_{session_key}_input", "") or "").strip()
     if session_value:
         return session_value
 
