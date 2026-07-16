@@ -981,7 +981,8 @@ def inject_css() -> None:
             border-radius:15px;
             background:linear-gradient(145deg, rgba(22,32,51,.96), rgba(14,24,41,.96));
             box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
-            transition:border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+            transform:translateY(-1px);
+            transition:border-color 180ms ease, box-shadow 180ms ease;
         }
 
         .aifds-sidebar-nav-visual.active {
@@ -1088,7 +1089,6 @@ def inject_css() -> None:
         }
 
         [class*="st-key-sidebar_nav_card_"]:hover .aifds-sidebar-nav-visual {
-            transform:translateY(-1px);
             border-color:rgba(96,165,250,.52);
             box-shadow:
                 0 12px 28px rgba(0,0,0,.20),
