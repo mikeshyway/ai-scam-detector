@@ -241,6 +241,8 @@ def main() -> None:
 
         metrics = evaluate_model(name, model, X_test_vec, y_test)
         metrics["training_seconds"] = float(elapsed)
+        metrics["training_time_seconds"] = float(elapsed)
+        metrics["training_time"] = float(elapsed)
         all_metrics[name] = metrics
 
         print(f"Accuracy : {metrics['accuracy']:.4f}")

@@ -18,55 +18,112 @@ from typing import Iterable
 from src.utils.time_utils import now_for_app
 
 
-DB_PATH = Path(__file__).resolve().parents[1] / "data" / "session_history.db"
+ROOT = Path(__file__).resolve().parents[2]
+DB_PATH = ROOT / "data" / "session_history.db"
+LEGACY_DB_PATH = ROOT / "src" / "data" / "session_history.db"
 DEFAULT_SESSION_ID = "local-capstone-demo"
+_LEGACY_MIGRATED = False
 
 
-def _connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH, check_same_thread=False)
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS scan_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    scanned_at TEXT NOT NULL,
+    scan_type TEXT NOT NULL,
+    source_name TEXT,
+    prediction TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    model_name TEXT,
+    preview TEXT,
+    flags TEXT,
+    explanation TEXT,
+    raw_input TEXT,
+    report_note TEXT,
+    source_fingerprint TEXT UNIQUE NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_scan_history_session_time
+    ON scan_history (session_id, scanned_at DESC);
+
+CREATE TABLE IF NOT EXISTS report_exports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    exported_at TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    format TEXT NOT NULL,
+    scan_ids TEXT NOT NULL,
+    filename TEXT NOT NULL
+);
+"""
+
+
+def _connect(path: Path = DB_PATH) -> sqlite3.Connection:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path, check_same_thread=False)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA foreign_keys=ON")
     return connection
 
 
+def _ensure_schema(connection: sqlite3.Connection) -> None:
+    connection.executescript(SCHEMA_SQL)
+
+
+def _migrate_legacy_history() -> None:
+    global _LEGACY_MIGRATED
+    if _LEGACY_MIGRATED:
+        return
+    _LEGACY_MIGRATED = True
+
+    if not LEGACY_DB_PATH.exists() or LEGACY_DB_PATH.resolve() == DB_PATH.resolve():
+        return
+
+    try:
+        with sqlite3.connect(LEGACY_DB_PATH) as legacy, _connect() as target:
+            legacy.row_factory = sqlite3.Row
+            tables = {
+                row["name"]
+                for row in legacy.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            if "scan_history" not in tables:
+                return
+
+            _ensure_schema(target)
+            columns = [
+                "session_id",
+                "scanned_at",
+                "scan_type",
+                "source_name",
+                "prediction",
+                "confidence",
+                "model_name",
+                "preview",
+                "flags",
+                "explanation",
+                "raw_input",
+                "report_note",
+                "source_fingerprint",
+            ]
+            column_sql = ", ".join(columns)
+            placeholders = ", ".join("?" for _ in columns)
+            for row in legacy.execute(f"SELECT {column_sql} FROM scan_history"):
+                target.execute(
+                    f"INSERT OR IGNORE INTO scan_history ({column_sql}) VALUES ({placeholders})",
+                    [row[column] for column in columns],
+                )
+    except sqlite3.Error:
+        return
+
+
 def init_db() -> None:
     """Create the report history tables if they do not already exist."""
 
     with _connect() as connection:
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS scan_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                scanned_at TEXT NOT NULL,
-                scan_type TEXT NOT NULL,
-                source_name TEXT,
-                prediction TEXT NOT NULL,
-                confidence REAL NOT NULL,
-                model_name TEXT,
-                preview TEXT,
-                flags TEXT,
-                explanation TEXT,
-                raw_input TEXT,
-                report_note TEXT,
-                source_fingerprint TEXT UNIQUE NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_scan_history_session_time
-                ON scan_history (session_id, scanned_at DESC);
-
-            CREATE TABLE IF NOT EXISTS report_exports (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                exported_at TEXT NOT NULL,
-                session_id TEXT NOT NULL,
-                format TEXT NOT NULL,
-                scan_ids TEXT NOT NULL,
-                filename TEXT NOT NULL
-            );
-            """
-        )
+        _ensure_schema(connection)
+    _migrate_legacy_history()
 
 
 def _string(value: object, fallback: str = "") -> str:
@@ -267,6 +324,33 @@ def sync_session_history(history: list[dict[str, object]], session_id: str = DEF
         if before is None:
             inserted += 1
     return inserted
+
+
+def record_history_item(
+    history: list[dict[str, object]],
+    item: dict[str, object],
+    session_id: str = DEFAULT_SESSION_ID,
+) -> int:
+    """Persist one scan result immediately and mirror it in Streamlit session history."""
+
+    row = normalise_history_item(item, session_id=session_id)
+    item["source_fingerprint"] = row["source_fingerprint"]
+    history.insert(0, item)
+    return insert_scan(
+        session_id=str(row["session_id"]),
+        scanned_at=str(row["scanned_at"]),
+        scan_type=str(row["scan_type"]),
+        source_name=str(row["source_name"]),
+        prediction=str(row["prediction"]),
+        confidence=float(row["confidence"]),
+        model_name=str(row["model_name"]),
+        preview=str(row["preview"]),
+        flags=list(row["flags"]),
+        explanation=str(row["explanation"]),
+        raw_input=str(row["raw_input"]),
+        report_note=str(row["report_note"]),
+        source_fingerprint=str(row["source_fingerprint"]),
+    )
 
 
 def query_by_fingerprint(source_fingerprint: str) -> dict[str, object] | None:

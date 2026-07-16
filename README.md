@@ -147,11 +147,12 @@ is [docs/omkar_api_setup_guide.html](docs/omkar_api_setup_guide.html).
 - Trained models: `models/`
 - Evaluation JSON: `reports/metrics/`
 - Local diagnostics: `logs/`
-- Report/history database: generated locally and ignored by Git
+- Report/history database: `data/session_history.db` is deployable when saved
+  evidence should be available in the AI Report Generator
 
-Large datasets, model binaries, local databases, logs, caches, and secrets are
-ignored. Keep only the artifacts required for the final offline demonstration
-when packaging the capstone submission.
+Raw datasets, transient SQLite sidecar files, logs, caches, and secrets are
+ignored. Keep only the artifacts required for the final offline or hosted
+demonstration when packaging the capstone submission.
 
 ## Detection Scope and Limitations
 

@@ -35,6 +35,7 @@ from src.phone.providers import (
     test_penipumy_connection,
 )
 from src.phone.providers.models import diagnostic_rows
+from src.reporting.history_db import record_history_item
 
 
 def _secret_value(*keys: str) -> str:
@@ -894,8 +895,8 @@ def _record_phone_result(
         if isinstance(row, dict) and row.get("Indicator")
     )
 
-    history.insert(
-        0,
+    record_history_item(
+        history,
         {
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "type": "Phone",
@@ -906,6 +907,7 @@ def _record_phone_result(
             "preview": phone_number,
             "flags": flags,
             "explanation": explanation.get("summary", ""),
+            "raw_input": json.dumps(result, ensure_ascii=True, default=str),
             "is_demo": bool(result.get("is_demo") or dict(result.get("record", {})).get("is_demo")),
         },
     )
@@ -2023,6 +2025,62 @@ def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _record_phone_investigation(
+    history: list[dict[str, object]],
+    investigation: dict[str, Any],
+) -> None:
+    output_view = build_caller_output_view(investigation)
+    assessment = dict(investigation.get("assessment") or _build_phone_assessment(investigation))
+    investigation["assessment"] = assessment
+
+    input_data = dict(output_view.get("input", {}))
+    profile = dict(output_view.get("caller_profile", {}))
+    reputation = dict(output_view.get("reputation", {}))
+    number = str(
+        input_data.get("normalized_number")
+        or input_data.get("raw_number")
+        or profile.get("phone_number")
+        or "Unknown phone number"
+    )
+    claimed_identity = str(input_data.get("claimed_identity") or "").strip()
+    preview = number if not claimed_identity else f"{number} | Claimed identity: {claimed_identity}"
+    flags = [
+        str(item.get("indicator"))
+        for item in assessment.get("contributions", [])
+        if isinstance(item, dict) and item.get("indicator")
+    ]
+    confidence = assessment.get("score")
+    confidence_value = float(confidence) if isinstance(confidence, (int, float)) else 0.0
+    coverage = dict(output_view.get("coverage", {}))
+    source_name = (
+        f"Omkar: {coverage.get('omkar', 'unavailable')}; "
+        f"PenipuMY: {coverage.get('penipumy', 'unavailable')}"
+    )
+    total_reports = (
+        _safe_int(reputation.get("police_report_count"))
+        + _safe_int(reputation.get("verified_report_count"))
+        + _safe_int(reputation.get("spoofing_report_count"))
+    )
+    if total_reports:
+        flags.append(f"{total_reports} total report indicator(s)")
+
+    record_history_item(
+        history,
+        {
+            "time": str(investigation.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            "type": "Phone",
+            "prediction": assessment.get("priority", "Reputation unknown"),
+            "confidence": confidence_value,
+            "model": "Phone provider reputation rules",
+            "source_name": source_name,
+            "preview": preview,
+            "flags": flags,
+            "explanation": assessment.get("interpretation", ""),
+            "raw_input": json.dumps(investigation, ensure_ascii=True, default=str),
+        },
+    )
+
+
 def _concern_meter(score: int | None, priority: str) -> go.Figure:
     value = 0 if score is None else score
     title = "Evidence unavailable" if score is None else f"{score} / 100"
@@ -2601,7 +2659,7 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
 
     if investigate:
         with st.spinner("Collecting phone evidence..."):
-            st.session_state["phone_investigation_result"] = _build_phone_investigation(
+            investigation = _build_phone_investigation(
                 root=root,
                 raw_number=number,
                 normalized_number=normalized,
@@ -2611,6 +2669,9 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
                 penipumy_enabled=bool(penipu_info["enabled"]),
                 penipumy_key=str(penipu_info["key_meta"].get("key", "")),
             )
+            investigation["assessment"] = _build_phone_assessment(investigation)
+            st.session_state["phone_investigation_result"] = investigation
+            _record_phone_investigation(history, investigation)
         render_analysis_ready("Phone investigation evidence collected")
         st.caption("The unified investigation object is saved in session state for the next output phase.")
 

@@ -214,6 +214,7 @@ def main():
 
         metrics = evaluate_model(name, model, X_test_vec, y_test)
         metrics["training_time_seconds"] = training_time
+        metrics["training_time"] = training_time
         all_metrics[name] = metrics
 
         print(f"Accuracy : {metrics['accuracy']:.4f}")

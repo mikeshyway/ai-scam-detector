@@ -100,12 +100,14 @@ temp/
 # ----------------------------------------------------------
 # Generated reports and training outputs
 # ----------------------------------------------------------
-reports/metrics/
+reports/metrics/*
 reports/training_runs/
 reports/figures/
 reports/cache/
 
+!reports/metrics/
 !reports/metrics/.gitkeep
+!reports/metrics/*.json
 
 # ----------------------------------------------------------
 # Large media / audio datasets
@@ -141,6 +143,17 @@ reports/cache/
 !data/processed/runtime/**/*.parquet
 !data/processed/runtime/**/*.feather
 
+# Runtime processed artifacts are intentionally deployable.
+!data/processed/**/*.csv
+!data/processed/**/*.tsv
+!data/processed/**/*.parquet
+!data/processed/**/*.feather
+!data/processed/**/*.flac
+!data/processed/**/*.wav
+!data/processed/**/*.mp3
+!data/processed/**/*.ogg
+!data/processed/**/*.m4a
+
 # ----------------------------------------------------------
 # NumPy training artifacts / feature dumps
 # ----------------------------------------------------------
@@ -152,8 +165,13 @@ reports/cache/
 # ----------------------------------------------------------
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
+
+# Deployable report evidence store used by AI Report Generator.
+!data/session_history.db
 
 # ----------------------------------------------------------
 # Logs

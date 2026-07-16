@@ -235,6 +235,8 @@ def main() -> None:
         },
         "feature_extraction_seconds": float(feature_seconds),
         "training_seconds": float(training_seconds),
+        "training_time_seconds": float(training_seconds),
+        "training_time": float(training_seconds),
         "model": "Random Forest on audio behavior metadata",
         "metrics": metrics,
         "dev_paths": dev_paths,

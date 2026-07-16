@@ -34,6 +34,7 @@ from src.text.explainability import (
     highlighted_html,
     top_model_terms,
 )
+from src.reporting.history_db import record_history_item
 from src.audio.live_audio_analysis import (
     BEHAVIORAL_FEATURE_NAMES,
     analyse_live_chunk,
@@ -1014,8 +1015,8 @@ def _predict(root: Path, text: str) -> tuple[dict[str, object], object | None]:
 
 
 def _record(history: list[dict[str, object]], result: dict[str, object], text: str) -> None:
-    history.insert(
-        0,
+    record_history_item(
+        history,
         {
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "type": "Transcript",
@@ -1023,6 +1024,7 @@ def _record(history: list[dict[str, object]], result: dict[str, object], text: s
             "confidence": round(float(result["confidence"]) * 100, 2),
             "model": result["model_name"],
             "preview": text.replace("\n", " ")[:160],
+            "raw_input": text,
         },
     )
 

@@ -33,6 +33,7 @@ from src.text.explainability import (
     type_intention,
     top_model_terms,
 )
+from src.reporting.history_db import record_history_item
 from src.text.text_classifier import load_text_artifacts
 
 
@@ -1122,9 +1123,7 @@ def _metrics_dataframe(root: Path) -> pd.DataFrame:
                 "ROC-AUC": round(values.get("roc_auc", 0) * 100, 2)
                 if "roc_auc" in values
                 else None,
-                "Training Time (s)": round(values.get("training_time", 0), 3)
-                if "training_time" in values
-                else None,
+                "Training Time (s)": _training_time_value(values),
                 "Prediction Time (ms)": round(values.get("prediction_time_ms", 0), 4)
                 if "prediction_time_ms" in values
                 else None,
@@ -1196,6 +1195,13 @@ def _metrics_model_name(model_name: str, metrics: dict[str, object]) -> str:
     return model_name
 
 
+def _training_time_value(values: dict[str, object]) -> float | None:
+    for key in ("training_time", "training_time_seconds", "training_seconds"):
+        if key in values and values[key] is not None:
+            return round(float(values[key]), 3)
+    return None
+
+
 def _is_suspicious_prediction(prediction: object) -> bool:
     text = str(prediction).casefold()
     return any(term in text for term in ("suspicious", "phishing", "scam"))
@@ -1232,9 +1238,7 @@ def _comparison_with_metrics(
                 "ROC-AUC": round(float(values.get("roc_auc", 0)) * 100, 2)
                 if values and "roc_auc" in values
                 else None,
-                "Training Time (s)": round(float(values.get("training_time", 0)), 3)
-                if values and "training_time" in values
-                else None,
+                "Training Time (s)": _training_time_value(values) if values else None,
                 "Prediction Time (ms)": round(float(values.get("prediction_time_ms", 0)), 4)
                 if values and "prediction_time_ms" in values
                 else None,
@@ -1688,8 +1692,8 @@ def _explainability_rows(
 
 
 def _record(history: list[dict[str, object]], result: dict[str, object], text: str) -> None:
-    history.insert(
-        0,
+    record_history_item(
+        history,
         {
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "type": "Email",
@@ -1697,6 +1701,7 @@ def _record(history: list[dict[str, object]], result: dict[str, object], text: s
             "confidence": round(float(result["confidence"]) * 100, 2),
             "model": result["model_name"],
             "preview": text.replace("\n", " ")[:160],
+            "raw_input": text,
         },
     )
 

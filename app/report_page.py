@@ -109,7 +109,7 @@ def _remove_deleted_from_session(history: list[dict[str, object]], deleted_rows:
     history[:] = [
         item
         for item in history
-        if history_fingerprint(item) not in deleted_fingerprints
+        if str(item.get("source_fingerprint") or history_fingerprint(item)) not in deleted_fingerprints
     ]
 
 

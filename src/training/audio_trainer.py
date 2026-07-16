@@ -331,6 +331,8 @@ def main() -> None:
         },
         "feature_extraction_seconds": float(feature_seconds),
         "training_seconds": float(training_seconds),
+        "training_time_seconds": float(training_seconds),
+        "training_time": float(training_seconds),
         "model": "Calibrated SVM with MFCC/statistical audio features",
         "calibration": {
             "method": "sigmoid",
