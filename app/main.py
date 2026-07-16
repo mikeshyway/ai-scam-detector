@@ -20,11 +20,11 @@ except Exception:
 
 from app.ui_components import (
     APP_TITLE,
-    clear_all_caches,
     inject_css,
     render_global_header,
     render_kpi_row,
     render_sidebar_brand,
+    render_sidebar_navigation,
     render_sidebar_status,
 )
 
@@ -45,12 +45,6 @@ PAGES = {
     "Detection Center": _email,
     "AI Report Generator": _report,
 }
-
-PAGE_ICONS = {
-    "Detection Center": "DET",
-    "AI Report Generator": "REP",
-}
-
 
 def _init_state() -> None:
     if "history" not in st.session_state:
@@ -77,22 +71,12 @@ def main() -> None:
 
     with st.sidebar:
         render_sidebar_brand()
-        for page_name in PAGES:
-            is_active = st.session_state.active_page == page_name
-            if st.button(
-                f"{PAGE_ICONS.get(page_name, '')} {page_name}",
-                key=f"nav_{page_name}",
-                use_container_width=True,
-                type="primary" if is_active else "secondary",
-            ):
-                _select_page(page_name)
-                st.rerun()
-        st.divider()
-        render_sidebar_status(ROOT)
-        if st.button("Clear cached data/resources", use_container_width=True):
-            clear_all_caches()
-            st.rerun()
-        st.caption("Refresh cached resources after replacing datasets or trained artifacts.")
+        render_sidebar_navigation(
+            active_page=st.session_state.active_page,
+            on_select=_select_page,
+        )
+        with st.container(key="sidebar_status_dock"):
+            render_sidebar_status(ROOT)
 
     selected_page = st.session_state.active_page
     render_global_header(ROOT, selected_page)

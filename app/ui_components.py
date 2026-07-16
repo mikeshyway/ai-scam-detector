@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import html
 import os
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -125,19 +127,6 @@ def inject_css() -> None:
         h2{font-size:clamp(1.3rem,2.5vw,1.7rem);font-weight:750;letter-spacing:-.025em;color:var(--text-primary);}
         h3{font-size:1.05rem;font-weight:650;color:var(--text-primary);}
         p,label,[data-testid="stCaptionContainer"]{color:var(--text-secondary);}
-        [data-testid="stSidebar"]{background:#101827!important;border-right:1px solid var(--border-subtle)!important;min-width:72px!important;}
-        [data-testid="stSidebar"]>div:first-child{padding-top:.8rem;}
-        .sidebar-brand{display:flex;align-items:center;gap:10px;padding:1rem .85rem .75rem;border-bottom:1px solid var(--border-subtle);margin-bottom:.6rem;}
-        .brand-mark{width:38px;height:38px;flex-shrink:0;background:var(--grad-primary);clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:.85rem;color:#fff;box-shadow:var(--glow-cyan);}
-        .brand-name{font-weight:800;font-size:.94rem;line-height:1.1;color:var(--text-primary);}
-        .brand-caption{font-size:.72rem;color:var(--text-muted);margin-top:2px;}
-        [data-testid="stSidebar"] .stButton>button{display:flex;align-items:center;gap:10px;min-height:2.55rem;padding:.58rem .8rem;border-radius:var(--radius-md);margin:2px 0;cursor:pointer;font-size:.86rem;font-weight:650;color:var(--text-secondary);border:1px solid transparent;background:transparent;box-shadow:none;transition:all 180ms var(--ease-out);justify-content:flex-start;}
-        [data-testid="stSidebar"] .stButton>button:hover{background:var(--bg-raised);color:var(--text-primary);border-color:var(--border-subtle);}
-        [data-testid="stSidebar"] .stButton>button[kind="primary"]{background:linear-gradient(135deg,rgba(37,99,235,.20),rgba(8,145,178,.12));color:#DDEBFF;border-color:var(--border-accent);box-shadow:var(--glow-cyan);}
-        .system-status{margin:1rem 8px 0;padding:.75rem;background:var(--bg-inset);border-radius:var(--radius-md);border:1px solid var(--border-subtle);}
-        .system-status-title{font-size:.72rem;font-weight:750;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:.5rem;}
-        .system-status-row{display:flex;justify-content:space-between;gap:.75rem;font-size:.76rem;padding:3px 0;color:var(--text-secondary);}
-        .system-status-state.ready{color:#34D399}.system-status-state.missing{color:#F87171}.system-status-state.demo{color:#FBBF24}
         .app-header{background:radial-gradient(circle at 18% 45%,rgba(37,99,235,.14),transparent 46%),radial-gradient(circle at 88% 20%,rgba(8,145,178,.12),transparent 42%),linear-gradient(135deg,rgba(17,24,39,.98),rgba(12,35,49,.92));border:1px solid rgba(8,145,178,.36);border-radius:var(--radius-xl);padding:1.7rem 2rem;margin-bottom:1.25rem;position:relative;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.24),var(--glow-cyan);}
         .app-header:before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--grad-primary);opacity:.75;}
         .app-header .eyebrow,.section-header .eyebrow{font-size:.72rem;font-weight:750;letter-spacing:.12em;text-transform:uppercase;background:var(--grad-primary);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
@@ -856,6 +845,479 @@ def inject_css() -> None:
             .hero-banner p {margin-top:20px;}
             .hero-visual {display:none;}
         }
+        /* =========================================================
+           AI-FDS SIDEBAR REDESIGN
+           ========================================================= */
+
+        [data-testid="stSidebar"] {
+            width:310px!important;
+            min-width:300px!important;
+            max-width:320px!important;
+            height:100vh!important;
+            background:
+                radial-gradient(circle at 12% 4%, rgba(37,99,235,.10), transparent 15rem),
+                linear-gradient(180deg, #0E1829 0%, #0B1424 100%)!important;
+            border-right:1px solid rgba(148,163,184,.14)!important;
+        }
+
+        [data-testid="stSidebar"] > div:first-child {
+            width:100%!important;
+            height:100vh!important;
+            padding:.9rem .95rem 1rem!important;
+            box-sizing:border-box!important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+            overflow-x:hidden!important;
+            overflow-y:hidden!important;
+            height:100%!important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+            min-height:calc(100vh - 2rem)!important;
+            display:flex!important;
+            flex-direction:column!important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+            gap:.35rem;
+        }
+
+        [data-testid="stSidebarCollapseButton"],
+        [data-testid="stSidebar"] button[title*="sidebar" i] {
+            border-radius:8px!important;
+            color:#DCE5F2!important;
+        }
+
+        .aifds-sidebar-brand {
+            display:flex;
+            align-items:center;
+            gap:.82rem;
+            padding:.45rem .35rem .9rem;
+            margin-bottom:.75rem;
+            border-bottom:1px solid rgba(148,163,184,.13);
+        }
+
+        .aifds-sidebar-logo {
+            position:relative;
+            flex:0 0 48px;
+            width:48px;
+            height:54px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+            background:linear-gradient(145deg, #2563EB 0%, #0891B2 55%, #10B981 100%);
+            box-shadow:0 12px 28px rgba(37,99,235,.24);
+        }
+
+        .aifds-sidebar-logo .aifds-sidebar-icon-mask {
+            position:relative;
+            width:32px;
+            height:32px;
+            color:#FFFFFF;
+            opacity:.96;
+            filter:drop-shadow(0 4px 10px rgba(255,255,255,.22));
+        }
+
+        .aifds-sidebar-brand-copy {
+            min-width:0;
+        }
+
+        .aifds-sidebar-brand-title {
+            color:#F8FAFC;
+            font-size:1.02rem;
+            font-weight:850;
+            line-height:1.15;
+            letter-spacing:0;
+        }
+
+        .aifds-sidebar-brand-subtitle {
+            margin-top:.22rem;
+            color:#77849A;
+            font-size:.66rem;
+            font-weight:550;
+            line-height:1.3;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+        }
+
+        .st-key-sidebar_navigation {
+            margin-bottom:.65rem;
+            flex:0 0 auto;
+        }
+
+        [class*="st-key-sidebar_nav_card_"] {
+            position:relative;
+            height:78px;
+            min-height:78px;
+            margin-bottom:.58rem!important;
+            overflow:hidden;
+        }
+
+        [class*="st-key-sidebar_nav_card_"][data-testid="stVerticalBlock"] {
+            gap:0!important;
+        }
+
+        .aifds-sidebar-nav-visual {
+            position:relative;
+            z-index:2;
+            pointer-events:none;
+            width:100%;
+            height:78px;
+            min-height:78px;
+            display:grid;
+            grid-template-columns:42px minmax(0,1fr) 18px;
+            align-items:center;
+            gap:.68rem;
+            box-sizing:border-box;
+            padding:.6rem .72rem;
+            border:1px solid rgba(148,163,184,.18);
+            border-radius:15px;
+            background:linear-gradient(145deg, rgba(22,32,51,.96), rgba(14,24,41,.96));
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
+            transition:border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+        }
+
+        .aifds-sidebar-nav-visual.active {
+            border-color:#2563EB;
+            background:
+                radial-gradient(circle at 18% 50%, rgba(37,99,235,.24), transparent 9rem),
+                linear-gradient(145deg, rgba(20,38,72,.98), rgba(14,26,48,.98));
+            box-shadow:
+                0 0 0 1px rgba(37,99,235,.18),
+                0 12px 26px rgba(37,99,235,.16),
+                inset 0 1px 0 rgba(255,255,255,.04);
+        }
+
+        .aifds-sidebar-nav-icon {
+            width:40px;
+            height:40px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            border-radius:12px;
+            color:#FFFFFF;
+        }
+
+        .aifds-sidebar-nav-visual.blue .aifds-sidebar-nav-icon {
+            background:linear-gradient(145deg, #2563EB, #1D4ED8);
+            box-shadow:0 9px 22px rgba(37,99,235,.24);
+        }
+
+        .aifds-sidebar-nav-visual.green .aifds-sidebar-nav-icon {
+            background:linear-gradient(145deg, #10B981, #059669);
+            box-shadow:0 9px 22px rgba(16,185,129,.20);
+        }
+
+        .aifds-sidebar-icon-mask {
+            display:inline-block;
+            width:1em;
+            height:1em;
+            flex:0 0 auto;
+            background:currentColor;
+            -webkit-mask:var(--sidebar-icon) center / contain no-repeat;
+            mask:var(--sidebar-icon) center / contain no-repeat;
+        }
+
+        .aifds-sidebar-nav-icon .aifds-sidebar-icon-mask {
+            width:23px;
+            height:23px;
+        }
+
+        .aifds-sidebar-nav-copy {
+            min-width:0;
+        }
+
+        .aifds-sidebar-nav-title {
+            color:#F8FAFC;
+            font-size:.8rem;
+            font-weight:800;
+            line-height:1.25;
+            letter-spacing:0;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+        }
+
+        .aifds-sidebar-nav-description {
+            margin-top:.23rem;
+            color:#94A3B8;
+            font-size:.59rem;
+            line-height:1.3;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+        }
+
+        .aifds-sidebar-nav-arrow {
+            color:#94A3B8;
+            width:19px;
+            height:19px;
+        }
+
+        [class*="st-key-sidebar_nav_card_"] [data-testid="stElementContainer"]:has([data-testid="stButton"]) {
+            position:absolute!important;
+            inset:0!important;
+            z-index:5!important;
+            margin:0!important;
+            height:78px!important;
+        }
+
+        [class*="st-key-sidebar_nav_card_"] .stButton,
+        [class*="st-key-sidebar_nav_card_"] [data-testid="stButton"] {
+            width:100%!important;
+            height:100%!important;
+            margin:0!important;
+        }
+
+        [class*="st-key-sidebar_nav_card_"] .stButton > button,
+        [class*="st-key-sidebar_nav_card_"] [data-testid="stButton"] > button {
+            width:100%!important;
+            height:78px!important;
+            min-height:78px!important;
+            margin:0!important;
+            padding:0!important;
+            opacity:0!important;
+            cursor:pointer!important;
+        }
+
+        [class*="st-key-sidebar_nav_card_"]:hover .aifds-sidebar-nav-visual {
+            transform:translateY(-1px);
+            border-color:rgba(96,165,250,.52);
+            box-shadow:
+                0 12px 28px rgba(0,0,0,.20),
+                inset 0 1px 0 rgba(255,255,255,.04);
+        }
+
+        .st-key-sidebar_status_dock {
+            margin-top:auto!important;
+            padding-top:.5rem;
+            flex:0 0 auto;
+        }
+
+        .aifds-sidebar-status-panel {
+            padding:.72rem .72rem .66rem;
+            border:1px solid rgba(148,163,184,.14);
+            border-radius:14px;
+            background:linear-gradient(160deg, rgba(10,19,34,.96), rgba(8,16,29,.96));
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,.025),
+                0 12px 28px rgba(0,0,0,.16);
+        }
+
+        .aifds-sidebar-status-heading {
+            display:flex;
+            align-items:center;
+            gap:.48rem;
+            padding:.05rem .1rem .52rem;
+            color:#94A3B8;
+            font-size:.64rem;
+            font-weight:850;
+            letter-spacing:0;
+        }
+
+        .aifds-sidebar-status-live-dot {
+            width:7px;
+            height:7px;
+            border-radius:999px;
+            background:#10B981;
+            box-shadow:0 0 12px rgba(16,185,129,.55);
+        }
+
+        .aifds-sidebar-status-divider {
+            height:1px;
+            margin:0 0 .3rem;
+            background:rgba(148,163,184,.12);
+        }
+
+        .aifds-sidebar-model-list {
+            display:flex;
+            flex-direction:column;
+            gap:.18rem;
+        }
+
+        .aifds-sidebar-model-group {
+            border-bottom:1px solid rgba(148,163,184,.08);
+        }
+
+        .aifds-sidebar-model-group:last-child {
+            border-bottom:none;
+        }
+
+        .aifds-sidebar-model-summary {
+            list-style:none;
+            display:grid;
+            grid-template-columns:24px minmax(0,1fr) auto 12px;
+            align-items:center;
+            gap:.42rem;
+            min-height:34px;
+            padding:.26rem .04rem;
+            cursor:pointer;
+        }
+
+        .aifds-sidebar-model-summary::-webkit-details-marker {
+            display:none;
+        }
+
+        .aifds-sidebar-model-summary::after {
+            content:"";
+            width:9px;
+            height:9px;
+            border-right:1.5px solid #94A3B8;
+            border-bottom:1.5px solid #94A3B8;
+            transform:rotate(45deg) translateY(-2px);
+            transition:transform 160ms ease;
+        }
+
+        .aifds-sidebar-model-group[open] .aifds-sidebar-model-summary::after {
+            transform:rotate(225deg) translateY(-2px);
+        }
+
+        .aifds-sidebar-model-icon {
+            width:24px;
+            height:24px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            border-radius:7px;
+            color:#DCEBFF;
+            background:rgba(37,99,235,.15);
+            border:1px solid rgba(148,163,184,.10);
+        }
+
+        .aifds-sidebar-model-icon .aifds-sidebar-icon-mask {
+            width:15px;
+            height:15px;
+        }
+
+        .aifds-sidebar-model-icon.blue {
+            color:#60A5FA;
+            background:rgba(37,99,235,.17);
+        }
+
+        .aifds-sidebar-model-icon.purple {
+            color:#A78BFA;
+            background:rgba(139,92,246,.17);
+        }
+
+        .aifds-sidebar-model-icon.pink {
+            color:#EC4899;
+            background:rgba(236,72,153,.15);
+        }
+
+        .aifds-sidebar-model-icon.orange {
+            color:#F97316;
+            background:rgba(249,115,22,.15);
+        }
+
+        .aifds-sidebar-model-detail-list {
+            display:flex;
+            flex-direction:column;
+            padding:0 0 .24rem 1.82rem;
+        }
+
+        .aifds-sidebar-detail-row {
+            display:grid;
+            grid-template-columns:minmax(0,1fr) auto;
+            align-items:center;
+            gap:.45rem;
+            min-height:28px;
+            padding:.22rem 0;
+            border-top:1px solid rgba(148,163,184,.07);
+        }
+
+        .aifds-sidebar-detail-row:last-child {
+            border-bottom:none;
+        }
+
+        .aifds-sidebar-model-copy,
+        .aifds-sidebar-detail-copy {
+            min-width:0;
+        }
+
+        .aifds-sidebar-model-name,
+        .aifds-sidebar-detail-name {
+            color:#E5EEF9;
+            font-size:.64rem;
+            font-weight:760;
+            line-height:1.2;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+        }
+
+        .aifds-sidebar-detail-date {
+            margin-top:.12rem;
+            color:#76849B;
+            font-size:.55rem;
+            font-weight:580;
+            line-height:1.15;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+        }
+
+        .aifds-sidebar-status-pill {
+            flex:0 0 auto;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            gap:.3rem;
+            min-width:58px;
+            padding:.22rem .46rem;
+            border-radius:999px;
+            font-size:.56rem;
+            font-weight:800;
+            line-height:1;
+            text-transform:lowercase;
+        }
+
+        .aifds-sidebar-status-pill > span {
+            width:5px;
+            height:5px;
+            border-radius:999px;
+        }
+
+        .aifds-sidebar-status-pill.active {
+            color:#34D399;
+            background:rgba(5,150,105,.14);
+        }
+
+        .aifds-sidebar-status-pill.active > span {
+            background:#34D399;
+        }
+
+        .aifds-sidebar-status-pill.pending {
+            color:#FBBF24;
+            background:rgba(217,119,6,.14);
+        }
+
+        .aifds-sidebar-status-pill.pending > span {
+            background:#F59E0B;
+        }
+
+        .aifds-sidebar-status-pill.inactive {
+            color:#F87171;
+            background:rgba(220,38,38,.13);
+        }
+
+        .aifds-sidebar-status-pill.inactive > span {
+            background:#F87171;
+        }
+
+        @media(max-width:900px) {
+            [data-testid="stSidebar"] {
+                min-width:280px!important;
+            }
+
+            .aifds-sidebar-nav-description,
+            .aifds-sidebar-brand-subtitle {
+                white-space:normal;
+            }
+        }
+
         @keyframes fade-up{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}@keyframes slide-in{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:translateX(0)}}@keyframes scale-in{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.35}}@keyframes pulse-banner{0%,100%{box-shadow:0 0 0 0 rgba(8,145,178,.24)}50%{box-shadow:0 0 0 6px rgba(8,145,178,0)}}.app-shell{animation:fade-up 250ms var(--ease-out) both}
         ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:var(--bg-inset)}::-webkit-scrollbar-thumb{background:var(--border-medium);border-radius:999px}::-webkit-scrollbar-thumb:hover{background:var(--accent-cyan)}
         @media(max-width:900px){.block-container{padding-top:4.25rem;padding-left:1rem;padding-right:1rem}.kpi-strip,.metric-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:560px){.app-header{padding:1.2rem;border-radius:var(--radius-lg)}.status-chip{width:100%}.kpi-strip,.metric-strip{grid-template-columns:1fr}}
@@ -876,8 +1338,78 @@ def _iconify_url(icon: str) -> str:
     return f"https://api.iconify.design/{quote(prefix)}/{quote(name)}.svg"
 
 
+def _sidebar_icon(icon: str, class_name: str = "aifds-sidebar-icon-mask") -> str:
+    icon_url = _iconify_url(icon)
+    if not icon_url:
+        return ""
+    return f'<span class="{_clean(class_name)}" style="--sidebar-icon:url({_clean(icon_url)})"></span>'
+
+
 def render_sidebar_brand() -> None:
-    st.markdown('<div class="sidebar-brand"><div class="brand-mark">AI</div><div><div class="brand-name">AI-FDS</div><div class="brand-caption">AI Fraud Detection System</div></div></div>', unsafe_allow_html=True)
+    st.html(
+        '<div class="aifds-sidebar-brand">'
+        '<div class="aifds-sidebar-logo">'
+        f'{_sidebar_icon("solar:shield-star-bold-duotone")}'
+        '</div>'
+        '<div class="aifds-sidebar-brand-copy">'
+        '<div class="aifds-sidebar-brand-title">AI-FDS</div>'
+        '<div class="aifds-sidebar-brand-subtitle">AI Fraud Detection System</div>'
+        '</div>'
+        '</div>'
+    )
+
+
+def render_sidebar_navigation(
+    *,
+    active_page: str,
+    on_select: Callable[[str], None],
+) -> None:
+    navigation_items = [
+        {
+            "page": "Detection Center",
+            "title": "Detection Center",
+            "description": "Analyze emails, voice & phone",
+            "icon": "solar:shield-bold-duotone",
+            "tone": "blue",
+        },
+        {
+            "page": "AI Report Generator",
+            "title": "AI Report Generator",
+            "description": "Generate professional reports",
+            "icon": "solar:document-text-bold-duotone",
+            "tone": "green",
+        },
+    ]
+
+    with st.container(key="sidebar_navigation"):
+        for item in navigation_items:
+            page_name = str(item["page"])
+            is_active = active_page == page_name
+
+            with st.container(
+                key=f"sidebar_nav_card_{page_name.lower().replace(' ', '_')}",
+            ):
+                st.html(
+                    f'<div class="aifds-sidebar-nav-visual {"active" if is_active else ""} {_clean(item["tone"])}">'
+                    '<div class="aifds-sidebar-nav-icon">'
+                    f'{_sidebar_icon(str(item["icon"]))}'
+                    '</div>'
+                    '<div class="aifds-sidebar-nav-copy">'
+                    f'<div class="aifds-sidebar-nav-title">{_clean(item["title"])}</div>'
+                    f'<div class="aifds-sidebar-nav-description">{_clean(item["description"])}</div>'
+                    '</div>'
+                    f'{_sidebar_icon("solar:alt-arrow-right-linear", "aifds-sidebar-icon-mask aifds-sidebar-nav-arrow")}'
+                    '</div>'
+                )
+
+                if st.button(
+                    f"Open {page_name}",
+                    key=f"sidebar_nav_button_{page_name}",
+                    use_container_width=True,
+                    type="secondary",
+                ):
+                    on_select(page_name)
+                    st.rerun()
 
 
 def render_detection_tool_intro(
@@ -1149,17 +1681,230 @@ def render_demo_notice(root: Path) -> None:
 
 
 def render_sidebar_status(root: Path) -> None:
-    model_rows = []
-    for name, exists in get_model_status(str(root)).items():
-        state = "ready" if exists else "missing"
-        label = "Ready" if exists else "Missing"
-        model_rows.append(f'<div class="system-status-row"><span>{_clean(name)}</span><span class="system-status-state {state}">{label}</span></div>')
-    dataset_rows = []
-    for name, exists in get_dataset_status(str(root)).items():
-        state = "ready" if exists else "demo"
-        label = "Ready" if exists else "Demo"
-        dataset_rows.append(f'<div class="system-status-row"><span>{_clean(name)}</span><span class="system-status-state {state}">{label}</span></div>')
-    st.markdown(f'<div class="system-status"><div class="system-status-title">System Status</div>{"".join(model_rows)}<div style="height:1px;background:var(--border-subtle);margin:.55rem 0;"></div>{"".join(dataset_rows)}</div>', unsafe_allow_html=True)
+    groups = _sidebar_model_status_items(root)
+    rows = [_sidebar_status_group_html(group) for group in groups]
+
+    st.html(
+        '<div class="aifds-sidebar-status-panel">'
+        '<div class="aifds-sidebar-status-heading">'
+        '<span class="aifds-sidebar-status-live-dot"></span>'
+        '<span>AI MODEL STATUS</span>'
+        '</div>'
+        '<div class="aifds-sidebar-status-divider"></div>'
+        f'<div class="aifds-sidebar-model-list">{"".join(rows)}</div>'
+        '</div>'
+    )
+
+
+def _sidebar_model_status_items(
+    root: Path,
+) -> list[dict[str, object]]:
+    models_dir = root / "models"
+    email_models = [
+        ("Email Naive Bayes", models_dir / "email_nb.pkl", [models_dir / "email_vectorizer.pkl"]),
+        ("Email Decision Tree", models_dir / "email_dt.pkl", [models_dir / "email_vectorizer.pkl"]),
+        ("Email SVM", models_dir / "email_svm.pkl", [models_dir / "email_vectorizer.pkl"]),
+        ("Email Random Forest", models_dir / "email_rf.pkl", [models_dir / "email_vectorizer.pkl"]),
+        ("Email XGBoost", models_dir / "email_xgb.pkl", [models_dir / "email_vectorizer.pkl"]),
+    ]
+    transcript_models = [
+        ("Transcript Naive Bayes", models_dir / "transcript_nb.pkl", [models_dir / "transcript_vectorizer.pkl"]),
+        ("Transcript Decision Tree", models_dir / "transcript_dt.pkl", [models_dir / "transcript_vectorizer.pkl"]),
+        ("Transcript SVM", models_dir / "transcript_svm.pkl", [models_dir / "transcript_vectorizer.pkl"]),
+        ("Transcript Random Forest", models_dir / "transcript_rf.pkl", [models_dir / "transcript_vectorizer.pkl"]),
+        ("Transcript XGBoost", models_dir / "transcript_xgb.pkl", [models_dir / "transcript_vectorizer.pkl"]),
+    ]
+    audio_models = [
+        ("Audio SVM", models_dir / "audio_svm.pkl", []),
+        ("Audio Behavioral RF", models_dir / "audio_behavior_rf.pkl", []),
+    ]
+
+    email_details = [_artifact_status_item(*item) for item in email_models]
+    transcript_details = [_artifact_status_item(*item) for item in transcript_models]
+    audio_details = [_artifact_status_item(*item) for item in audio_models]
+    api_details = [
+        _phone_api_status_item("Omkar Carrier Lookup API", "omkar"),
+        _phone_api_status_item("PenipuMY", "penipumy"),
+    ]
+
+    return [
+        _group_status_item(
+            name="EMAIL",
+            icon="solar:letter-bold-duotone",
+            tone="blue",
+            details=email_details,
+        ),
+        _group_status_item(
+            name="VOICE TRANSCRIPT",
+            icon="solar:document-text-bold-duotone",
+            tone="purple",
+            details=transcript_details,
+        ),
+        _group_status_item(
+            name="VOICE AUDIO",
+            icon="solar:soundwave-bold-duotone",
+            tone="pink",
+            details=audio_details,
+        ),
+        _group_status_item(
+            name="PHONE LOOKUP API",
+            icon="solar:phone-calling-rounded-bold-duotone",
+            tone="orange",
+            details=api_details,
+        ),
+    ]
+
+
+def _artifact_status_item(
+    name: str,
+    artifact_path: Path,
+    dependency_paths: list[Path],
+) -> dict[str, str]:
+    artifact_exists = artifact_path.exists()
+    dependencies_ready = all(path.exists() for path in dependency_paths)
+    if artifact_exists and dependencies_ready:
+        status = "active"
+    elif artifact_exists or any(path.exists() for path in dependency_paths):
+        status = "pending"
+    else:
+        status = "inactive"
+
+    return {
+        "name": name,
+        "status": status,
+        "date_label": "Last trained",
+        "date": _latest_path_date([artifact_path]),
+    }
+
+
+def _group_status_item(
+    name: str,
+    icon: str,
+    tone: str,
+    details: list[dict[str, str]],
+) -> dict[str, object]:
+    statuses = [item["status"] for item in details]
+    if statuses and all(status == "active" for status in statuses):
+        status = "active"
+    elif any(status == "active" for status in statuses) or any(status == "pending" for status in statuses):
+        status = "pending"
+    else:
+        status = "inactive"
+
+    return {
+        "name": name,
+        "status": status,
+        "icon": icon,
+        "tone": tone,
+        "details": details,
+    }
+
+
+def _phone_api_status_item(name: str, provider_id: str) -> dict[str, str]:
+    enabled = bool(st.session_state.get(f"phone_{provider_id}_enabled", True))
+    configured = bool(_configured_phone_provider_key(provider_id))
+    if not enabled:
+        status = "inactive"
+    elif configured:
+        status = "active"
+    else:
+        status = "pending"
+
+    return {
+        "name": name,
+        "status": status,
+        "date_label": "Last tested",
+        "date": "Not tested",
+    }
+
+
+def _configured_phone_provider_key(provider_id: str) -> str:
+    if provider_id == "penipumy":
+        session_key = "phone_penipumy_api_key"
+        env_keys = ("PENIPUMY_API_KEY", "PENIPU_API_KEY")
+        secret_sections = ("penipumy", "penipu")
+    else:
+        session_key = "phone_omkar_api_key"
+        env_keys = ("OMKAR_API_KEY", "OMKAR_CARRIER_API_KEY")
+        secret_sections = ("omkar", "carrier_lookup")
+
+    session_value = str(st.session_state.get(session_key, "") or "").strip()
+    if session_value:
+        return session_value
+
+    for key in env_keys:
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+        secret_value = _streamlit_secret(key)
+        if secret_value:
+            return secret_value
+
+    for section_name in secret_sections:
+        secret_value = _streamlit_secret(section_name, "api_key")
+        if secret_value:
+            return secret_value
+
+    return ""
+
+
+def _streamlit_secret(*keys: str) -> str:
+    try:
+        value: object = st.secrets
+        for key in keys:
+            value = value.get(key, {}) if isinstance(value, dict) else value.get(key, {})
+        return str(value or "").strip() if not isinstance(value, dict) else ""
+    except Exception:
+        return ""
+
+
+def _latest_path_date(paths: list[Path]) -> str:
+    existing_paths = [path for path in paths if path.exists()]
+    if not existing_paths:
+        return "Not trained"
+    latest = max(path.stat().st_mtime for path in existing_paths)
+    return datetime.fromtimestamp(latest).strftime("%Y-%m-%d")
+
+
+def _sidebar_status_group_html(group: dict[str, object]) -> str:
+    status = str(group["status"])
+    details = list(group.get("details", []))
+    return (
+        '<details class="aifds-sidebar-model-group" name="aifds-sidebar-model-status">'
+        '<summary class="aifds-sidebar-model-summary">'
+        f'<div class="aifds-sidebar-model-icon {_clean(group["tone"])}">'
+        f'{_sidebar_icon(str(group["icon"]))}'
+        '</div>'
+        f'<div class="aifds-sidebar-model-name">{_clean(group["name"])}</div>'
+        f'{_sidebar_status_pill_html(status)}'
+        '</summary>'
+        '<div class="aifds-sidebar-model-detail-list">'
+        + "".join(_sidebar_detail_row_html(item) for item in details)
+        + "</div>"
+        "</details>"
+    )
+
+
+def _sidebar_detail_row_html(item: dict[str, str]) -> str:
+    status = item["status"]
+    return (
+        '<div class="aifds-sidebar-detail-row">'
+        '<div class="aifds-sidebar-detail-copy">'
+        f'<div class="aifds-sidebar-detail-name">{_clean(item["name"])}</div>'
+        f'<div class="aifds-sidebar-detail-date">{_clean(item["date_label"])}: {_clean(item["date"])}</div>'
+        '</div>'
+        f'{_sidebar_status_pill_html(status)}'
+        '</div>'
+    )
+
+
+def _sidebar_status_pill_html(status: str) -> str:
+    return (
+        f'<div class="aifds-sidebar-status-pill {_clean(status)}">'
+        '<span></span>'
+        f'{_clean(status)}'
+        '</div>'
+    )
 
 
 def clear_all_caches() -> None:
