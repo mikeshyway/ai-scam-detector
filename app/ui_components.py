@@ -735,9 +735,53 @@ def inject_css() -> None:
         .detection-tab-visual.active .detection-tab-icon {
             color:#60A5FA;
         }
-        [class*="st-key-detection_tab_card_"]:hover .detection-tab-visual {
+        [class*="st-key-detection_tab_card_"]:hover .detection-tab-visual:not(.active) {
             color:#F8FAFC;
             border-color:rgba(96,165,250,.55);
+        }
+
+        [class*="st-key-detection_tab_card_"]:hover .detection-tab-visual.purple:not(.active) {
+            color:#F8FAFC;
+            border-color:rgba(167,139,250,.62);
+            background:
+                radial-gradient(circle at 50% 50%, rgba(167,139,250,.20), transparent 15rem),
+                linear-gradient(135deg, rgba(38,31,67,.96), rgba(15,23,42,.96));
+        }
+
+        [class*="st-key-detection_tab_card_"]:hover .detection-tab-visual.orange:not(.active) {
+            color:#F8FAFC;
+            border-color:rgba(249,115,22,.62);
+            background:
+                radial-gradient(circle at 50% 50%, rgba(249,115,22,.20), transparent 15rem),
+                linear-gradient(135deg, rgba(64,35,20,.96), rgba(15,23,42,.96));
+        }
+
+        .detection-tab-visual.purple.active {
+            background:
+                radial-gradient(circle at 20% 50%, rgba(167,139,250,.36), transparent 18rem),
+                linear-gradient(135deg, rgba(91,62,170,.95), rgba(28,22,52,.96));
+            border-color:#A78BFA;
+            box-shadow:
+                0 0 0 1px rgba(167,139,250,.25),
+                0 14px 30px rgba(167,139,250,.18);
+        }
+
+        .detection-tab-visual.purple.active .detection-tab-icon {
+            color:#A78BFA;
+        }
+
+        .detection-tab-visual.orange.active {
+            background:
+                radial-gradient(circle at 20% 50%, rgba(249,115,22,.35), transparent 18rem),
+                linear-gradient(135deg, rgba(194,82,18,.95), rgba(52,28,18,.96));
+            border-color:#F97316;
+            box-shadow:
+                0 0 0 1px rgba(249,115,22,.25),
+                0 14px 30px rgba(249,115,22,.18);
+        }
+
+        .detection-tab-visual.orange.active .detection-tab-icon {
+            color:#F97316;
         }
         .detection-tool-intro {
             margin-top:18px;
@@ -1501,16 +1545,19 @@ def render_detection_tab_selector(active_tab: str) -> str:
             "key": "email",
             "title": "Emails and Messages",
             "icon": "solar:letter-bold-duotone",
+            "tone": "blue",
         },
         {
             "key": "transcript",
             "title": "Voice Transcript",
             "icon": "solar:microphone-3-bold-duotone",
+            "tone": "purple",
         },
         {
             "key": "phone",
             "title": "Phone Number",
             "icon": "solar:phone-calling-rounded-bold-duotone",
+            "tone": "orange",
         },
     ]
 
@@ -1524,13 +1571,14 @@ def render_detection_tab_selector(active_tab: str) -> str:
         for col, tab in zip(cols, tabs):
             tab_key = str(tab["key"])
             tab_title = str(tab["title"])
+            tab_tone = str(tab["tone"])
             icon_url = _iconify_url(str(tab["icon"]))
             is_active = active_tab == tab_key
 
             with col:
                 with st.container(key=f"detection_tab_card_{tab_key}"):
                     st.html(
-                        f'<div class="detection-tab-visual {"active" if is_active else ""}">'
+                        f'<div class="detection-tab-visual {_clean(tab_tone)} {"active" if is_active else ""}">'
                         f'<span class="detection-tab-icon" style="--tab-icon:url({_clean(icon_url)})"></span>'
                         f'<span>{_clean(tab_title)}</span>'
                         '</div>'
@@ -1541,6 +1589,7 @@ def render_detection_tab_selector(active_tab: str) -> str:
                         key=f"detection_tab_button_{tab_key}",
                         use_container_width=True,
                         type="secondary",
+                        disabled=is_active,
                     ):
                         st.session_state.active_detection_tab = tab_key
                         st.rerun()
