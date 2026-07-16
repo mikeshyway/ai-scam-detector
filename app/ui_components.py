@@ -944,19 +944,24 @@ def inject_css() -> None:
 
         .st-key-sidebar_navigation {
             margin-bottom:.65rem;
+            padding:.12rem .08rem .22rem;
             flex:0 0 auto;
+            overflow:visible!important;
         }
 
         [class*="st-key-sidebar_nav_card_"] {
             position:relative;
-            height:78px;
-            min-height:78px;
-            margin-bottom:.58rem!important;
-            overflow:hidden;
+            height:86px;
+            min-height:86px;
+            padding:4px 2px;
+            margin-bottom:.42rem!important;
+            overflow:visible!important;
+            box-sizing:border-box;
         }
 
         [class*="st-key-sidebar_nav_card_"][data-testid="stVerticalBlock"] {
             gap:0!important;
+            overflow:visible!important;
         }
 
         .aifds-sidebar-nav-visual {
@@ -1058,7 +1063,7 @@ def inject_css() -> None:
 
         [class*="st-key-sidebar_nav_card_"] [data-testid="stElementContainer"]:has([data-testid="stButton"]) {
             position:absolute!important;
-            inset:0!important;
+            inset:4px 2px!important;
             z-index:5!important;
             margin:0!important;
             height:78px!important;
