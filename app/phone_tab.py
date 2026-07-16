@@ -1558,6 +1558,19 @@ def _build_phone_investigation(
     }
 
 
+def _phone_result_matches_current_number(
+    investigation: dict[str, Any],
+    *,
+    current_number_ok: bool,
+    current_normalized_number: str,
+) -> bool:
+    if not current_number_ok:
+        return False
+    saved_input = dict(investigation.get("input") or {})
+    saved_normalized_number = str(saved_input.get("normalized_number") or "").strip()
+    return bool(saved_normalized_number) and saved_normalized_number == str(current_normalized_number or "").strip()
+
+
 CONCERN_WEIGHTS = {
     "police_report": 8,
     "police_report_cap": 32,
@@ -2751,10 +2764,18 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
 
     investigation_result = st.session_state.get("phone_investigation_result")
     if isinstance(investigation_result, dict):
-        st.divider()
-        if st.session_state.pop("phone_investigation_just_completed", False):
-            render_analysis_ready("Phone investigation evidence collected")
-            st.caption("The unified investigation object is saved in session state for the next output phase.")
-        _render_caller_investigation_summary(investigation_result)
+        if _phone_result_matches_current_number(
+            investigation_result,
+            current_number_ok=ok,
+            current_normalized_number=normalized,
+        ):
+            st.divider()
+            if st.session_state.pop("phone_investigation_just_completed", False):
+                render_analysis_ready("Phone investigation evidence collected")
+                st.caption("The unified investigation object is saved in session state for the next output phase.")
+            _render_caller_investigation_summary(investigation_result)
+        else:
+            st.session_state.pop("phone_investigation_result", None)
+            st.session_state.pop("phone_investigation_just_completed", None)
 
     return
