@@ -883,9 +883,13 @@ def inject_css() -> None:
         }
 
         [data-testid="stSidebarCollapseButton"],
-        [data-testid="stSidebar"] button[title*="sidebar" i] {
-            border-radius:8px!important;
-            color:#DCE5F2!important;
+        [data-testid="collapsedControl"],
+        [data-testid="stSidebar"] button[title*="sidebar" i],
+        button[title*="sidebar" i],
+        button[aria-label*="sidebar" i] {
+            display:none!important;
+            visibility:hidden!important;
+            pointer-events:none!important;
         }
 
         .aifds-sidebar-brand {
