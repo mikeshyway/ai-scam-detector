@@ -636,22 +636,58 @@ def inject_css() -> None:
         .st-key-detection_tab_wrapper [data-testid="column"] {
             padding:0!important;
             position:relative;
+            overflow:visible!important;
         }
-        .st-key-detection_tab_wrapper .stButton {
-            position:absolute;
-            inset:0;
-            z-index:5;
+
+        [class*="st-key-detection_tab_card_"] {
+            position:relative;
             height:64px;
+            min-height:64px;
+            overflow:visible!important;
+        }
+
+        [class*="st-key-detection_tab_card_"][data-testid="stVerticalBlock"] {
+            gap:0!important;
+        }
+
+        [class*="st-key-detection_tab_card_"] [data-testid="stElementContainer"]:has([data-testid="stButton"]),
+        [class*="st-key-detection_tab_card_"] [data-testid="stElementContainer"][class*="st-key-detection_tab_button_"] {
+            position:absolute!important;
+            inset:0!important;
+            z-index:5!important;
+            height:64px!important;
             margin:0!important;
         }
-        .st-key-detection_tab_wrapper .stButton>button {
+
+        [class*="st-key-detection_tab_card_"] .stButton,
+        [class*="st-key-detection_tab_card_"] [data-testid="stButton"] {
             width:100%!important;
             height:64px!important;
+            margin:0!important;
+        }
+
+        [class*="st-key-detection_tab_card_"] .stButton>button,
+        [class*="st-key-detection_tab_card_"] [data-testid="stButton"]>button {
+            width:100%!important;
+            height:64px!important;
+            min-height:64px!important;
+            margin:0!important;
+            padding:0!important;
             opacity:0!important;
             cursor:pointer!important;
             border-radius:18px!important;
+            transform:none!important;
+            box-shadow:none!important;
+        }
+
+        [class*="st-key-detection_tab_card_"] .stButton>button:hover,
+        [class*="st-key-detection_tab_card_"] [data-testid="stButton"]>button:hover {
+            transform:none!important;
+            box-shadow:none!important;
         }
         .detection-tab-visual {
+            position:relative;
+            z-index:2;
             height:64px;
             margin:0;
             padding:0 24px;
@@ -699,7 +735,7 @@ def inject_css() -> None:
         .detection-tab-visual.active .detection-tab-icon {
             color:#60A5FA;
         }
-        .st-key-detection_tab_wrapper [data-testid="column"]:hover .detection-tab-visual {
+        [class*="st-key-detection_tab_card_"]:hover .detection-tab-visual {
             color:#F8FAFC;
             border-color:rgba(96,165,250,.55);
         }
@@ -1492,21 +1528,22 @@ def render_detection_tab_selector(active_tab: str) -> str:
             is_active = active_tab == tab_key
 
             with col:
-                if st.button(
-                    tab_title,
-                    key=f"detection_tab_{tab_key}",
-                    use_container_width=True,
-                    type="primary" if is_active else "secondary",
-                ):
-                    st.session_state.active_detection_tab = tab_key
-                    st.rerun()
+                with st.container(key=f"detection_tab_card_{tab_key}"):
+                    st.html(
+                        f'<div class="detection-tab-visual {"active" if is_active else ""}">'
+                        f'<span class="detection-tab-icon" style="--tab-icon:url({_clean(icon_url)})"></span>'
+                        f'<span>{_clean(tab_title)}</span>'
+                        '</div>'
+                    )
 
-                st.html(
-                    f'<div class="detection-tab-visual {"active" if is_active else ""}">'
-                    f'<span class="detection-tab-icon" style="--tab-icon:url({_clean(icon_url)})"></span>'
-                    f'<span>{_clean(tab_title)}</span>'
-                    '</div>'
-                )
+                    if st.button(
+                        tab_title,
+                        key=f"detection_tab_button_{tab_key}",
+                        use_container_width=True,
+                        type="secondary",
+                    ):
+                        st.session_state.active_detection_tab = tab_key
+                        st.rerun()
 
     return str(st.session_state.active_detection_tab)
 
