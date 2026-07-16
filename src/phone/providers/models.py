@@ -105,6 +105,7 @@ class ProviderDiagnosticResult:
     error_code: str
     error_message: str
     raw_field_names: list[str] = field(default_factory=list)
+    retry_attempted: bool = False
     checked_at: str = field(default_factory=utc_timestamp)
 
     def as_dict(self) -> dict[str, Any]:
@@ -128,6 +129,7 @@ class PhoneProviderResult:
     request_id: str | None = None
     fallback_used: bool = False
     fallback_reason: str | None = None
+    retry_attempted: bool = False
     checked_at: str = field(default_factory=utc_timestamp)
 
     def as_dict(self) -> dict[str, Any]:
@@ -207,9 +209,9 @@ def diagnostic_rows(diagnostic: ProviderDiagnosticResult | dict[str, Any]) -> li
             "Detail": "Provider headers",
         },
         {
-            "Check": "Fallback used",
-            "Result": "Yes" if data.get("fallback_used") else "No",
-            "Detail": "Connection check only",
+            "Check": "Timeout retry",
+            "Result": "Yes" if data.get("retry_attempted") else "No",
+            "Detail": "Retried once with extended timeout" if data.get("retry_attempted") else "No retry needed",
         },
         {
             "Check": "Request ID",

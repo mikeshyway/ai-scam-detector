@@ -34,7 +34,13 @@ from src.text.explainability import (
     highlighted_html,
     top_model_terms,
 )
-from src.reporting.history_db import record_history_item
+try:
+    from src.reporting.history_db import record_history_item
+except ImportError:
+    import importlib
+    import src.reporting.history_db as history_db
+
+    record_history_item = importlib.reload(history_db).record_history_item
 from src.audio.live_audio_analysis import (
     BEHAVIORAL_FEATURE_NAMES,
     analyse_live_chunk,

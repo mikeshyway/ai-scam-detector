@@ -33,7 +33,13 @@ from src.text.explainability import (
     type_intention,
     top_model_terms,
 )
-from src.reporting.history_db import record_history_item
+try:
+    from src.reporting.history_db import record_history_item
+except ImportError:
+    import importlib
+    import src.reporting.history_db as history_db
+
+    record_history_item = importlib.reload(history_db).record_history_item
 from src.text.text_classifier import load_text_artifacts
 
 

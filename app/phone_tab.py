@@ -35,7 +35,13 @@ from src.phone.providers import (
     test_penipumy_connection,
 )
 from src.phone.providers.models import diagnostic_rows
-from src.reporting.history_db import record_history_item
+try:
+    from src.reporting.history_db import record_history_item
+except ImportError:
+    import importlib
+    import src.reporting.history_db as history_db
+
+    record_history_item = importlib.reload(history_db).record_history_item
 
 
 def _secret_value(*keys: str) -> str:
@@ -1252,6 +1258,14 @@ def _status_chip(label: str) -> None:
     )
 
 
+def _provider_api_portal_url(provider_id: str) -> str:
+    if provider_id == "penipumy":
+        return "https://penipu.my"
+    if provider_id == "omkar_carrier_lookup":
+        return "https://www.omkar.cloud"
+    return ""
+
+
 def _provider_status_label(
     enabled: bool,
     key_meta: dict[str, object],
@@ -1269,6 +1283,10 @@ def _provider_status_label(
             return "Authentication rejected"
         if error_code == "rate_limited":
             return "Rate limited"
+        if error_code == "timeout":
+            return "Timed out"
+        if error_code == "connection_failed":
+            return "Network failed"
         return "Connection failed"
     return "Ready" if key_meta.get("configured") else "Not configured"
 
@@ -1288,6 +1306,27 @@ def _render_diagnostics_expander(title: str, diagnostic_key: str) -> None:
         fields = diagnostic.get("raw_field_names") or []
         if fields:
             st.caption(f"Fields returned: {', '.join(str(item) for item in fields)}")
+
+        error_code = str(diagnostic.get("error_code") or "none")
+        provider_id = str(diagnostic.get("provider_id") or "")
+        provider_name = str(diagnostic.get("provider_name") or "provider")
+        portal_url = _provider_api_portal_url(provider_id)
+        if error_code == "timeout":
+            st.warning(
+                f"{provider_name} did not return a response before the timeout. The app retries once with a longer "
+                "timeout; if this keeps happening, wait a moment and test again. If it still fails, retrieve or "
+                "regenerate the API key from the provider website and paste the fresh key here."
+            )
+        elif error_code == "authentication_failed":
+            st.warning(
+                f"{provider_name} rejected the API key. Retrieve or regenerate the API key from the provider website, "
+                "paste the fresh key here, then press Enter before testing again."
+            )
+        elif error_code == "missing_key":
+            st.info(f"Paste a {provider_name} API key, then press Enter before testing the connection.")
+
+        if portal_url and error_code in {"timeout", "authentication_failed", "missing_key"}:
+            st.link_button(f"Open {provider_name} Website", portal_url, use_container_width=True)
 
 
 def _render_live_provider_card(

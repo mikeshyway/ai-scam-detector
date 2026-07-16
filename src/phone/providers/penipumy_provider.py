@@ -21,6 +21,8 @@ from src.phone.providers.models import (
 
 PROVIDER_ID = "penipumy"
 PROVIDER_NAME = "PenipuMY"
+PRIMARY_TIMEOUT_SECONDS = 10.0
+RETRY_TIMEOUT_SECONDS = 20.0
 
 
 def _request_id(payload: dict[str, Any]) -> str:
@@ -32,13 +34,52 @@ def _status_from_error(exc: Exception) -> int | None:
     return int(status_code) if isinstance(status_code, int) else None
 
 
+def _fetch_with_timeout_retry(
+    phone_number: str,
+    api_key: str,
+    *,
+    timeout: float = PRIMARY_TIMEOUT_SECONDS,
+    retry_timeout: float = RETRY_TIMEOUT_SECONDS,
+) -> tuple[Any, bool]:
+    try:
+        return (
+            fetch_phone_reputation(
+                phone_number,
+                api_key,
+                timeout_seconds=int(timeout),
+            ),
+            False,
+        )
+    except (PenipuApiError, PenipuClientError) as exc:
+        status_code = _status_from_error(exc)
+        if normalize_error_code(status_code, str(exc)) != "timeout":
+            raise
+
+    try:
+        return (
+            fetch_phone_reputation(
+                phone_number,
+                api_key,
+                timeout_seconds=int(retry_timeout),
+            ),
+            True,
+        )
+    except (PenipuApiError, PenipuClientError) as exc:
+        status_code = _status_from_error(exc)
+        if normalize_error_code(status_code, str(exc)) == "timeout":
+            raise PenipuClientError(
+                f"PenipuMY lookup timed out after retry ({int(timeout)}s then {int(retry_timeout)}s)."
+            ) from exc
+        raise
+
+
 def test_penipumy_connection(
     test_number: str,
     api_key: str,
     *,
     key_source: str,
     key_variable: str,
-    timeout: float = 10.0,
+    timeout: float = PRIMARY_TIMEOUT_SECONDS,
 ) -> ProviderDiagnosticResult:
     api_key = str(api_key or "").strip()
     configured = bool(api_key)
@@ -92,10 +133,10 @@ def test_penipumy_connection(
         )
 
     try:
-        live = fetch_phone_reputation(
+        live, retry_attempted = _fetch_with_timeout_retry(
             format_phone_for_penipumy(test_number),
             api_key,
-            timeout_seconds=int(timeout),
+            timeout=timeout,
         )
     except (PenipuApiError, PenipuClientError) as exc:
         elapsed_ms = (time.perf_counter() - started) * 1000
@@ -122,6 +163,7 @@ def test_penipumy_connection(
             request_id="",
             error_code=error_code,
             error_message=error_message,
+            retry_attempted=error_code == "timeout",
         )
 
     elapsed_ms = (time.perf_counter() - started) * 1000
@@ -149,10 +191,11 @@ def test_penipumy_connection(
         error_code="none",
         error_message="",
         raw_field_names=list(payload.keys()),
+        retry_attempted=retry_attempted,
     )
 
 
-def lookup_penipumy_reputation(number: str, api_key: str, *, timeout: float = 10.0) -> PhoneProviderResult:
+def lookup_penipumy_reputation(number: str, api_key: str, *, timeout: float = PRIMARY_TIMEOUT_SECONDS) -> PhoneProviderResult:
     normalized = normalise_phone_query(number)
     api_key = str(api_key or "").strip()
 
@@ -170,14 +213,15 @@ def lookup_penipumy_reputation(number: str, api_key: str, *, timeout: float = 10
 
     started = time.perf_counter()
     try:
-        live = fetch_phone_reputation(
+        live, retry_attempted = _fetch_with_timeout_retry(
             format_phone_for_penipumy(normalized),
             api_key,
-            timeout_seconds=int(timeout),
+            timeout=timeout,
         )
     except (PenipuApiError, PenipuClientError) as exc:
         elapsed_ms = (time.perf_counter() - started) * 1000
         status_code = _status_from_error(exc)
+        error_code = normalize_error_code(status_code, str(exc))
         return PhoneProviderResult(
             provider_id=PROVIDER_ID,
             provider_name=PROVIDER_NAME,
@@ -185,9 +229,10 @@ def lookup_penipumy_reputation(number: str, api_key: str, *, timeout: float = 10
             status="error",
             success=False,
             normalized_number=normalized,
-            error_code=normalize_error_code(status_code, str(exc)),
+            error_code=error_code,
             error_message=str(exc),
             response_time_ms=elapsed_ms,
+            retry_attempted=error_code == "timeout",
         )
 
     elapsed_ms = (time.perf_counter() - started) * 1000
@@ -204,4 +249,5 @@ def lookup_penipumy_reputation(number: str, api_key: str, *, timeout: float = 10
         response_time_ms=elapsed_ms,
         rate_limit=live.rate_limit,
         request_id=_request_id(payload) or None,
+        retry_attempted=retry_attempted,
     )
