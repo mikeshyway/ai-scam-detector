@@ -1184,6 +1184,24 @@ def _phone_widget_key(session_key: str, suffix: str) -> str:
     return f"_{session_key}_{suffix}"
 
 
+def _phone_provider_status_key_from_session(session_key: str) -> str:
+    return "phone_penipumy_provider_status" if "penipumy" in session_key else "phone_omkar_provider_status"
+
+
+def _record_phone_provider_status(session_key: str, result: dict[str, Any], *, source: str) -> None:
+    st.session_state[_phone_provider_status_key_from_session(session_key)] = {
+        "provider_id": result.get("provider_id") or result.get("provider"),
+        "provider_name": result.get("provider_name") or result.get("provider"),
+        "status": result.get("status"),
+        "success": result.get("success") if "success" in result else result.get("provider_success"),
+        "error_code": result.get("error_code"),
+        "error_message": result.get("error_message"),
+        "retry_attempted": result.get("retry_attempted", False),
+        "checked_at": result.get("checked_at") or datetime.now().isoformat(timespec="seconds"),
+        "source": source,
+    }
+
+
 def _hydrate_phone_widget_from_session(widget_key: str, session_key: str) -> None:
     session_value = str(st.session_state.get(session_key, "") or "")
     if session_value and not st.session_state.get(widget_key):
@@ -1203,6 +1221,7 @@ def _sync_phone_provider_enabled(
         st.session_state[session_key] = ""
         st.session_state[api_widget_key] = ""
         st.session_state.pop(diagnostic_key, None)
+        st.session_state.pop(_phone_provider_status_key_from_session(session_key), None)
 
 
 def _sync_phone_session_api_key(widget_key: str, session_key: str, diagnostic_key: str) -> None:
@@ -1211,6 +1230,7 @@ def _sync_phone_session_api_key(widget_key: str, session_key: str, diagnostic_ke
     st.session_state[session_key] = value
     if value != previous:
         st.session_state.pop(diagnostic_key, None)
+        st.session_state.pop(_phone_provider_status_key_from_session(session_key), None)
 
 
 def _phone_provider_key_config(provider_id: str) -> dict[str, object]:
@@ -1371,6 +1391,7 @@ def _render_live_provider_card(
             st.session_state[session_key] = ""
             st.session_state[api_widget_key] = ""
             st.session_state.pop(diagnostic_key, None)
+            st.session_state.pop(_phone_provider_status_key_from_session(session_key), None)
         else:
             _hydrate_phone_widget_from_session(api_widget_key, session_key)
 
@@ -1419,6 +1440,8 @@ def _render_live_provider_card(
                         key_variable=str(key_meta.get("variable", "-")),
                     )
                 st.session_state[diagnostic_key] = diagnostic.as_dict()
+                _record_phone_provider_status(session_key, diagnostic.as_dict(), source="connection_test")
+                st.rerun()
 
         diagnostic = st.session_state.get(diagnostic_key)
         _status_chip(_provider_status_label(enabled, key_meta, diagnostic if isinstance(diagnostic, dict) else None))
@@ -1492,18 +1515,24 @@ def _build_phone_investigation(
         if omkar_key:
             omkar_result = lookup_omkar_metadata(normalized_number, omkar_key).as_dict()
             metadata = _provider_result_block(omkar_result, default_provider="omkar", enabled=True)
+            _record_phone_provider_status("phone_omkar_api_key", omkar_result, source="investigation")
             completed += 1 if omkar_result.get("success") else 0
             failed += 0 if omkar_result.get("success") else 1
+        else:
+            _record_phone_provider_status("phone_omkar_api_key", metadata, source="investigation")
 
     if penipumy_enabled:
         requested += 1
         if penipumy_key:
             penipu_result = lookup_penipumy_reputation(normalized_number, penipumy_key).as_dict()
             reputation = _provider_result_block(penipu_result, default_provider="penipumy", enabled=True)
+            _record_phone_provider_status("phone_penipumy_api_key", penipu_result, source="investigation")
             if penipu_result.get("success"):
                 completed += 1
             else:
                 failed += 1
+        else:
+            _record_phone_provider_status("phone_penipumy_api_key", reputation, source="investigation")
 
     return {
         "input": {
@@ -2711,12 +2740,15 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
             investigation["assessment"] = _build_phone_assessment(investigation)
             st.session_state["phone_investigation_result"] = investigation
             _record_phone_investigation(history, investigation)
-        render_analysis_ready("Phone investigation evidence collected")
-        st.caption("The unified investigation object is saved in session state for the next output phase.")
+        st.session_state["phone_investigation_just_completed"] = True
+        st.rerun()
 
     investigation_result = st.session_state.get("phone_investigation_result")
     if isinstance(investigation_result, dict):
         st.divider()
+        if st.session_state.pop("phone_investigation_just_completed", False):
+            render_analysis_ready("Phone investigation evidence collected")
+            st.caption("The unified investigation object is saved in session state for the next output phase.")
         _render_caller_investigation_summary(investigation_result)
 
     st.markdown("</div>", unsafe_allow_html=True)

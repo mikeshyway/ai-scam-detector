@@ -1899,19 +1899,62 @@ def _phone_api_status_item(name: str, provider_id: str) -> dict[str, str]:
     enabled_widget_key = f"_{enabled_key}_toggle"
     enabled = bool(st.session_state.get(enabled_key, st.session_state.get(enabled_widget_key, True)))
     configured = bool(_configured_phone_provider_key(provider_id))
+    provider_state = _phone_provider_session_status(provider_id)
+    error_code = str(provider_state.get("error_code") or "none")
+    success = provider_state.get("success")
+
     if not enabled:
         status = "inactive"
+        state_label = "Disabled"
+    elif not configured:
+        status = "pending"
+        state_label = "No API key"
+    elif error_code == "timeout":
+        status = "pending"
+        state_label = "Timed out"
+    elif error_code == "authentication_failed":
+        status = "inactive"
+        state_label = "Auth rejected"
+    elif error_code == "rate_limited":
+        status = "pending"
+        state_label = "Rate limited"
+    elif error_code in {"connection_failed", "provider_error", "invalid_response"}:
+        status = "pending"
+        state_label = "Connection issue"
+    elif error_code == "missing_key":
+        status = "pending"
+        state_label = "No API key"
+    elif error_code == "none" and success is False:
+        status = "pending"
+        state_label = "Not returned"
+    elif error_code == "none" and provider_state:
+        status = "active"
+        state_label = "Tested successfully"
     elif configured:
         status = "active"
+        state_label = "Configured"
     else:
         status = "pending"
+        state_label = "Not tested"
 
     return {
         "name": name,
         "status": status,
-        "date_label": "Last tested",
-        "date": "Not tested",
+        "date_label": "Provider state",
+        "date": state_label,
     }
+
+
+def _phone_provider_session_status(provider_id: str) -> dict[str, object]:
+    status = st.session_state.get(f"phone_{provider_id}_provider_status")
+    if isinstance(status, dict):
+        return status
+
+    diagnostic = st.session_state.get(f"phone_{provider_id}_diagnostic")
+    if isinstance(diagnostic, dict):
+        return diagnostic
+
+    return {}
 
 
 def _configured_phone_provider_key(provider_id: str) -> str:
