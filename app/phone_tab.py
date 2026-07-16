@@ -29,8 +29,6 @@ from src.phone.omkar_client import lookup_omkar_phone
 from src.phone.phone_lookup import lookup_phone, normalise_phone_query, validate_phone_query
 from src.phone.phone_number import format_phone_for_omkar
 from src.phone.providers import (
-    get_local_dataset_status,
-    lookup_local_reputation,
     lookup_omkar_metadata,
     lookup_penipumy_reputation,
     test_omkar_connection,
@@ -133,8 +131,8 @@ def _source_label(source: str) -> str:
         "penipumy_api": "PenipuMY API",
         "ipqualityscore_api": "IPQualityScore API",
         "omkar_carrier_lookup_api": "Omkar Carrier Lookup",
-        "local_fallback": "Local fallback dataset",
-        "demo_fallback": "Demo fallback dataset",
+        "local_fallback": "Legacy fallback record",
+        "demo_fallback": "Demo record",
         "unknown_fallback": "Unknown fallback",
         "local_processed": "Local processed dataset",
     }
@@ -216,10 +214,9 @@ def _render_api_setup(provider: str, root: Path) -> dict[str, object]:
             st.caption(f"Masked key: `{key_meta.get('masked_key')}`")
         else:
             render_info_banner(
-                f"No {provider_label} API key was detected. The lookup will automatically use the local fallback "
-                "dataset when you check a number.",
+                f"No {provider_label} API key was detected. Configure a live API key before checking a number.",
                 kind="warning",
-                code="FALLBACK",
+                code="API KEY",
             )
 
         render_info_banner(
@@ -629,16 +626,16 @@ def _session_lookup_history_chart(history: list[dict[str, object]]) -> go.Figure
         return None
 
     live = sum(1 for item in phone_rows if "omkar" in str(item.get("source", "")).lower() or "carrier lookup" in str(item.get("source", "")).lower())
-    local = sum(1 for item in phone_rows if "fallback dataset" in str(item.get("source", "")).lower() or "local" in str(item.get("source", "")).lower())
+    non_live = sum(1 for item in phone_rows if "fallback" in str(item.get("source", "")).lower() or "unknown" in str(item.get("source", "")).lower())
     unknown = sum(1 for item in phone_rows if "unknown" in str(item.get("source", "")).lower() or str(item.get("prediction", "")).lower() == "unknown")
-    provider_failures = max(0, local + unknown)
+    provider_failures = max(0, non_live + unknown)
 
     fig = go.Figure(
         go.Bar(
-            x=["Live API successes", "Local fallback uses", "Unknown results", "Provider failures"],
-            y=[live, local, unknown, provider_failures],
+            x=["Live API successes", "Non-live results", "Unknown results", "Provider failures"],
+            y=[live, non_live, unknown, provider_failures],
             marker_color=["#38BDF8", "#F59E0B", "#64748B", "#EF4444"],
-            text=[live, local, unknown, provider_failures],
+            text=[live, non_live, unknown, provider_failures],
             textposition="auto",
             hovertemplate="%{x}: %{y}<extra></extra>",
         )
@@ -817,13 +814,13 @@ def _render_provider_connection_check(provider: str, key_meta: dict[str, object]
         elif diagnostic.get("configured"):
             render_info_banner(
                 f"Provider test completed with status: {diagnostic.get('error_category')}. "
-                "Normal lookup can still continue through the local fallback dataset.",
+                "Fix the live provider response before running lookup.",
                 kind="warning",
                 code="DIAGNOSTIC",
             )
         else:
             render_info_banner(
-                "No API key was configured. Normal lookup can still use the local fallback dataset.",
+                "No API key was configured. Add a live provider API key before running lookup.",
                 kind="warning",
                 code="MISSING KEY",
             )
@@ -904,7 +901,7 @@ def _record_phone_result(
             "type": "Phone",
             "prediction": risk.get("risk_level", "Unknown"),
             "confidence": float(risk.get("risk_score", 0)),
-            "model": f"{_provider_label(str(result.get('requested_provider', 'omkar_carrier_lookup')))} + fallback reputation rules",
+            "model": f"{_provider_label(str(result.get('requested_provider', 'omkar_carrier_lookup')))} reputation rules",
             "source": _source_label(str(result.get("source", ""))),
             "preview": phone_number,
             "flags": flags,
@@ -958,7 +955,7 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
             str(explanation.get("summary", "No explanation returned.")),
         )
 
-    _render_phone_step("03", "Review Evidence", "Inspect source, fallback status, metadata, reputation evidence, and recommended action.")
+    _render_phone_step("03", "Review Evidence", "Inspect source, provider status, metadata, reputation evidence, and recommended action.")
 
     render_content_card_open("violet")
     cols = st.columns(3)
@@ -1055,7 +1052,7 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
     if not business_df.empty:
         render_section_header(
             "Caller identity details",
-            "Business or fallback identity fields associated with the queried number.",
+            "Business identity fields associated with the queried number.",
             "Business status",
         )
         render_content_card_open("green")
@@ -1165,8 +1162,6 @@ def _init_phone_input_state() -> None:
     defaults: dict[str, Any] = {
         "phone_omkar_enabled": True,
         "phone_penipumy_enabled": True,
-        "phone_local_fallback_enabled": True,
-        "phone_auto_fallback_enabled": True,
         "phone_omkar_api_key": "",
         "phone_penipumy_api_key": "",
         "phone_omkar_test_number": "016-240 4384",
@@ -1390,58 +1385,12 @@ def _render_live_provider_card(
         return {"enabled": enabled, "key_meta": key_meta}
 
 
-def _render_local_fallback_card(root: Path) -> dict[str, Any]:
-    with st.container(border=True):
-        st.markdown(
-            """
-            <div class="phone-provider-heading">
-                <iconify-icon icon="solar:database-bold-duotone"></iconify-icon>
-                <div>
-                    <strong>Local Fallback Dataset</strong>
-                    <span>Offline educational reputation evidence</span>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        enabled = st.toggle(
-            "Enable fallback dataset",
-            key="phone_local_fallback_enabled",
-        )
-        auto_fallback = st.toggle(
-            "Automatic fallback",
-            key="phone_auto_fallback_enabled",
-            disabled=not enabled,
-        )
-        status = get_local_dataset_status(root)
-        if st.button("Validate Dataset", key="phone_validate_local_dataset", use_container_width=True, disabled=not enabled):
-            status = get_local_dataset_status(root)
-            st.session_state["phone_local_dataset_status"] = status.as_dict()
-
-        dataset_usable = enabled and status.schema_valid and status.record_count > 0
-        label = (
-            "Ready"
-            if dataset_usable
-            else "Empty dataset"
-            if enabled and status.schema_valid
-            else "Missing"
-            if not status.exists
-            else "Invalid schema"
-        )
-        _status_chip(label)
-        st.caption(f"{status.record_count:,} records loaded" if status.schema_valid else status.error_message)
-        st.caption(f"Source: {status.source_filename}")
-        return {"enabled": enabled, "auto_fallback": auto_fallback, "status": status}
-
-
 def _render_status_row(
     omkar_enabled: bool,
     omkar_key: dict[str, object],
     penipu_enabled: bool,
     penipu_key: dict[str, object],
-    local_info: dict[str, Any],
 ) -> None:
-    local_status = local_info["status"]
     rows = [
         {
             "Provider": "Omkar",
@@ -1450,14 +1399,6 @@ def _render_status_row(
         {
             "Provider": "PenipuMY",
             "Status": "Ready" if penipu_enabled and penipu_key.get("configured") else "Not configured" if penipu_enabled else "Disabled",
-        },
-        {
-            "Provider": "Local dataset",
-            "Status": (
-                "Ready"
-                if local_info.get("enabled") and local_status.schema_valid and local_status.record_count > 0
-                else "Missing / Invalid"
-            ),
         },
     ]
     st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
@@ -1484,8 +1425,6 @@ def _build_phone_investigation(
     omkar_key: str,
     penipumy_enabled: bool,
     penipumy_key: str,
-    fallback_enabled: bool,
-    auto_fallback: bool,
 ) -> dict[str, Any]:
     metadata = {
         "provider": "omkar",
@@ -1503,14 +1442,6 @@ def _build_phone_investigation(
         "error_code": "missing_key" if penipumy_enabled and not penipumy_key else None,
         "error_message": "PenipuMY API key is not configured." if penipumy_enabled and not penipumy_key else None,
     }
-    fallback = {
-        "provider": "local",
-        "enabled": fallback_enabled,
-        "used": False,
-        "reason": None,
-        "data": {},
-    }
-
     requested = 0
     completed = 0
     failed = 0
@@ -1523,8 +1454,6 @@ def _build_phone_investigation(
             completed += 1 if omkar_result.get("success") else 0
             failed += 0 if omkar_result.get("success") else 1
 
-    should_try_fallback = False
-    fallback_reason = None
     if penipumy_enabled:
         requested += 1
         if penipumy_key:
@@ -1534,27 +1463,6 @@ def _build_phone_investigation(
                 completed += 1
             else:
                 failed += 1
-                should_try_fallback = bool(auto_fallback)
-                fallback_reason = reputation.get("error_message") or reputation.get("error_code")
-        else:
-            should_try_fallback = bool(auto_fallback)
-            fallback_reason = "PenipuMY API key is not configured."
-    elif fallback_enabled:
-        should_try_fallback = True
-        fallback_reason = "PenipuMY disabled; local fallback used as reputation channel."
-
-    if fallback_enabled and should_try_fallback:
-        local_result = lookup_local_reputation(root, normalized_number).as_dict()
-        fallback.update(
-            {
-                "used": True,
-                "reason": fallback_reason,
-                "data": local_result.get("data", {}),
-                "status": local_result.get("status"),
-                "error_code": local_result.get("error_code"),
-                "error_message": local_result.get("error_message"),
-            }
-        )
 
     return {
         "input": {
@@ -1564,7 +1472,6 @@ def _build_phone_investigation(
         },
         "metadata": metadata,
         "reputation": reputation,
-        "fallback": fallback,
         "provider_coverage": {
             "requested": requested,
             "completed": completed,
@@ -1588,7 +1495,6 @@ CONCERN_WEIGHTS = {
     "recent_reports": 10,
     "claimed_identity_unverified": 10,
     "invalid_number": 15,
-    "local_fallback_match": 20,
 }
 
 
@@ -1744,20 +1650,13 @@ def _business_from_reputation_data(data: dict[str, Any]) -> dict[str, Any]:
 def build_caller_output_view(investigation: dict[str, Any]) -> dict[str, Any]:
     metadata = dict(investigation.get("metadata", {}))
     reputation = dict(investigation.get("reputation", {}))
-    fallback = dict(investigation.get("fallback", {}))
     input_data = dict(investigation.get("input", {}))
 
     omkar_data = dict(metadata.get("data", {}))
     penipumy_data = dict(reputation.get("data", {}))
-    fallback_data = dict(fallback.get("data", {}))
     reputation_source = "penipumy"
     reputation_status = str(reputation.get("status", "unavailable"))
     reputation_data = penipumy_data
-
-    if not reputation_data and fallback.get("used") and fallback_data:
-        reputation_source = "local"
-        reputation_status = str(fallback.get("status", "fallback"))
-        reputation_data = fallback_data
 
     business = _business_from_reputation_data(reputation_data)
     spoofing_count = _safe_int(
@@ -1817,7 +1716,6 @@ def build_caller_output_view(investigation: dict[str, Any]) -> dict[str, Any]:
         "coverage": {
             "omkar": metadata.get("status", "unavailable"),
             "penipumy": reputation.get("status", "unavailable"),
-            "fallback": "used" if fallback.get("used") else "not_used",
         },
     }
 
@@ -1933,7 +1831,6 @@ def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
     output_view = build_caller_output_view(investigation)
     metadata = {"data": dict(output_view.get("caller_profile", {}))}
     reputation = dict(investigation.get("reputation", {}))
-    fallback = dict(investigation.get("fallback", {}))
     input_data = dict(output_view.get("input", {}))
 
     profile = dict(output_view.get("caller_profile", {}))
@@ -1954,7 +1851,7 @@ def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
         contributions.append(
             {
                 "indicator": f"{police_count} police report(s) found",
-                "source": "PenipuMY" if reputation_view.get("source") == "penipumy" else "Local fallback dataset",
+                "source": "PenipuMY",
                 "points": min(
                     police_count * CONCERN_WEIGHTS["police_report"],
                     CONCERN_WEIGHTS["police_report_cap"],
@@ -1967,7 +1864,7 @@ def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
         contributions.append(
             {
                 "indicator": f"{verified_count} verified report(s) found",
-                "source": "PenipuMY" if reputation_view.get("source") == "penipumy" else "Local fallback dataset",
+                "source": "PenipuMY",
                 "points": min(
                     verified_count * CONCERN_WEIGHTS["verified_report"],
                     CONCERN_WEIGHTS["verified_report_cap"],
@@ -1980,7 +1877,7 @@ def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
         contributions.append(
             {
                 "indicator": "Fraud flag returned",
-                "source": "PenipuMY" if reputation_view.get("source") == "penipumy" else "Local fallback dataset",
+                "source": "PenipuMY",
                 "points": CONCERN_WEIGHTS["fraud_flag"],
                 "effect": "raises_concern",
             }
@@ -1990,7 +1887,7 @@ def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
         contributions.append(
             {
                 "indicator": "Spam flag returned",
-                "source": "PenipuMY" if reputation_view.get("source") == "penipumy" else "Local fallback dataset",
+                "source": "PenipuMY",
                 "points": CONCERN_WEIGHTS["spam_flag"],
                 "effect": "raises_concern",
             }
@@ -2000,7 +1897,7 @@ def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
         contributions.append(
             {
                 "indicator": f"{spoofing_count} spoofing report(s) found",
-                "source": "PenipuMY" if reputation_view.get("source") == "penipumy" else "Local fallback dataset",
+                "source": "PenipuMY",
                 "points": min(
                     spoofing_count * CONCERN_WEIGHTS["spoofing_report"],
                     CONCERN_WEIGHTS["spoofing_report_cap"],
@@ -2103,21 +2000,8 @@ def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
-    if bool(fallback.get("used")) and bool(dict(fallback.get("data", {}))):
-        contributions.append(
-            {
-                "indicator": "Local fallback reputation match",
-                "source": "Local fallback dataset",
-                "points": CONCERN_WEIGHTS["local_fallback_match"],
-                "effect": "raises_concern",
-            }
-        )
-
     reputation_status = str(reputation_view.get("status") or "")
-    reputation_was_checked = reputation_status in {"success", "no_match"} or str(fallback.get("status") or "") in {
-        "success",
-        "no_match",
-    }
+    reputation_was_checked = reputation_status in {"success", "no_match"}
     reputation_evidence_available = bool(contributions) or combined_report_count > 0
     score = min(100, sum(int(item.get("points", 0)) for item in contributions))
     score_value: int | None = score if reputation_evidence_available or reputation_was_checked or contributions else None
@@ -2224,18 +2108,13 @@ def _coverage_summary(output_view: dict[str, Any]) -> str:
     coverage = dict(output_view.get("coverage", {}))
     omkar_complete = coverage.get("omkar") == "success"
     reputation_complete = coverage.get("penipumy") in {"success", "no_match"}
-    fallback_used = coverage.get("fallback") == "used"
 
     if omkar_complete and reputation_complete:
         return "Metadata + reputation complete"
-    if omkar_complete and fallback_used:
-        return "Metadata + local reputation complete"
     if omkar_complete:
         return "Metadata complete"
     if reputation_complete:
         return "Reputation lookup complete"
-    if fallback_used:
-        return "Local fallback evidence used"
     return "No provider evidence complete"
 
 
@@ -2339,8 +2218,7 @@ def _render_scam_reputation(output_view: dict[str, Any]) -> None:
         "PenipuMY reputation fields, report counts, and flags only.",
     )
     with st.container(border=True):
-        source = "PenipuMY" if reputation.get("source") == "penipumy" else "Local fallback dataset"
-        st.caption(f"Source: {source}")
+        st.caption("Source: PenipuMY")
         _status_chip(str(reputation.get("status") or "Data unavailable").replace("_", " ").title())
         if total_reports:
             st.metric("Total report indicators", total_reports)
@@ -2365,8 +2243,7 @@ def _render_reported_identity(output_view: dict[str, Any]) -> None:
         "Provider-reported business association, shown only when returned.",
     )
     with st.container(border=True):
-        source = "PenipuMY" if identity.get("source") == "penipumy" else "Local fallback dataset"
-        st.caption(f"Source: {source}")
+        st.caption("Source: PenipuMY")
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         st.caption(
             "This record indicates an association reported by the provider. "
@@ -2600,8 +2477,8 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
     render_detection_tool_intro(
         title="Phone Number",
         description=(
-            "Investigate caller numbers with independent carrier metadata, community reputation checks, "
-            "and local fallback evidence when live reputation data is unavailable."
+            "Investigate caller numbers with independent carrier metadata and community reputation checks "
+            "from configured live API providers."
         ),
         icon="solar:phone-calling-rounded-bold-duotone",
         accent="orange",
@@ -2660,7 +2537,7 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
         "Configure providers, test connections, and view their current status.",
     )
 
-    provider_cols = st.columns(3, gap="small")
+    provider_cols = st.columns(2, gap="small")
     with provider_cols[0]:
         omkar_info = _render_live_provider_card(
             provider_id="omkar_carrier_lookup",
@@ -2685,15 +2562,11 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
             diagnostic_key="phone_penipumy_diagnostic",
         )
 
-    with provider_cols[2]:
-        local_info = _render_local_fallback_card(root)
-
     _render_status_row(
         bool(omkar_info["enabled"]),
         dict(omkar_info["key_meta"]),
         bool(penipu_info["enabled"]),
         dict(penipu_info["key_meta"]),
-        local_info,
     )
 
     st.divider()
@@ -2704,19 +2577,17 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
         "Run enabled provider checks and prepare combined caller evidence.",
     )
 
-    local_status = local_info["status"]
     has_usable_provider = any(
         [
             bool(omkar_info["enabled"]) and bool(omkar_info["key_meta"].get("configured")),
             bool(penipu_info["enabled"]) and bool(penipu_info["key_meta"].get("configured")),
-            bool(local_info["enabled"]) and bool(local_status.schema_valid) and int(local_status.record_count) > 0,
         ]
     )
     disabled_reason = ""
     if not ok:
         disabled_reason = validation_message or "Enter a valid phone number first."
     elif not has_usable_provider:
-        disabled_reason = "Enable at least one configured live provider or a valid local fallback dataset."
+        disabled_reason = "Enable at least one live provider with a configured API key."
 
     with st.container(key="phone_investigate_button"):
         investigate = st.button(
@@ -2739,12 +2610,6 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
                 omkar_key=str(omkar_info["key_meta"].get("key", "")),
                 penipumy_enabled=bool(penipu_info["enabled"]),
                 penipumy_key=str(penipu_info["key_meta"].get("key", "")),
-                fallback_enabled=(
-                    bool(local_info["enabled"])
-                    and bool(local_status.schema_valid)
-                    and int(local_status.record_count) > 0
-                ),
-                auto_fallback=bool(local_info["auto_fallback"]),
             )
         render_analysis_ready("Phone investigation evidence collected")
         st.caption("The unified investigation object is saved in session state for the next output phase.")
@@ -2756,110 +2621,3 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
 
     st.markdown("</div>", unsafe_allow_html=True)
     return
-
-    provider = "omkar_carrier_lookup"
-
-    render_detection_tool_intro(
-        title="Phone Number",
-        description=(
-            "Check phone-number validity, carrier metadata, and local reputation evidence using Omkar Carrier "
-            "Lookup first, then a local fallback dataset when live metadata is unavailable."
-        ),
-        icon="solar:phone-calling-rounded-bold-duotone",
-        accent="orange",
-    )
-
-    render_section_header(
-        "Phone number metadata lookup",
-        "Omkar provides carrier and validity metadata. Local fallback records provide reputation evidence when available.",
-        "Carrier lookup",
-    )
-
-    st.caption(
-        "Live provider: Omkar Carrier Lookup. Results use carrier metadata first, then local fallback evidence when available."
-    )
-
-    render_info_banner(
-        "Omkar metadata does not contain police reports, community scam reports, or scam probability. "
-        "A valid number is not automatically a safe caller.",
-        kind="info",
-        code="SCOPE",
-    )
-
-    demo_mode = st.checkbox(
-        "Demo Mode - allow fictional phone records for presentation",
-        value=False,
-        key="phone_demo_mode",
-        help=(
-            "Normal lookups do not search synthetic demo records. Enable this only when you intentionally "
-            "want capstone presentation samples."
-        ),
-    )
-    if demo_mode:
-        render_info_banner(
-            "Demo Mode is enabled. Fictional local records may be returned and will be labelled as demonstration data.",
-            kind="warning",
-            code="DEMO MODE",
-        )
-
-    key_meta = _render_api_setup(provider, root)
-    _render_provider_connection_check(provider, key_meta)
-    api_key = str(key_meta.get("key", "") or "")
-
-    _render_phone_step(
-        "01",
-        "Enter Phone Number",
-        "Use local or international format. Examples: 012-345 6789, +60 12-345 6789, or (03) 1234 5678.",
-    )
-    render_content_card_open("violet")
-    number = st.text_input(
-        "Phone number",
-        placeholder="012-345 6789 or +60 12-345 6789",
-        help=(
-            "Spaces, hyphens, brackets, and one leading plus sign are accepted. "
-            "The app normalizes the value before provider lookup."
-        ),
-    )
-    claimed_identity = st.text_input(
-        "Claimed caller identity (optional)",
-        placeholder="Example: bank officer, courier, university support, unknown caller",
-    )
-
-    ok, validation_message = validate_phone_query(number)
-    normalized = normalise_phone_query(number)
-    if number.strip() and not ok:
-        st.warning(validation_message)
-    elif normalized:
-        st.caption(f"Normalized lookup query: `{normalized}`")
-    render_content_card_close()
-
-    _render_phone_step("02", "Check Reputation", "Try Omkar Carrier Lookup first, then local fallback, then unknown fallback.")
-    check_button = st.button("Check Phone Reputation", type="primary", use_container_width=True)
-
-    render_info_banner(
-        "This module does not intercept calls or verify telecom ownership. It checks reputation evidence and teaches safe response.",
-        kind="info",
-        code="SCOPE",
-    )
-
-    if not check_button:
-        return
-
-    if not ok:
-        st.warning(validation_message)
-        return
-
-    with st.spinner("Checking caller reputation..."):
-        try:
-            lookup_result = _lookup_phone_compat(
-                normalized,
-                root,
-                provider=provider,
-                api_key=api_key,
-                demo_mode=demo_mode,
-            )
-        except ValueError as exc:
-            st.warning(str(exc))
-            return
-
-    _render_result(root, lookup_result, claimed_identity, history)

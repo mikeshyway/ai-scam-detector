@@ -63,7 +63,6 @@ def get_dataset_status(root: str) -> dict[str, bool]:
         "Email datasets": base / "data/raw/email",
         "Transcript datasets": base / "data/raw/voice_transcript",
         "ASVspoof source": base / "data/raw/asvspoof_2019_dataset_subset",
-        "Processed phone fallback": base / "data/processed/phone/phone_dataset.csv",
     }
     status: dict[str, bool] = {}
     for name, path in checks.items():
