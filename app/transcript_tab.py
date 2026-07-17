@@ -2951,45 +2951,45 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
 
         st.markdown('<div class="transcript-step-divider"></div>', unsafe_allow_html=True)
 
+        _transcript_step_header(
+            "03",
+            "Review Transcript Text",
+            "Upload TXT or CSV evidence, paste transcript text, or leave this step disabled for audio-only analysis.",
+        )
+
+        transcript_enabled = bool(
+            st.session_state.get("transcript_use_text", False)
+        )
+        transcript_left, transcript_right = st.columns([0.34, 0.66], gap="small")
+
+        with transcript_left:
+            uploaded_file = st.file_uploader(
+                "Upload transcript TXT or CSV",
+                type=["txt", "csv"],
+                key="transcript_text_upload",
+                disabled=not transcript_enabled,
+            )
+            uploaded = _read_upload(uploaded_file) if transcript_enabled else None
+
+        with transcript_right:
+            if isinstance(uploaded, str):
+                st.session_state["transcript_text_preview"] = uploaded
+
+            text = st.text_area(
+                "Transcript preview",
+                height=260,
+                placeholder=(
+                    "Paste a call, Zoom, Teams, or Google Meet transcript here."
+                    if transcript_enabled
+                    else "Transcript input is disabled. Enable 'Uploaded or Pasted Transcript' above."
+                ),
+                disabled=not transcript_enabled,
+                key="transcript_text_preview",
+            )
+
+        st.markdown('<div class="transcript-step-divider"></div>', unsafe_allow_html=True)
+
         with st.form("transcript_analysis_form", clear_on_submit=False):
-            _transcript_step_header(
-                "03",
-                "Review Transcript Text",
-                "Upload TXT or CSV evidence, paste transcript text, or leave this step disabled for audio-only analysis.",
-            )
-
-            transcript_enabled = bool(
-                st.session_state.get("transcript_use_text", False)
-            )
-            transcript_left, transcript_right = st.columns([0.34, 0.66], gap="small")
-
-            with transcript_left:
-                uploaded_file = st.file_uploader(
-                    "Upload transcript TXT or CSV",
-                    type=["txt", "csv"],
-                    key="transcript_text_upload",
-                    disabled=not transcript_enabled,
-                )
-                uploaded = _read_upload(uploaded_file) if transcript_enabled else None
-
-            with transcript_right:
-                if isinstance(uploaded, str):
-                    st.session_state["transcript_text_preview"] = uploaded
-
-                text = st.text_area(
-                    "Transcript preview",
-                    height=260,
-                    placeholder=(
-                        "Paste a call, Zoom, Teams, or Google Meet transcript here."
-                        if transcript_enabled
-                        else "Transcript input is disabled. Enable 'Uploaded or Pasted Transcript' above."
-                    ),
-                    disabled=not transcript_enabled,
-                    key="transcript_text_preview",
-                )
-
-            st.markdown('<div class="transcript-step-divider"></div>', unsafe_allow_html=True)
-
             _transcript_step_header(
                 "04",
                 "Confirm and Analyze",
