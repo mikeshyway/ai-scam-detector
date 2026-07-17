@@ -166,6 +166,13 @@ reports/cache/
 !data/processed/**/*.ogg
 !data/processed/**/*.m4a
 
+# Demo/runtime fallback data is deployable; raw datasets remain ignored above.
+!data/demo/
+!data/demo/**/*.csv
+!data/demo/**/*.tsv
+!data/demo/**/*.parquet
+!data/demo/**/*.feather
+
 # ----------------------------------------------------------
 # NumPy training artifacts / feature dumps
 # ----------------------------------------------------------

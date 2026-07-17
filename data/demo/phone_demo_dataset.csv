@@ -1,0 +1,51 @@
+phone,police_report_count,verified_report_count,spam,fraud,business_tier,business_name,spoofing_report_count,source,record_type,is_demo,source_reference,last_verified
+0123456789,4,12,true,true,none,,7,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0137654321,2,8,true,true,none,,3,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0149988776,1,6,true,true,none,,2,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0162345678,5,14,true,true,none,,8,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0178881122,3,9,true,true,none,,5,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0186677889,2,11,true,true,none,,6,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0195551234,1,7,true,true,none,,4,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0112223344,6,16,true,true,none,,9,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0119090909,3,10,true,true,none,,7,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0127070707,2,5,true,true,none,,2,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0136060606,1,4,true,true,none,,3,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0145050505,4,13,true,true,none,,5,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0154040404,2,6,true,true,none,,2,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0163030303,1,3,true,true,none,,2,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0172020202,0,3,true,false,unverified,Digital Wallet Care,1,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0181010101,0,2,true,false,unverified,Online Marketplace Help,1,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0192929292,0,2,true,false,none,,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0113838383,0,1,true,false,none,,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0124747474,0,2,true,false,registered,ParcelLink Express,1,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0135656565,0,3,true,false,unverified,FastCourier Malaysia,1,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0146565656,0,1,true,false,ecommerce,ShopNexa Support,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0157474747,0,2,true,false,telecom,TeleCom Customer Care,1,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0168383838,0,1,true,false,delivery,MetroDelivery Helpdesk,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0179292929,0,2,true,false,none,,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0184545454,0,3,true,false,unverified,MyUtility Services,1,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0321234567,0,0,false,false,bank,SecureBank Support,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0387654321,0,0,false,false,government,City Water Department,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0398765432,0,0,false,false,telecom,TeleCom Customer Care,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0376543210,0,0,false,false,delivery,ParcelLink Express,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0355512345,0,0,false,false,ecommerce,Online Marketplace Help,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0366654321,0,0,false,false,verified,MetroHealth Appointment Desk,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0377788990,0,0,false,false,registered,Campus Shuttle Office,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0388899001,0,0,false,false,government,National Revenue Office,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0399900112,0,0,false,false,verified,MyUtility Services,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0322200333,0,0,false,false,bank,Digital Wallet Care,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0121112233,0,0,false,false,none,,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0132223344,0,0,false,false,none,,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0143334455,0,0,false,false,none,,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0154445566,0,0,false,false,none,,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0165556677,0,0,false,false,none,,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0176667788,0,0,false,false,none,,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0187778899,0,0,false,false,none,,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0198889900,0,0,false,false,none,,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0111234987,0,0,false,false,unverified,QuickLoan Assist,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0112345098,0,0,false,false,registered,Neighbourhood Repair Services,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0123457098,0,0,false,false,unverified,Student Device Care,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0134568901,0,0,false,false,registered,Local Tuition Helpdesk,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0145679012,0,0,false,false,unverified,Event Ticket Support,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0156780123,0,0,false,false,registered,Community Clinic Desk,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
+0167891234,0,0,false,false,unverified,Travel Voucher Centre,0,demo_processed,demo,true,synthetic_capstone_demo,2026-07-11
