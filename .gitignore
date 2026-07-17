@@ -102,7 +102,9 @@ temp/
 models/**/model.safetensors
 models/**/pytorch_model.bin
 models/transcript_bert/
-models/transcript_distilbert/
+!models/transcript_distilbert/
+!models/transcript_distilbert/**
+!models/transcript_distilbert/model.safetensors
 
 # Local archive for heavy artifacts we keep on disk but never deploy.
 archive/local_models/

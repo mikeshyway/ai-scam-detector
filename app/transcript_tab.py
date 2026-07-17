@@ -219,6 +219,11 @@ def _available_transcript_models(root: Path) -> list[str]:
 
 
 def _default_transcript_model_keys(options: list[str]) -> list[str]:
+    transformer_defaults = [key for key in ("distilbert",) if key in options]
+    if transformer_defaults:
+        anchors = [key for key in ("svm", "nb") if key in options]
+        return (transformer_defaults + anchors)[:4]
+
     preferred = ["nb", "svm"]
     defaults = [key for key in preferred if key in options]
     return defaults or options[:1]

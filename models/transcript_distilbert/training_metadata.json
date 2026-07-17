@@ -1,0 +1,13 @@
+{
+  "model": "DistilBERT",
+  "checkpoint": "distilbert-base-uncased",
+  "labels": {
+    "0": "Legitimate",
+    "1": "Suspicious"
+  },
+  "max_length": 256,
+  "epochs": 1,
+  "batch_size": 4,
+  "learning_rate": 2e-05,
+  "training_time_seconds": 590.2117592999984
+}
