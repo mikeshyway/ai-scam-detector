@@ -1,10 +1,13 @@
-"""Call and meeting transcript scam detection tab with browser voice recorder."""
+"""Call and meeting transcript scam detection tab with uploaded audio support."""
 
 from __future__ import annotations
 
 import hashlib
 import html
+import importlib
 import json
+import os
+import re
 import tempfile
 from difflib import SequenceMatcher
 from datetime import datetime
@@ -27,12 +30,10 @@ from app.ui_components import (
     render_result_card,
     render_section_header,
 )
-from src.audio.audio_classifier import load_audio_behavior_model, load_audio_model
 from src.text.explainability import (
     educational_summary,
     find_suspicious_phrases,
     highlighted_html,
-    top_model_terms,
 )
 try:
     from src.reporting.history_db import record_history_item
@@ -41,27 +42,68 @@ except ImportError:
     import src.reporting.history_db as history_db
 
     record_history_item = importlib.reload(history_db).record_history_item
-from src.audio.live_audio_analysis import (
-    BEHAVIORAL_FEATURE_NAMES,
-    analyse_live_chunk,
-    transcribe_with_whisper,
-    wav_bytes_to_audio,
-)
+import src.audio.live_audio_analysis as live_audio_analysis
 from src.text.rule_demo import rule_based_text_prediction
-from src.text.text_classifier import load_text_artifacts
 
-try:
-    import whisper as _whisper
+if not all(
+    hasattr(live_audio_analysis, name)
+    for name in (
+        "BEHAVIORAL_FEATURE_NAMES",
+        "assess_speech_quality",
+        "analyse_live_chunk",
+        "transcribe_with_whisper_details",
+    )
+):
+    live_audio_analysis = importlib.reload(live_audio_analysis)
 
-    WHISPER_AVAILABLE = True
-except Exception:
-    _whisper = None
-    WHISPER_AVAILABLE = False
+BEHAVIORAL_FEATURE_NAMES = live_audio_analysis.BEHAVIORAL_FEATURE_NAMES
+assess_speech_quality = live_audio_analysis.assess_speech_quality
+analyse_live_chunk = live_audio_analysis.analyse_live_chunk
+transcribe_with_whisper_details = live_audio_analysis.transcribe_with_whisper_details
+
+
+WHISPER_MODEL_LABELS = {
+    "tiny.en": "tiny.en - fastest English, lowest accuracy",
+    "tiny": "tiny - fastest multilingual, lowest accuracy",
+    "base.en": "base.en - fast English, better demo default",
+    "base": "base - fast multilingual",
+    "small.en": "small.en - slower English, stronger accuracy",
+    "small": "small - slower multilingual, stronger accuracy",
+    "medium.en": "medium.en - high accuracy, high memory",
+    "medium": "medium - high accuracy multilingual, high memory",
+    "large-v3-turbo": "large-v3-turbo - strongest local option, very high memory",
+    "turbo": "turbo - strongest local option, very high memory",
+}
+WHISPER_MODEL_ORDER = [
+    "tiny.en",
+    "tiny",
+    "base.en",
+    "base",
+    "small.en",
+    "small",
+    "medium.en",
+    "medium",
+    "large-v3-turbo",
+    "turbo",
+]
+WHISPER_INITIAL_PROMPT = (
+    "This is an English call or meeting transcript about student safety, banking, "
+    "verification, accounts, payments, OTPs, passwords, universities, and scam prevention."
+)
+TRANSCRIPT_MODEL_FILES = {
+    "nb": ("Naive Bayes", "transcript_nb.pkl"),
+    "svm": ("SVM", "transcript_svm.pkl"),
+    "distilbert": ("DistilBERT", "transcript_distilbert"),
+}
+TRANSCRIPT_TRANSFORMER_MODEL_KEYS = {"distilbert"}
+LOCAL_TRANSFORMER_ARCHIVE = Path("archive") / "local_models" / "models"
 
 
 @st.cache_resource(show_spinner=False)
 def _load_audio_classifier(root: str):
     try:
+        from src.audio.audio_classifier import load_audio_model
+
         return load_audio_model(Path(root) / "models" / "audio_svm.pkl")
     except Exception:
         return None
@@ -70,50 +112,153 @@ def _load_audio_classifier(root: str):
 @st.cache_resource(show_spinner=False)
 def _load_behavioral_classifier(root: str):
     try:
+        from src.audio.audio_classifier import load_audio_behavior_model
+
         return load_audio_behavior_model(Path(root) / "models" / "audio_behavior_rf.pkl")
     except Exception:
         return None
 
 
 @st.cache_resource(show_spinner=False)
-def _load_transcript_classifier(root: str):
+def _load_transcript_classifier(root: str, model_key: str = "nb"):
+    model_path, model_name = _transcript_model_artifact(Path(root), model_key)
+    if model_key in TRANSCRIPT_TRANSFORMER_MODEL_KEYS:
+        from src.text.transformer_classifier import load_transformer_text_artifacts
+
+        return load_transformer_text_artifacts(model_path, model_name=model_name)
+    from src.text.text_classifier import load_text_artifacts
+
     return load_text_artifacts(
         Path(root) / "models" / "transcript_vectorizer.pkl",
-        Path(root) / "models" / "transcript_nb.pkl",
-        model_name="Transcript Naive Bayes",
+        model_path,
+        model_name=model_name,
     )
 
 
 @st.cache_resource(show_spinner=False)
-def _load_transcript_classifier_safe(root: str):
+def _load_transcript_classifier_safe(root: str, model_key: str = "nb"):
     try:
-        return _load_transcript_classifier(root)
+        return _load_transcript_classifier(root, model_key)
     except Exception:
         return None
 
 
 @st.cache_resource(show_spinner=False)
 def _load_whisper_model(model_size: str):
-    if not WHISPER_AVAILABLE or _whisper is None:
+    whisper_module = _load_whisper_module()
+    if whisper_module is None:
         return None
-    return _whisper.load_model(model_size)
+    return whisper_module.load_model(model_size)
+
+
+def _load_whisper_module() -> Any | None:
+    try:
+        import whisper
+    except Exception:
+        return None
+    return whisper
+
+
+def _transcript_model_candidates(root: Path, model_key: str) -> list[Path]:
+    _label, filename = TRANSCRIPT_MODEL_FILES.get(
+        model_key,
+        TRANSCRIPT_MODEL_FILES["nb"],
+    )
+    candidates = [root / "models" / filename]
+    if model_key in TRANSCRIPT_TRANSFORMER_MODEL_KEYS:
+        env_root = os.environ.get("AIFDS_LOCAL_TRANSFORMER_MODELS_DIR", "").strip()
+        if env_root:
+            env_path = Path(env_root)
+            candidates.extend([env_path / filename, env_path])
+        candidates.append(root / LOCAL_TRANSFORMER_ARCHIVE / filename)
+    return candidates
+
+
+def _transcript_model_path(root: Path, model_key: str) -> Path:
+    candidates = _transcript_model_candidates(root, model_key)
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[0]
+
+
+def _transcript_model_label(root: Path, model_key: str) -> str:
+    label, _filename = TRANSCRIPT_MODEL_FILES.get(
+        model_key,
+        TRANSCRIPT_MODEL_FILES["nb"],
+    )
+    return label
+
+
+def _transcript_model_artifact(root: Path, model_key: str = "nb") -> tuple[Path, str]:
+    """Return the selected transcript model artifact, falling back safely."""
+
+    label, filename = TRANSCRIPT_MODEL_FILES.get(
+        model_key,
+        TRANSCRIPT_MODEL_FILES["nb"],
+    )
+    model_path = _transcript_model_path(root, model_key)
+    if model_path.exists():
+        return model_path, f"Transcript {label}"
+
+    for fallback_key, (fallback_label, fallback_filename) in TRANSCRIPT_MODEL_FILES.items():
+        fallback_path = _transcript_model_path(root, fallback_key)
+        if fallback_path.exists():
+            return fallback_path, f"Transcript {fallback_label}"
+
+    return root / "models" / "transcript_nb.pkl", "Transcript Naive Bayes"
+
+
+def _available_transcript_models(root: Path) -> list[str]:
+    options = [
+        key
+        for key, (_label, filename) in TRANSCRIPT_MODEL_FILES.items()
+        if _transcript_model_path(root, key).exists()
+    ]
+    return options or ["nb"]
+
+
+def _default_transcript_model_keys(options: list[str]) -> list[str]:
+    preferred = ["nb", "svm"]
+    defaults = [key for key in preferred if key in options]
+    return defaults or options[:1]
+
+
+def _available_whisper_models() -> list[str]:
+    return ["tiny.en", "tiny", "base.en", "base", "small.en", "small"]
+
+
+def _cached_whisper_models() -> set[str]:
+    cache_dir = Path.home() / ".cache" / "whisper"
+    if not cache_dir.exists():
+        return set()
+    return {path.stem for path in cache_dir.glob("*.pt")}
+
+
+def _whisper_model_label(model_name: str) -> str:
+    label = WHISPER_MODEL_LABELS.get(model_name, model_name)
+    cached = _cached_whisper_models()
+    if model_name in cached:
+        return f"{label} | cached"
+    return f"{label} | first use may download"
+
+
+def _default_whisper_model(options: list[str]) -> str:
+    cached = _cached_whisper_models()
+    for model_name in ("base.en", "base", "tiny.en", "tiny"):
+        if model_name in options and model_name in cached:
+            return model_name
+    for model_name in ("base.en", "base", "tiny.en", "tiny"):
+        if model_name in options:
+            return model_name
+    return options[0]
 
 
 def _init_transcript_voice_state() -> None:
     defaults: dict[str, Any] = {
-        "transcript_use_voice": False,
         "transcript_use_uploaded_audio": False,
         "transcript_use_text": False,
         "transcript_text_preview": "",
-        "transcript_voice_sessions": [],
-        "transcript_voice_active_session_id": None,
-        "transcript_voice_active_index": 0,
-        "transcript_voice_selector_generation": 0,
-        "transcript_voice_mode": "record",
-        "transcript_recorder_generation": 0,
-        "transcript_recorder_error": "",
-        "transcript_recorder_carousel_index": 0,
-        "transcript_pending_voice_analysis": False,
         "transcript_uploaded_audio_file_name": None,
         "transcript_uploaded_audio_file_bytes": None,
         "transcript_uploaded_audio_file_suffix": "",
@@ -127,163 +272,19 @@ def _init_transcript_voice_state() -> None:
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
-
-
-def _on_voice_source_change() -> None:
-    """Keep voice recording and uploaded audio mutually exclusive."""
-
-    if st.session_state.get("transcript_use_voice", False):
-        st.session_state["transcript_use_uploaded_audio"] = False
-
-
-def _on_uploaded_audio_source_change() -> None:
-    """Keep uploaded audio and voice recording mutually exclusive."""
-
-    if st.session_state.get("transcript_use_uploaded_audio", False):
-        st.session_state["transcript_use_voice"] = False
-
-
-def _on_voice_session_selected() -> None:
-    """Show selected saved recording in the shared recorder display area."""
-
-    selector_generation = int(
-        st.session_state.get("transcript_voice_selector_generation", 0)
-    )
-    selector_key = f"transcript_voice_session_selector_{selector_generation}"
-    selected_session_id = st.session_state.get(selector_key)
-
-    if selected_session_id:
-        st.session_state["transcript_voice_active_session_id"] = str(
-            selected_session_id
-        )
-
-    st.session_state["transcript_voice_mode"] = "saved"
-    st.session_state["transcript_recorder_carousel_index"] = 0
-
-
-def _voice_sessions() -> list[dict[str, object]]:
-    sessions = st.session_state.get("transcript_voice_sessions", [])
-    return sessions if isinstance(sessions, list) else []
-
-
-def _active_voice_session() -> dict[str, object] | None:
-    """Return the saved recording currently selected by session ID."""
-
-    sessions = _voice_sessions()
-    if not sessions:
-        st.session_state["transcript_voice_active_session_id"] = None
-        st.session_state["transcript_voice_active_index"] = 0
-        return None
-
-    active_id = st.session_state.get("transcript_voice_active_session_id")
-
-    for index, session in enumerate(sessions):
-        if str(session.get("session_id", "")) == str(active_id):
-            st.session_state["transcript_voice_active_index"] = index
-            return session
-
-    newest_index = len(sessions) - 1
-    newest_session = sessions[newest_index]
-
-    st.session_state["transcript_voice_active_index"] = newest_index
-    st.session_state["transcript_voice_active_session_id"] = str(
-        newest_session.get("session_id", "")
-    )
-
-    return newest_session
-
-
-def _create_voice_session(
-    *,
-    audio_bytes: bytes,
-    signature: str,
-    results: list[dict[str, object]],
-) -> None:
-    sessions = _voice_sessions()
-    session_number = len(sessions) + 1
-    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    transcript_parts = [
-        str(item.get("transcript", "")).strip()
-        for item in results
-        if str(item.get("transcript", "")).strip()
-    ]
-
-    session = {
-        "session_id": datetime.now().strftime("voice_%Y%m%d_%H%M%S_%f"),
-        "title": f"Recorded voice {session_number}",
-        "created_at": created_at,
-        "audio_bytes": audio_bytes,
-        "signature": signature,
-        "results": results,
-        "transcript": "\n".join(transcript_parts),
-    }
-
-    sessions.append(session)
-    st.session_state["transcript_voice_sessions"] = sessions
-    st.session_state["transcript_voice_active_index"] = len(sessions) - 1
-    st.session_state["transcript_voice_active_session_id"] = str(
-        session["session_id"]
-    )
-    st.session_state["transcript_voice_mode"] = "saved"
-    st.session_state["transcript_recorder_carousel_index"] = 0
-
-
-def _delete_active_voice_session() -> None:
-    sessions = _voice_sessions()
-    if not sessions:
-        return
-
-    active_id = str(
-        st.session_state.get("transcript_voice_active_session_id", "")
-    )
-    active_index = next(
-        (
-            index
-            for index, session in enumerate(sessions)
-            if str(session.get("session_id", "")) == active_id
-        ),
-        len(sessions) - 1,
-    )
-
-    sessions.pop(active_index)
-    st.session_state["transcript_voice_sessions"] = sessions
-
-    if sessions:
-        next_index = min(active_index, len(sessions) - 1)
-        next_session = sessions[next_index]
-        st.session_state["transcript_voice_active_index"] = next_index
-        st.session_state["transcript_voice_active_session_id"] = str(
-            next_session.get("session_id", "")
-        )
-        st.session_state["transcript_voice_mode"] = "saved"
-    else:
-        st.session_state["transcript_voice_active_index"] = 0
-        st.session_state["transcript_voice_active_session_id"] = None
-        st.session_state["transcript_voice_mode"] = "record"
-        st.session_state["transcript_recorder_generation"] = (
-            int(st.session_state.get("transcript_recorder_generation", 0)) + 1
-        )
-
-    st.session_state["transcript_voice_selector_generation"] = (
-        int(st.session_state.get("transcript_voice_selector_generation", 0)) + 1
-    )
-    st.session_state["transcript_recorder_carousel_index"] = 0
-
-
-def _clear_recorder_state() -> None:
-    st.session_state["transcript_voice_sessions"] = []
-    st.session_state["transcript_voice_active_index"] = 0
-    st.session_state["transcript_voice_active_session_id"] = None
-    st.session_state["transcript_voice_mode"] = "record"
-    st.session_state["transcript_recorder_error"] = ""
-    st.session_state["transcript_recorder_carousel_index"] = 0
-    st.session_state["transcript_voice_selector_generation"] = (
-        int(st.session_state.get("transcript_voice_selector_generation", 0)) + 1
-    )
-    st.session_state["transcript_recorder_generation"] = (
-        int(st.session_state.get("transcript_recorder_generation", 0)) + 1
-    )
+    for key in (
+        "transcript_use_voice",
+        "transcript_voice_sessions",
+        "transcript_voice_active_session_id",
+        "transcript_voice_active_index",
+        "transcript_voice_selector_generation",
+        "transcript_voice_mode",
+        "transcript_recorder_generation",
+        "transcript_recorder_error",
+        "transcript_recorder_carousel_index",
+        "transcript_pending_voice_analysis",
+    ):
+        st.session_state.pop(key, None)
 
 
 def _clear_uploaded_audio_state(
@@ -326,6 +327,8 @@ def _process_audio_array(
     transcript_source: str,
     manual_transcript: str,
     whisper_model: Any | None,
+    whisper_language: str | None = "en",
+    whisper_task: str = "transcribe",
     audio_classifier: Any | None,
     text_classifier: Any | None,
     behavioral_classifier: Any | None,
@@ -338,52 +341,68 @@ def _process_audio_array(
 
     processed = []
     for index, chunk in enumerate(_recording_chunks(audio, sample_rate, chunk_seconds)):
+        audio_quality = assess_speech_quality(chunk, sample_rate=sample_rate)
+        transcription_details: dict[str, object] = {
+            "text": "",
+            "usable": False,
+            "quality_label": str(audio_quality.get("reason", "Not transcribed")),
+            "warnings": [],
+            "language": whisper_language or "",
+            "language_confidence": None,
+            "forced_language": whisper_language or "",
+            "no_speech_probability": None,
+            "avg_logprob": None,
+            "compression_ratio": None,
+        }
         if transcript_source == "Local Whisper":
-            if chunk.size < sample_rate * 1.0 or float(np.abs(chunk).mean()) < 0.0005:
+            if not bool(audio_quality.get("usable_speech", True)):
                 transcript = ""
             else:
-                transcript = transcribe_with_whisper(chunk, whisper_model)
+                transcription_details = transcribe_with_whisper_details(
+                    chunk,
+                    whisper_model,
+                    language=whisper_language,
+                    task=whisper_task,
+                    initial_prompt=WHISPER_INITIAL_PROMPT,
+                )
+                transcript = str(transcription_details.get("text", "")).strip()
         elif transcript_source == "Manual transcript" and index == 0:
             transcript = manual_transcript
+            transcription_details = {
+                **transcription_details,
+                "text": transcript,
+                "raw_text": transcript,
+                "usable": bool(transcript.strip()),
+                "quality_label": "Manual transcript supplied",
+            }
         else:
             transcript = ""
 
-        processed.append(
-            analyse_live_chunk(
-                chunk,
-                transcript=transcript,
-                audio_classifier=audio_classifier,
-                text_classifier=text_classifier,
-                behavioral_classifier=behavioral_classifier,
-                sample_rate=sample_rate,
-            )
+        result = analyse_live_chunk(
+            chunk,
+            transcript=transcript,
+            audio_classifier=audio_classifier,
+            text_classifier=text_classifier,
+            behavioral_classifier=behavioral_classifier,
+            sample_rate=sample_rate,
         )
+        result["pre_transcription_quality"] = audio_quality
+        result["transcription"] = transcription_details
+        result["transcription_status"] = str(
+            transcription_details.get("quality_label")
+            or audio_quality.get("reason")
+            or "Not transcribed"
+        )
+        result["quality_warnings"] = [
+            *list(result.get("quality_warnings", [])),
+            *[
+                str(message)
+                for message in transcription_details.get("warnings", [])
+                if str(message).strip()
+            ],
+        ]
+        processed.append(result)
     return processed
-
-
-def _process_recording(
-    audio_bytes: bytes,
-    *,
-    chunk_seconds: int,
-    transcript_source: str,
-    manual_transcript: str,
-    whisper_model: Any | None,
-    audio_classifier: Any | None,
-    text_classifier: Any | None,
-    behavioral_classifier: Any | None,
-) -> list[dict[str, object]]:
-    audio, sample_rate = wav_bytes_to_audio(audio_bytes, target_sample_rate=16_000)
-    return _process_audio_array(
-        audio,
-        sample_rate,
-        chunk_seconds=chunk_seconds,
-        transcript_source=transcript_source,
-        manual_transcript=manual_transcript,
-        whisper_model=whisper_model,
-        audio_classifier=audio_classifier,
-        text_classifier=text_classifier,
-        behavioral_classifier=behavioral_classifier,
-    )
 
 
 def _process_uploaded_audio(
@@ -394,6 +413,8 @@ def _process_uploaded_audio(
     transcript_source: str,
     manual_transcript: str,
     whisper_model: Any | None,
+    whisper_language: str | None = "en",
+    whisper_task: str = "transcribe",
     audio_classifier: Any | None,
     text_classifier: Any | None,
     behavioral_classifier: Any | None,
@@ -418,6 +439,8 @@ def _process_uploaded_audio(
             transcript_source=transcript_source,
             manual_transcript=manual_transcript,
             whisper_model=whisper_model,
+            whisper_language=whisper_language,
+            whisper_task=whisper_task,
             audio_classifier=audio_classifier,
             text_classifier=text_classifier,
             behavioral_classifier=behavioral_classifier,
@@ -442,6 +465,10 @@ def _analyse_selected_uploaded_audio(
     *,
     chunk_seconds: int,
     whisper_size: str,
+    whisper_language: str | None = "en",
+    whisper_task: str = "transcribe",
+    transcript_model_key: str = "nb",
+    analysis_signature: str | None = None,
 ) -> list[dict[str, object]]:
     """Analyze only the currently selected uploaded-audio file."""
 
@@ -455,11 +482,13 @@ def _analyse_selected_uploaded_audio(
     if suffix not in {".wav", ".mp3", ".flac"}:
         raise RuntimeError("The selected uploaded audio must be WAV, MP3, or FLAC.")
 
-    whisper_model = None
-    if WHISPER_AVAILABLE:
-        whisper_model = _load_whisper_model(whisper_size)
-        if whisper_model is None:
-            raise RuntimeError("The selected Whisper model could not be loaded.")
+    whisper_model = _load_whisper_model(whisper_size)
+    if whisper_model is None:
+        st.session_state["transcript_uploaded_audio_whisper_notice"] = (
+            "Local Whisper is unavailable in this environment, so uploaded audio was analysed without speech-to-text."
+        )
+    else:
+        st.session_state.pop("transcript_uploaded_audio_whisper_notice", None)
 
     transcript_source = "Local Whisper" if whisper_model is not None else "Audio only"
 
@@ -470,8 +499,10 @@ def _analyse_selected_uploaded_audio(
         transcript_source=transcript_source,
         manual_transcript="",
         whisper_model=whisper_model,
+        whisper_language=whisper_language,
+        whisper_task=whisper_task,
         audio_classifier=_load_audio_classifier(str(root)),
-        text_classifier=_load_transcript_classifier_safe(str(root)),
+        text_classifier=_load_transcript_classifier_safe(str(root), transcript_model_key),
         behavioral_classifier=_load_behavioral_classifier(str(root)),
     )
 
@@ -490,7 +521,9 @@ def _analyse_selected_uploaded_audio(
         result["source_signature"] = signature
 
     st.session_state["transcript_uploaded_audio_results"] = processed
-    st.session_state["transcript_uploaded_audio_last_processed_signature"] = signature
+    st.session_state["transcript_uploaded_audio_last_processed_signature"] = (
+        analysis_signature or signature
+    )
     st.session_state["transcript_uploaded_audio_error"] = ""
     st.session_state["transcript_pending_uploaded_audio_analysis"] = True
     st.session_state["transcript_uploaded_audio_carousel_index"] = 0
@@ -619,6 +652,20 @@ def _result_table(results: list[dict[str, object]]) -> pd.DataFrame:
     rows = []
     for result in reversed(results[-20:]):
         transcript = str(result.get("transcript", "")).strip()
+        quality = result.get("audio_quality", {})
+        if not isinstance(quality, dict):
+            quality = {}
+        transcription = result.get("transcription", {})
+        if not isinstance(transcription, dict):
+            transcription = {}
+        detected_language = str(
+            transcription.get("detected_language")
+            or transcription.get("language")
+            or "-"
+        )
+        language_confidence = transcription.get("language_confidence")
+        if isinstance(language_confidence, (int, float)):
+            detected_language = f"{detected_language} ({float(language_confidence) * 100:.0f}%)"
         rows.append(
             {
                 "Clip": int(result.get("clip", 1)),
@@ -628,7 +675,10 @@ def _result_table(results: list[dict[str, object]]) -> pd.DataFrame:
                 "Voice": f"{float(result.get('voice_risk', 0)):.1f}%",
                 "Transcript": f"{float(result.get('transcript_risk', 0)):.1f}%",
                 "Behavioral": _risk_value_text(result.get("behavioral_risk")),
-                "Detected text": transcript or "Audio-only chunk",
+                "Speech quality": quality.get("reason", "Usable speech-like audio"),
+                "Whisper": result.get("transcription_status", "Not transcribed"),
+                "Language check": detected_language,
+                "Detected text": transcript or "No usable speech text",
                 "Flags": ", ".join(result.get("flags", [])) or "-",
             }
         )
@@ -709,6 +759,21 @@ def _render_live_dashboard(
                 st.error(
                     f"Alert threshold reached. This chunk scored {float(latest.get('risk', 0)):.1f}% combined risk."
                 )
+            quality_messages = [
+                str(message)
+                for message in latest.get("quality_warnings", [])
+                if str(message).strip()
+            ]
+            audio_quality = latest.get("audio_quality", {})
+            if isinstance(audio_quality, dict) and not bool(
+                audio_quality.get("usable_speech", True)
+            ):
+                quality_messages.insert(
+                    0,
+                    str(audio_quality.get("reason", "No usable speech detected")),
+                )
+            if quality_messages:
+                st.warning("Audio/transcript quality: " + " ".join(dict.fromkeys(quality_messages)))
         else:
             st.info(empty_message)
 
@@ -760,6 +825,7 @@ def _render_live_dashboard(
                     {"Feature": "Voice AI risk", "Value": f"{float(latest.get('voice_risk', 0)):.2f}%"},
                     {"Feature": "Transcript scam risk", "Value": f"{float(latest.get('transcript_risk', 0)):.2f}%"},
                     {"Feature": "Behavioral risk", "Value": _risk_value_text(latest.get("behavioral_risk"))},
+                    {"Feature": "Speech quality", "Value": str(audio_quality.get("reason", "Usable speech-like audio")) if isinstance(audio_quality, dict) else "Unknown"},
                     {"Feature": "Pitch variance", "Value": f"{float(features.get('pitch_variance', 0)):.2f} Hz"},
                     {"Feature": "Spectral centroid", "Value": f"{float(features.get('spectral_centroid', 0)) / 1000:.2f} kHz"},
                     {"Feature": "Dominant frequency", "Value": f"{float(features.get('dominant_frequency', 0)):.1f} Hz"},
@@ -889,6 +955,7 @@ def _render_recording_carousel(
             "Recommendation: no strong scam indicators were found in this recording, but continue "
             "to verify unexpected requests."
         )
+    _render_student_ctas(peak, title="Audio response checklist")
 
     _render_dashboard_section(
         clip_results,
@@ -897,25 +964,6 @@ def _render_recording_carousel(
         frequency_heading=frequency_heading,
         latest_title=latest_title,
     )
-
-
-def _recorder_transcript_text() -> str:
-    """Return usable transcript text from the selected speaker voice recording."""
-
-    session = _active_voice_session()
-    if not session:
-        return ""
-
-    return str(session.get("transcript", "")).strip()
-
-
-def _active_recorder_results() -> list[dict[str, object]]:
-    session = _active_voice_session()
-    if not session:
-        return []
-
-    results = session.get("results", [])
-    return list(results) if isinstance(results, list) else []
 
 
 def _uploaded_audio_transcript_text() -> str:
@@ -941,25 +989,6 @@ def _transcript_text_from_results(results: object) -> str:
     return "\n".join(lines).strip()
 
 
-def _combined_source_text(mode: str, voice_text: str, transcript_text: str) -> str:
-    """Build the final text passed into the transcript classifier."""
-
-    voice_text = voice_text.strip()
-    transcript_text = transcript_text.strip()
-
-    if mode == "Voice recording only":
-        return voice_text
-    if mode == "Uploaded / pasted transcript only":
-        return transcript_text
-
-    parts = []
-    if voice_text:
-        parts.append("[Voice recording transcript]\n" + voice_text)
-    if transcript_text:
-        parts.append("[Uploaded / pasted transcript]\n" + transcript_text)
-    return "\n\n".join(parts).strip()
-
-
 def _read_upload(uploaded_file) -> str | pd.DataFrame | None:
     if uploaded_file is None:
         return None
@@ -972,7 +1001,7 @@ def _read_upload(uploaded_file) -> str | pd.DataFrame | None:
     return None
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=4)
 def _load_demo_examples(root: str) -> pd.DataFrame | None:
     root_path = Path(root)
     path = root_path / "data" / "raw" / "transcripts" / "youtube_scam_transcripts.csv"
@@ -998,9 +1027,14 @@ def _confidence_chart(probabilities: dict[str, float]) -> go.Figure:
     return apply_chart_theme(fig)
 
 
-def _predict(root: Path, text: str) -> tuple[dict[str, object], object | None]:
+def _predict(
+    root: Path,
+    text: str,
+    *,
+    transcript_model_key: str = "nb",
+) -> tuple[dict[str, object], object | None]:
     try:
-        classifier = _load_transcript_classifier(str(root))
+        classifier = _load_transcript_classifier(str(root), transcript_model_key)
         prediction = classifier.predict_one(text)
         findings = find_suspicious_phrases(text)
         return (
@@ -1020,40 +1054,866 @@ def _predict(root: Path, text: str) -> tuple[dict[str, object], object | None]:
         return result, None
 
 
+def _risk_score(result: dict[str, object]) -> float:
+    probabilities = dict(result.get("probabilities", {}))
+    confidence = float(result.get("confidence", 0.0))
+    label = int(result.get("label", 0))
+
+    if "Suspicious" in probabilities:
+        return max(0.0, min(100.0, float(probabilities["Suspicious"]) * 100))
+
+    return max(0.0, min(100.0, confidence * 100 if label == 1 else (1 - confidence) * 100))
+
+
+def _is_suspicious_prediction(value: object) -> bool:
+    return "suspicious" in str(value).casefold()
+
+
+def _label_from_verdict(verdict: str) -> int:
+    return 1 if _is_suspicious_prediction(verdict) else 0
+
+
+@st.cache_data(show_spinner=False, ttl=300, max_entries=4)
+def _load_transcript_metrics(root: str) -> dict[str, object]:
+    metrics_path = Path(root) / "reports" / "metrics" / "transcript_model_metrics.json"
+    try:
+        return json.loads(metrics_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _transcript_metrics_name(root: Path, model_key: str) -> str:
+    return {
+        "nb": "Naive Bayes",
+        "svm": "SVM",
+        "distilbert": "DistilBERT",
+    }.get(model_key, "")
+
+
+def _training_time_value(values: dict[str, object]) -> float | None:
+    for key in ("training_time", "training_time_seconds", "training_seconds"):
+        if key in values and values[key] is not None:
+            return round(float(values[key]), 3)
+    return None
+
+
+def _prediction_time_value(values: dict[str, object]) -> float | None:
+    if values.get("prediction_time_ms") is not None:
+        return round(float(values["prediction_time_ms"]), 4)
+    if values.get("prediction_time_seconds") is not None:
+        return round(float(values["prediction_time_seconds"]) * 1000, 4)
+    return None
+
+
+def _clean_text_for_training_similarity(text: str) -> str:
+    lines = []
+    for line in str(text).splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=2)
+def _load_transcript_training_dataset(root: str) -> pd.DataFrame:
+    dataset_path = Path(root) / "data" / "processed" / "transcript" / "transcript_dataset.csv"
+    try:
+        dataset = pd.read_csv(dataset_path)
+    except Exception:
+        return pd.DataFrame()
+
+    required_columns = {"transcript", "label"}
+    if not required_columns.issubset(dataset.columns):
+        return pd.DataFrame()
+
+    dataset = dataset.dropna(subset=["transcript", "label"]).copy()
+    dataset["transcript"] = dataset["transcript"].astype(str)
+    dataset["label"] = dataset["label"].astype(int)
+    if "source" not in dataset.columns:
+        dataset["source"] = "Training dataset"
+    return dataset[dataset["transcript"].str.strip().str.len() > 0].reset_index(drop=True)
+
+
+def _nearest_training_examples(root: Path, text: str, *, top_n: int = 5) -> pd.DataFrame:
+    dataset = _load_transcript_training_dataset(str(root))
+    clean_text = _clean_text_for_training_similarity(text)
+    if dataset.empty or not clean_text:
+        return pd.DataFrame()
+
+    corpus = dataset["transcript"].astype(str).tolist()
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
+
+        vectorizer = TfidfVectorizer(
+            max_features=10000,
+            ngram_range=(1, 2),
+            stop_words="english",
+            min_df=1,
+            sublinear_tf=True,
+        )
+        matrix = vectorizer.fit_transform([clean_text, *corpus])
+        similarities = cosine_similarity(matrix[0], matrix[1:]).ravel()
+    except Exception:
+        return pd.DataFrame()
+
+    if similarities.size == 0:
+        return pd.DataFrame()
+
+    order = np.argsort(similarities)[::-1][:top_n]
+    rows = []
+    for index in order:
+        training_row = dataset.iloc[int(index)]
+        snippet = " ".join(str(training_row["transcript"]).split())
+        rows.append(
+            {
+                "Similarity": f"{float(similarities[index]) * 100:.1f}%",
+                "Training Label": "Suspicious" if int(training_row["label"]) == 1 else "Legitimate",
+                "Closest Training Snippet": snippet[:220] + ("..." if len(snippet) > 220 else ""),
+                "Source": str(training_row.get("source", "Training dataset")),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _baseline_weight_vector(model: object) -> tuple[np.ndarray | None, str]:
+    if hasattr(model, "feature_log_prob_") and model.feature_log_prob_.shape[0] >= 2:
+        return model.feature_log_prob_[1] - model.feature_log_prob_[0], "naive_bayes_log_probability_delta"
+
+    coefficients = []
+    for calibrated_model in getattr(model, "calibrated_classifiers_", []) or []:
+        estimator = getattr(calibrated_model, "estimator", None)
+        if estimator is not None and hasattr(estimator, "coef_"):
+            coefficients.append(np.ravel(estimator.coef_))
+    if coefficients:
+        return np.mean(coefficients, axis=0), "svm_linear_coefficient"
+
+    if hasattr(model, "coef_"):
+        return np.ravel(model.coef_), "linear_coefficient"
+
+    return None, ""
+
+
+def _baseline_vocabulary_terms(
+    text: str,
+    classifier: object,
+    model_label: str,
+    *,
+    top_n: int = 8,
+) -> list[dict[str, object]]:
+    vectorizer = getattr(classifier, "vectorizer", None)
+    model = getattr(classifier, "model", None)
+    if vectorizer is None or model is None:
+        return []
+
+    try:
+        X = vectorizer.transform([text])
+        feature_names = np.asarray(vectorizer.get_feature_names_out())
+        active = X.toarray()[0]
+        active_indices = np.flatnonzero(active)
+        weights, method = _baseline_weight_vector(model)
+        if weights is None or len(active_indices) == 0:
+            return []
+
+        scores = active[active_indices] * weights[active_indices]
+        order = np.argsort(np.abs(scores))[::-1][:top_n]
+    except Exception:
+        return []
+
+    rows = []
+    for index in order:
+        score = float(scores[index])
+        rows.append(
+            {
+                "Model": model_label,
+                "Term": str(feature_names[active_indices[index]]),
+                "Direction": "Suspicious wording" if score > 0 else "Legitimate wording",
+                "Strength": round(abs(score), 4),
+                "Method": method,
+            }
+        )
+    return rows
+
+
+def _clean_vocabulary_token(value: str) -> str:
+    return value.strip(".,!?;:()[]{}\"'`<>").casefold()
+
+
+def _baseline_signal_map(rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+    signals: dict[str, dict[str, object]] = {}
+    for row in rows:
+        term = str(row.get("Term", "")).strip()
+        if not term:
+            continue
+
+        try:
+            strength = float(row.get("Strength", 0.0))
+        except Exception:
+            strength = 0.0
+
+        signal = {
+            "model": str(row.get("Model", "Baseline model")),
+            "direction": str(row.get("Direction", "Vocabulary signal")),
+            "strength": strength,
+        }
+        candidate_tokens = {_clean_vocabulary_token(term)}
+        candidate_tokens.update(_clean_vocabulary_token(part) for part in term.split())
+        for token in candidate_tokens:
+            if not token:
+                continue
+            current = signals.get(token)
+            if current is None or strength > float(current.get("strength", 0.0)):
+                signals[token] = signal
+    return signals
+
+
+def _baseline_vocabulary_highlight_html(text: str, rows: list[dict[str, object]]) -> str:
+    signals = _baseline_signal_map(rows)
+    if not signals:
+        return html.escape(text).replace("\n", "<br>")
+
+    html_tokens = []
+    for token in re.split(r"(\s+)", text):
+        if not token:
+            continue
+        if token.isspace():
+            html_tokens.append("<br>" if "\n" in token else " ")
+            continue
+
+        clean = _clean_vocabulary_token(token)
+        escaped = html.escape(token)
+        signal = signals.get(clean)
+        if not signal:
+            html_tokens.append(escaped)
+            continue
+
+        direction = str(signal.get("direction", "Vocabulary signal"))
+        is_suspicious = direction.casefold().startswith("suspicious")
+        style = ";".join(
+            [
+                "background:rgba(245,158,11,0.24)" if is_suspicious else "background:rgba(34,197,94,0.18)",
+                "border-bottom:2px solid #F59E0B" if is_suspicious else "border-bottom:2px solid #22C55E",
+                "padding:1px 4px",
+                "border-radius:4px",
+                "line-height:1.75",
+            ]
+        )
+        title = html.escape(
+            f"{signal.get('model')}: {direction}, strength {float(signal.get('strength', 0.0)):.4f}",
+            quote=True,
+        )
+        html_tokens.append(f'<span title="{title}" style="{style}">{escaped}</span>')
+
+    return (
+        '<div style="font-size:0.88rem;line-height:1.75;padding:1rem;'
+        'border:1px solid rgba(148,163,184,0.18);border-radius:8px;'
+        'background:rgba(15,23,42,0.32);color:var(--text-secondary);">'
+        f'{"".join(html_tokens)}</div>'
+    )
+
+
+def _transcript_metric_values(root: Path, model_key: str) -> dict[str, object]:
+    metrics = _load_transcript_metrics(str(root))
+    model_metrics = metrics.get("models", {})
+    metric_name = _transcript_metrics_name(root, model_key)
+    if isinstance(model_metrics, dict) and metric_name:
+        values = model_metrics.get(metric_name, {})
+        return dict(values) if isinstance(values, dict) else {}
+    return {}
+
+
+def _transcript_metrics_dataframe(root: Path) -> pd.DataFrame:
+    metrics = _load_transcript_metrics(str(root))
+    model_metrics = metrics.get("models", {})
+    if not isinstance(model_metrics, dict):
+        return pd.DataFrame()
+
+    supported_metric_names = {
+        _transcript_metrics_name(root, model_key)
+        for model_key in TRANSCRIPT_MODEL_FILES
+    }
+    rows = []
+    for model_name, values in model_metrics.items():
+        if not isinstance(values, dict):
+            continue
+        if model_name not in supported_metric_names:
+            continue
+        cm = values.get("confusion_matrix", [[0, 0], [0, 0]])
+        try:
+            tn, fp = cm[0]
+            fn, tp = cm[1]
+        except Exception:
+            tn = values.get("true_negative", 0)
+            fp = values.get("false_positive", 0)
+            fn = values.get("false_negative", 0)
+            tp = values.get("true_positive", 0)
+
+        rows.append(
+            {
+                "Model": model_name,
+                "Accuracy": round(float(values.get("accuracy", 0)) * 100, 2),
+                "Precision": round(float(values.get("precision", 0)) * 100, 2),
+                "Recall": round(float(values.get("recall", 0)) * 100, 2),
+                "F1 Score": round(float(values.get("f1", 0)) * 100, 2),
+                "ROC-AUC": round(float(values.get("roc_auc", 0)) * 100, 2)
+                if "roc_auc" in values
+                else None,
+                "Training Time (s)": _training_time_value(values),
+                "Prediction Time (ms)": _prediction_time_value(values),
+                "True Positive": int(tp),
+                "False Positive": int(fp),
+                "True Negative": int(tn),
+                "False Negative": int(fn),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def _training_metrics_chart(metrics_df: pd.DataFrame) -> go.Figure:
+    metric_columns = ["Accuracy", "Precision", "Recall", "F1 Score"]
+    if "ROC-AUC" in metrics_df.columns and metrics_df["ROC-AUC"].notna().any():
+        metric_columns.append("ROC-AUC")
+
+    fig = go.Figure()
+    for metric in metric_columns:
+        fig.add_trace(go.Bar(x=metrics_df["Model"], y=metrics_df[metric], name=metric))
+
+    fig.update_layout(
+        height=360,
+        margin=dict(l=10, r=10, t=30, b=80),
+        yaxis_title="Score (%)",
+        yaxis=dict(range=[0, 100]),
+        barmode="group",
+    )
+    return apply_chart_theme(fig)
+
+
+def _confusion_matrix_figure(metrics: dict[str, object], model_name: str) -> go.Figure | None:
+    model_metrics = metrics.get("models", {}) if isinstance(metrics, dict) else {}
+    values = model_metrics.get(model_name, {}) if isinstance(model_metrics, dict) else {}
+    matrix = values.get("confusion_matrix") if isinstance(values, dict) else None
+    if not matrix:
+        return None
+
+    fig = go.Figure(
+        go.Heatmap(
+            z=matrix,
+            x=["Predicted legitimate", "Predicted suspicious"],
+            y=["Actual legitimate", "Actual suspicious"],
+            text=matrix,
+            texttemplate="%{text}",
+            colorscale="Purples",
+            colorbar=dict(title="Count"),
+        )
+    )
+    fig.update_layout(
+        height=320,
+        margin=dict(l=10, r=10, t=20, b=35),
+        xaxis_title="Prediction",
+        yaxis_title="Actual label",
+    )
+    return apply_chart_theme(fig)
+
+
+def _roc_auc_curve(root: Path, model_keys: list[str]) -> go.Figure | None:
+    metrics = _load_transcript_metrics(str(root))
+    model_metrics = metrics.get("models", {}) if isinstance(metrics, dict) else {}
+    if not isinstance(model_metrics, dict):
+        return None
+
+    fig = go.Figure()
+    has_curve = False
+    seen_models: set[str] = set()
+    for model_key in model_keys:
+        metrics_name = _transcript_metrics_name(root, model_key)
+        if not metrics_name or metrics_name in seen_models:
+            continue
+        seen_models.add(metrics_name)
+        values = model_metrics.get(metrics_name)
+        if not isinstance(values, dict):
+            continue
+
+        curve = values.get("roc_curve")
+        if not isinstance(curve, dict):
+            continue
+        fpr = curve.get("fpr")
+        tpr = curve.get("tpr")
+        roc_auc = values.get("roc_auc")
+        if not fpr or not tpr:
+            continue
+
+        has_curve = True
+        fig.add_trace(
+            go.Scatter(
+                x=fpr,
+                y=tpr,
+                mode="lines",
+                name=f"{metrics_name} AUC={float(roc_auc):.3f}"
+                if roc_auc is not None
+                else metrics_name,
+            )
+        )
+
+    if not has_curve:
+        return None
+
+    fig.add_trace(
+        go.Scatter(
+            x=[0, 1],
+            y=[0, 1],
+            mode="lines",
+            name="Random baseline",
+            line=dict(dash="dash"),
+        )
+    )
+    fig.update_layout(
+        height=380,
+        margin=dict(l=10, r=10, t=30, b=40),
+        xaxis_title="False Positive Rate",
+        yaxis_title="True Positive Rate",
+        xaxis=dict(range=[0, 1]),
+        yaxis=dict(range=[0, 1]),
+    )
+    return apply_chart_theme(fig)
+
+
+def _recommended_transcript_model(
+    df_compare: pd.DataFrame,
+    metrics: dict[str, object],
+) -> str:
+    model_metrics = metrics.get("models", {}) if isinstance(metrics, dict) else {}
+    if not df_compare.empty and isinstance(model_metrics, dict) and model_metrics:
+        selected = set()
+        if "Metrics Model" in df_compare.columns:
+            selected = set(df_compare["Metrics Model"].dropna().astype(str).tolist())
+        candidate_rows = [
+            (name, float(values.get("f1", 0)))
+            for name, values in model_metrics.items()
+            if name in selected and isinstance(values, dict)
+        ]
+        if candidate_rows:
+            return max(candidate_rows, key=lambda item: item[1])[0]
+
+    for key in ("recommended_model", "top_validation_model", "best_model"):
+        model_name = str(metrics.get(key, "")).strip() if isinstance(metrics, dict) else ""
+        supported_metric_names = {
+            _transcript_metrics_name(Path("."), model_key)
+            for model_key in TRANSCRIPT_MODEL_FILES
+        }
+        if model_name and model_name in supported_metric_names:
+            return model_name
+
+    if not df_compare.empty:
+        return str(df_compare.sort_values("Confidence", ascending=False).iloc[0]["Model"])
+
+    return "Not available"
+
+
+def _consensus_result_from_comparison(
+    comparison_rows: list[dict[str, object]],
+    *,
+    final_verdict: str,
+    average_risk: float,
+    suspicious_count: int,
+    total_models: int,
+) -> dict[str, object]:
+    first_result = dict(comparison_rows[0].get("result", {})) if comparison_rows else {}
+    findings = list(first_result.get("findings", []))
+    label = _label_from_verdict(final_verdict)
+    suspicious_probability = max(0.0, min(1.0, average_risk / 100.0))
+    confidence = suspicious_probability if label == 1 else 1.0 - suspicious_probability
+    model_votes = ", ".join(
+        f"{row.get('Model')}: {row.get('Prediction')} ({float(row.get('Risk Score', 0.0)):.1f}%)"
+        for row in comparison_rows
+    )
+    model_evidence = [
+        {
+            "Model": str(row.get("Model", "")),
+            "Prediction": str(row.get("Prediction", "")),
+            "Suspicious Risk": f"{float(row.get('Risk Score', 0.0)):.1f}%",
+            "Confidence": f"{float(row.get('Confidence', 0.0)):.1f}%",
+        }
+        for row in comparison_rows
+    ]
+
+    return {
+        "label": label,
+        "label_name": final_verdict,
+        "confidence": confidence,
+        "probabilities": {
+            "Legitimate": 1.0 - suspicious_probability,
+            "Suspicious": suspicious_probability,
+        },
+        "model_name": f"Transcript model consensus ({suspicious_count}/{total_models} suspicious)",
+        "findings": findings,
+        "is_consensus": True,
+        "model_votes": model_votes,
+        "model_evidence": model_evidence,
+        "model_agreement": f"{suspicious_count}/{total_models}",
+    }
+
+
+def _representative_comparison_row(
+    comparison_rows: list[dict[str, object]],
+    *,
+    final_verdict: str,
+    average_risk: float,
+) -> dict[str, object]:
+    if not comparison_rows:
+        return {}
+
+    verdict_is_suspicious = _is_suspicious_prediction(final_verdict)
+    matching_rows = [
+        row
+        for row in comparison_rows
+        if _is_suspicious_prediction(row.get("Prediction", "")) == verdict_is_suspicious
+    ]
+    candidates = matching_rows or comparison_rows
+    return min(
+        candidates,
+        key=lambda row: abs(float(row.get("Risk Score", 0.0)) - average_risk),
+    )
+
+
+def _render_transcript_evaluation_evidence(
+    root: Path,
+    metrics_df: pd.DataFrame,
+    metrics: dict[str, object],
+    recommended_model: str,
+    model_keys: list[str],
+) -> None:
+    render_section_header(
+        "Evaluation evidence",
+        "Review saved transcript training metrics separately from this live prediction.",
+        "Evaluation evidence",
+    )
+    render_content_card_open("violet")
+    metrics_tab, confusion_tab, roc_tab = st.tabs(
+        ["Performance Metrics", "Confusion Matrix Heatmap", "ROC-AUC Curve"]
+    )
+
+    with metrics_tab:
+        if metrics_df.empty:
+            st.warning("No saved transcript training metrics found. Run the transcript training script first.")
+        else:
+            st.plotly_chart(_training_metrics_chart(metrics_df), use_container_width=True)
+            st.dataframe(metrics_df, hide_index=True, use_container_width=True)
+
+    with confusion_tab:
+        figure = _confusion_matrix_figure(metrics, recommended_model)
+        if figure is None:
+            st.info("No confusion matrix is saved for the recommended transcript model yet.")
+        else:
+            st.caption(f"Confusion matrix shown for recommended model: {recommended_model}")
+            st.plotly_chart(figure, use_container_width=True)
+
+    with roc_tab:
+        figure = _roc_auc_curve(root, model_keys)
+        if figure is None:
+            st.warning("ROC-AUC data is not available yet. Retrain the transcript models to refresh metrics.")
+        else:
+            st.plotly_chart(figure, use_container_width=True)
+            st.caption(
+                "ROC-AUC shows how well each transcript model separates legitimate and suspicious transcripts. "
+                "A curve closer to the top-left corner indicates stronger classification performance."
+            )
+
+    render_content_card_close()
+
+
+def _comparison_chart(rows: list[dict[str, object]]) -> go.Figure:
+    labels = [str(row.get("Model", "-")) for row in rows]
+    risks = [float(row.get("Risk Score", 0.0)) for row in rows]
+    colors = ["#DC2626" if risk >= 70 else "#D97706" if risk >= 40 else "#22C55E" for risk in risks]
+    fig = go.Figure(
+        go.Bar(
+            x=risks,
+            y=labels,
+            orientation="h",
+            marker_color=colors,
+            hovertemplate="%{y}<br>Risk %{x:.1f}%<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        height=max(220, 48 * max(1, len(rows))),
+        margin=dict(l=10, r=10, t=15, b=30),
+        xaxis_title="Suspicious risk (%)",
+        yaxis_title="",
+        xaxis=dict(range=[0, 100]),
+    )
+    return apply_chart_theme(fig)
+
+
+def _render_transcript_model_comparison(
+    root: Path,
+    comparison_rows: list[dict[str, object]],
+) -> tuple[dict[str, object] | None, object | None]:
+    if not comparison_rows:
+        return None, None
+
+    df_compare = pd.DataFrame(comparison_rows)
+    display_df = df_compare.drop(
+        columns=["result", "classifier", "Metrics Model", "Model Key"],
+        errors="ignore",
+    )
+    suspicious_count = int(df_compare["Prediction"].apply(_is_suspicious_prediction).sum())
+    total_models = len(df_compare)
+    average_risk = float(df_compare["Risk Score"].mean())
+    highest_confidence = float(df_compare["Confidence"].max())
+    if suspicious_count > (total_models / 2):
+        final_verdict = "Suspicious"
+    elif suspicious_count == (total_models / 2):
+        final_verdict = "Suspicious" if average_risk >= 50 else "Legitimate"
+    else:
+        final_verdict = "Legitimate"
+
+    metrics = _load_transcript_metrics(str(root))
+    metrics_df = _transcript_metrics_dataframe(root)
+    recommended_model = _recommended_transcript_model(df_compare, metrics)
+    representative_row = _representative_comparison_row(
+        comparison_rows,
+        final_verdict=final_verdict,
+        average_risk=average_risk,
+    )
+    consensus_result = _consensus_result_from_comparison(
+        comparison_rows,
+        final_verdict=final_verdict,
+        average_risk=average_risk,
+        suspicious_count=suspicious_count,
+        total_models=total_models,
+    )
+
+    render_analysis_ready("Transcript model comparison complete - results ready below")
+    render_section_header(
+        "Transcript model agreement",
+        "Compare each selected transcript model before trusting a single score.",
+        "Multi-model result",
+    )
+    render_content_card_open("violet")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Final Verdict", final_verdict)
+    col2.metric("Average Risk", f"{average_risk:.2f}%")
+    col3.metric("Model Agreement", f"{suspicious_count}/{total_models}")
+    col4.metric("Recommended Model", recommended_model)
+    col5.metric("Highest Confidence", f"{highest_confidence:.2f}%")
+    st.caption(
+        "The verdict uses selected model agreement and average suspicious-risk probability. "
+        "Recommended Model is chosen from saved training metrics and does not override the live consensus."
+    )
+    render_content_card_close()
+
+    render_section_header(
+        "AI model comparison",
+        "Risk score is suspicious probability; confidence is the selected model's predicted-class confidence.",
+        "Model evidence",
+    )
+    render_content_card_open("violet")
+    st.plotly_chart(_comparison_chart(comparison_rows), use_container_width=True)
+    st.dataframe(display_df, hide_index=True, use_container_width=True)
+    st.caption(
+        "Higher agreement between independent models generally increases confidence. "
+        "If models disagree, use the transcript, rule evidence, and source context before acting."
+    )
+    render_content_card_close()
+
+    _render_transcript_evaluation_evidence(
+        root,
+        metrics_df,
+        metrics,
+        recommended_model,
+        [str(row.get("Model Key", "")) for row in comparison_rows],
+    )
+
+    return consensus_result, representative_row.get("classifier")
+
+
+def _source_labels_from_text(text: str) -> list[str]:
+    labels = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and "]" in stripped:
+            labels.append(stripped[1 : stripped.index("]")])
+    return labels or ["Transcript text"]
+
+
+def _student_actions(risk_score: float) -> list[str]:
+    if risk_score >= 70:
+        return [
+            "Pause the conversation before replying.",
+            "Verify through the official app, website, campus office, or published phone number.",
+            "Do not share OTPs, passwords, bank details, recovery codes, or payment proof.",
+            "Save screenshots, audio, phone numbers, links, timestamps, and account names.",
+            "Ask a trusted person or campus support before paying or continuing.",
+        ]
+    if risk_score >= 40:
+        return [
+            "Slow down and ask for written confirmation through an official channel.",
+            "Check links, sender identity, payment destination, and unusual urgency.",
+            "Avoid sending sensitive information until the request is independently verified.",
+            "Keep the evidence in case the pattern escalates.",
+        ]
+    return [
+        "Continue normal caution for unexpected requests.",
+        "Use official channels for payments, credentials, and account changes.",
+        "Keep evidence if the conversation later becomes urgent, secretive, or payment-focused.",
+    ]
+
+
+def _render_student_ctas(risk_score: float, *, title: str = "Student action checklist") -> None:
+    actions = _student_actions(risk_score)
+    tone = st.error if risk_score >= 70 else st.warning if risk_score >= 40 else st.success
+    if title:
+        st.caption(title)
+    tone(
+        "Recommended response: "
+        + ("pause and verify before acting." if risk_score >= 40 else "keep normal verification habits.")
+    )
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"Step": index, "Action": action}
+                for index, action in enumerate(actions, start=1)
+            ]
+        ),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+
+def _render_score_flow(result: dict[str, object], text: str, findings: list[dict[str, object]]) -> None:
+    risk_score = _risk_score(result)
+    sources = _source_labels_from_text(text)
+    source_label = ", ".join(sources[:3])
+    if len(sources) > 3:
+        source_label += f", +{len(sources) - 3} more"
+    rule_signal = f"{len(findings)} warning pattern(s)"
+    if not findings:
+        rule_signal = "No rule warning patterns"
+
+    labels = [
+        f"Source: {source_label}",
+        f"Transcript: {len(text.split())} word(s)",
+        f"Model: {risk_score:.1f}% suspicious risk",
+        f"Rules: {rule_signal}",
+        "Action: verify before acting" if risk_score >= 40 else "Action: continue cautious review",
+    ]
+    fig = go.Figure(
+        go.Sankey(
+            arrangement="snap",
+            node=dict(
+                pad=18,
+                thickness=18,
+                line=dict(color="rgba(148,163,184,.35)", width=1),
+                label=labels,
+                color=["#7C3AED", "#2563EB", "#D97706", "#DC2626", "#059669"],
+            ),
+            link=dict(
+                source=[0, 1, 2, 3],
+                target=[1, 2, 3, 4],
+                value=[1, 1, 1, 1],
+                color=["rgba(124,58,237,.20)", "rgba(37,99,235,.20)", "rgba(217,119,6,.20)", "rgba(220,38,38,.20)"],
+            ),
+        )
+    )
+    fig.update_layout(height=255, margin=dict(l=10, r=10, t=10, b=10), font_size=11)
+    st.plotly_chart(apply_chart_theme(fig), use_container_width=True)
+
+    rows = [
+        {
+            "Stage": "Source",
+            "Evidence": source_label,
+            "Student meaning": "Where the text came from before analysis.",
+        },
+        {
+            "Stage": "Transcript",
+            "Evidence": f"{len(text.split())} word(s)",
+            "Student meaning": "The exact words the model and rules inspected.",
+        },
+        {
+            "Stage": "Model signal",
+            "Evidence": f"{result.get('model_name', 'Transcript model')} | {risk_score:.1f}% suspicious risk",
+            "Student meaning": "The ML probability that the wording resembles scam transcripts.",
+        },
+        {
+            "Stage": "Rule signal",
+            "Evidence": rule_signal,
+            "Student meaning": "Human-readable warning patterns such as urgency, OTP, payment, secrecy, or impersonation.",
+        },
+        {
+            "Stage": "Action",
+            "Evidence": _student_actions(risk_score)[0],
+            "Student meaning": "The first practical step to take before responding.",
+        },
+    ]
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+
 def _record(history: list[dict[str, object]], result: dict[str, object], text: str) -> None:
+    risk_score = _risk_score(result)
+    findings = list(result.get("findings", []))
     record_history_item(
         history,
         {
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "type": "Transcript",
             "prediction": result["label_name"],
-            "confidence": round(float(result["confidence"]) * 100, 2),
+            "confidence": round(risk_score, 2),
+            "risk_score": round(risk_score, 2),
             "model": result["model_name"],
             "preview": text.replace("\n", " ")[:160],
             "raw_input": text,
+            "flags": [str(item.get("phrase", "")) for item in findings if item.get("phrase")],
+            "explanation": (
+                f"Transcript suspicious-risk probability: {risk_score:.1f}%. "
+                f"Stored as risk so dashboard/report history does not treat legitimate confidence as threat."
+            ),
         },
     )
 
 
-def _display_result(result: dict[str, object], text: str, classifier: object | None) -> None:
-    confidence = float(result["confidence"])
-    label = str(result["label_name"])
-    findings = list(result.get("findings", []))
+def _transcript_result_summary(
+    result: dict[str, object],
+    label: str,
+    confidence: float,
+    findings: list[dict[str, object]],
+) -> str:
+    risk_score = _risk_score(result)
+    count = len(findings)
+    agreement = str(result.get("model_agreement", "")).strip()
+    agreement_text = f" and {agreement} model agreement" if agreement else ""
 
-    probabilities = dict(result["probabilities"])
-    risk_score = float(probabilities.get("Suspicious", confidence if int(result["label"]) == 1 else 1 - confidence)) * 100
-    render_analysis_ready("Transcript analysis complete - results ready below")
-    render_result_card(
-        f"{label} transcript result",
-        risk_score,
-        educational_summary(label, confidence, findings),
-    )
+    if bool(result.get("is_consensus")):
+        if _is_suspicious_prediction(label):
+            if count:
+                return (
+                    f"Selected models classified this as suspicious with {risk_score:.1f}% average suspicious risk"
+                    f"{agreement_text}. It also found {count} explicit phrase-rule warning pattern(s)."
+                )
+            return (
+                f"Selected models classified this as suspicious with {risk_score:.1f}% average suspicious risk"
+                f"{agreement_text}, but no explicit phrase-rule warning was found. "
+                "Treat this as a model-only warning and review the comparison table before acting."
+            )
+        return (
+            f"Selected models classified this as lower risk with {100 - risk_score:.1f}% average legitimate confidence"
+            f"{agreement_text}. Still verify identity and links before acting."
+        )
 
-    render_content_card_open("violet")
-    st.plotly_chart(_confidence_chart(result["probabilities"]), use_container_width=True)
-    render_content_card_close()
+    if _is_suspicious_prediction(label) and count == 0:
+        percent = round(confidence * 100, 1)
+        return (
+            f"The model classified this as suspicious with {percent}% confidence, but no explicit phrase-rule warning "
+            "was found. This is a statistical model signal, not a matched scam phrase."
+        )
 
-    render_section_header("Suspicious transcript patterns", eyebrow="Explainability")
+    return educational_summary(label, confidence, findings)
+
+
+def _render_rule_evidence(result: dict[str, object], text: str, findings: list[dict[str, object]]) -> None:
+    risk_score = _risk_score(result)
+    render_section_header("Rule evidence", eyebrow="Explainability")
     if findings:
         render_content_card_open("red")
         st.markdown(highlighted_html(text, findings), unsafe_allow_html=True)
@@ -1063,18 +1923,139 @@ def _display_result(result: dict[str, object], text: str, classifier: object | N
             for column in ["phrase", "category", "label", "specific_tactic", "reason", "intention"]
             if column in findings_df.columns
         ]
-        st.dataframe(findings_df[preferred_columns] if preferred_columns else findings_df, hide_index=True, use_container_width=True)
+        st.dataframe(
+            findings_df[preferred_columns] if preferred_columns else findings_df,
+            hide_index=True,
+            use_container_width=True,
+        )
         render_content_card_close()
-    else:
-        st.info("No suspicious phrase rules were triggered.")
+        return
 
-    if classifier is not None:
-        terms = top_model_terms(text, classifier.vectorizer, classifier.model)
-        if terms:
-            render_section_header("Model-influential terms", eyebrow="Classifier signal")
-            render_content_card_open("green")
-            st.dataframe(pd.DataFrame(terms), hide_index=True, use_container_width=True)
-            render_content_card_close()
+    rows = [
+        {
+            "Evidence Layer": "Direct scam phrase rules",
+            "Result": "No matched rule",
+            "Student Meaning": "No explicit OTP, payment, threat, secrecy, impersonation, or urgent-action phrase was found.",
+            "How To Read It": (
+                "Supports lower risk, but does not override model evidence."
+                if risk_score < 40
+                else "Treat as a model-only warning and verify with the comparison table."
+            ),
+        }
+    ]
+    tone = st.success if risk_score < 40 else st.warning if _is_suspicious_prediction(result.get("label_name", "")) else st.info
+    tone(
+        "No explicit scam-rule pattern matched. This is useful evidence: the warning, if any, is coming from model similarity rather than a direct scam phrase."
+    )
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+
+def _render_model_agreement_evidence(result: dict[str, object]) -> None:
+    model_evidence = result.get("model_evidence", [])
+    if not isinstance(model_evidence, list) or not model_evidence:
+        return
+
+    render_section_header(
+        "Model agreement explained",
+        "Shows which models agreed and how strongly they leaned suspicious.",
+        "Classifier signal",
+    )
+    render_content_card_open("violet")
+    st.dataframe(pd.DataFrame(model_evidence), hide_index=True, use_container_width=True)
+    st.caption(
+        "DistilBERT is the recommended model from current training metrics. SVM and Naive Bayes are kept as transparent baselines."
+    )
+    render_content_card_close()
+
+
+def _render_training_similarity_evidence(root: Path, text: str) -> None:
+    examples = _nearest_training_examples(root, text)
+    if examples.empty:
+        return
+
+    render_section_header(
+        "Closest training examples",
+        "These examples explain what the current transcript statistically resembles in the corrected training data.",
+        "Training evidence",
+    )
+    render_content_card_open("green")
+    st.dataframe(examples, hide_index=True, use_container_width=True)
+    st.caption(
+        "Similarity is a TF-IDF lookup for explanation only. It does not replace DistilBERT's prediction, but it makes the training-data comparison visible."
+    )
+    render_content_card_close()
+
+
+def _render_baseline_vocabulary_evidence(root: Path, text: str) -> None:
+    rows: list[dict[str, object]] = []
+    for model_key in ("svm", "nb"):
+        classifier = _load_transcript_classifier_safe(str(root), model_key)
+        if classifier is None:
+            continue
+        rows.extend(
+            _baseline_vocabulary_terms(
+                text,
+                classifier,
+                _transcript_model_label(root, model_key),
+                top_n=6,
+            )
+        )
+
+    if not rows:
+        return
+
+    render_section_header(
+        "Baseline vocabulary signals",
+        "Transparent SVM and Naive Bayes terms that pushed the baseline models up or down.",
+        "Vocabulary evidence",
+    )
+    render_content_card_open("green")
+    st.markdown(_baseline_vocabulary_highlight_html(text, rows), unsafe_allow_html=True)
+    st.caption(
+        "Highlighted words come from transparent baseline models: amber leans suspicious, green leans legitimate. Hover a highlight for model and strength."
+    )
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.caption(
+        "These are not DistilBERT word weights. They are supporting vocabulary signals from the transparent baseline models."
+    )
+    render_content_card_close()
+
+
+def _display_result(
+    root: Path,
+    result: dict[str, object],
+    text: str,
+    classifier: object | None,
+) -> None:
+    confidence = float(result["confidence"])
+    label = str(result["label_name"])
+    findings = list(result.get("findings", []))
+
+    probabilities = dict(result["probabilities"])
+    risk_score = _risk_score(result)
+    render_analysis_ready("Transcript analysis complete - results ready below")
+    render_result_card(
+        f"{label} transcript result",
+        risk_score,
+        _transcript_result_summary(result, label, confidence, findings),
+    )
+
+    render_section_header(
+        "Why This Score Happened",
+        "Follow the evidence from source text to model probability, rule indicators, and student action.",
+        "Student view",
+    )
+    _render_score_flow(result, text, findings)
+    _render_student_ctas(risk_score)
+
+    render_content_card_open("violet")
+    st.plotly_chart(_confidence_chart(result["probabilities"]), use_container_width=True)
+    render_content_card_close()
+
+    _render_rule_evidence(result, text, findings)
+    _render_model_agreement_evidence(result)
+    _render_training_similarity_evidence(root, text)
+    _render_baseline_vocabulary_evidence(root, text)
 
 
 
@@ -1090,36 +2071,20 @@ def _similarity_percent(left: str, right: str) -> float:
 
 def _render_combined_input_summary(
     *,
-    use_voice: bool,
     use_uploaded_audio: bool,
     use_text: bool,
-    voice_text: str,
     uploaded_audio_text: str,
     transcript_text: str,
-    recorder_results: list[dict[str, object]],
     uploaded_audio_results: list[dict[str, object]],
 ) -> None:
     """Show a compact summary of which sources are available before analysis."""
 
-    voice_peak = max((float(item.get("risk", 0)) for item in recorder_results), default=0.0)
     upload_peak = max((float(item.get("risk", 0)) for item in uploaded_audio_results), default=0.0)
-    voice_chunks = len(recorder_results)
     upload_chunks = len(uploaded_audio_results)
     transcript_words = len(transcript_text.split())
-    voice_words = len(voice_text.split())
     upload_words = len(uploaded_audio_text.split())
 
     rows = []
-    if use_voice:
-        rows.append(
-            {
-                "Source": "Speaker voice recorder",
-                "Status": "Ready" if recorder_results else "Waiting for recording",
-                "Usable text": f"{voice_words} word(s)" if voice_text else "No transcript text yet",
-                "Audio chunks": voice_chunks,
-                "Peak voice risk": f"{voice_peak:.1f}%" if recorder_results else "-",
-            }
-        )
     if use_uploaded_audio:
         rows.append(
             {
@@ -1144,11 +2109,8 @@ def _render_combined_input_summary(
     if rows:
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
-    audio_text = "\n".join(
-        value for value in [voice_text.strip(), uploaded_audio_text.strip()] if value
-    )
-    if (use_voice or use_uploaded_audio) and use_text and audio_text and transcript_text.strip():
-        similarity = _similarity_percent(audio_text, transcript_text)
+    if use_uploaded_audio and use_text and uploaded_audio_text.strip() and transcript_text.strip():
+        similarity = _similarity_percent(uploaded_audio_text, transcript_text)
         st.info(
             f"Audio-to-transcript similarity: {similarity:.1f}%. "
             "Use this as a rough check only; different wording, missing punctuation, or Whisper errors can lower the score."
@@ -1159,37 +2121,19 @@ def _render_analysis_outputs(
     *,
     root: Path,
     history: list[dict[str, object]],
-    use_voice: bool,
+    transcript_model_keys: list[str],
     use_uploaded_audio: bool,
     use_text: bool,
-    voice_text: str,
     uploaded_audio_text: str,
     transcript_text: str,
-    recorder_results: list[dict[str, object]],
     uploaded_audio_results: list[dict[str, object]],
     risk_threshold: int,
 ) -> None:
-    """Render outputs for either voice, transcript, or both."""
+    """Render outputs for uploaded audio, transcript text, or both."""
 
-    has_voice_results = bool(recorder_results)
-    has_voice_text = bool(voice_text.strip())
     has_uploaded_audio_results = bool(uploaded_audio_results)
     has_uploaded_audio_text = bool(uploaded_audio_text.strip())
     has_transcript_text = bool(transcript_text.strip())
-
-    if use_voice and has_voice_results:
-        _render_recording_carousel(
-            recorder_results,
-            risk_threshold,
-            state_key="transcript_recorder_carousel_index",
-            title="Voice recording analysis",
-            transcript_heading="Recorded transcript and chunks",
-            frequency_heading="Latest frequency spectrum",
-            latest_title="Latest recorded chunk {chunk}",
-        )
-
-    if use_voice and not has_voice_results:
-        st.warning("Voice recording was selected, but no analysed voice sample is available yet.")
 
     if use_uploaded_audio and has_uploaded_audio_results:
         _render_recording_carousel(
@@ -1208,8 +2152,6 @@ def _render_analysis_outputs(
     # Decide what text should be passed into transcript scam classification.
     # If both are supplied, keep the texts labelled and combined so the user can see both sources.
     text_blocks = []
-    if use_voice and has_voice_text:
-        text_blocks.append("[Speaker voice recorder transcript]\n" + voice_text.strip())
     if use_uploaded_audio and has_uploaded_audio_text:
         text_blocks.append("[Uploaded audio transcript]\n" + uploaded_audio_text.strip())
     if use_text and has_transcript_text:
@@ -1218,7 +2160,7 @@ def _render_analysis_outputs(
     combined_text = "\n\n".join(text_blocks).strip()
 
     if not combined_text:
-        if (use_voice and has_voice_results) or (use_uploaded_audio and has_uploaded_audio_results):
+        if use_uploaded_audio and has_uploaded_audio_results:
             st.info(
                 "Audio was analysed for voice authenticity and behavioral signals, but no speech transcript was available. "
                 "Whisper may be unavailable, the sample may be too quiet, or no speech was detected."
@@ -1233,9 +2175,52 @@ def _render_analysis_outputs(
         "Unified result",
     )
 
-    result, classifier = _predict(root, combined_text)
+    comparison_rows: list[dict[str, object]] = []
+    for model_key in transcript_model_keys:
+        try:
+            result, classifier = _predict(
+                root,
+                combined_text,
+                transcript_model_key=model_key,
+            )
+        except FileNotFoundError:
+            continue
+        metrics = _transcript_metric_values(root, model_key)
+        comparison_rows.append(
+            {
+                "Model": _transcript_model_label(root, model_key),
+                "Model Key": model_key,
+                "Metrics Model": _transcript_metrics_name(root, model_key),
+                "Prediction": result["label_name"],
+                "Risk Score": round(_risk_score(result), 2),
+                "Confidence": round(float(result["confidence"]) * 100, 2),
+                "Accuracy": round(float(metrics.get("accuracy", 0.0)) * 100, 2) if metrics else None,
+                "Precision": round(float(metrics.get("precision", 0.0)) * 100, 2) if metrics else None,
+                "Recall": round(float(metrics.get("recall", 0.0)) * 100, 2) if metrics else None,
+                "F1 Score": round(float(metrics.get("f1", 0.0)) * 100, 2) if metrics else None,
+                "ROC-AUC": round(float(metrics.get("roc_auc", 0.0)) * 100, 2) if metrics else None,
+                "Training Time (s)": _training_time_value(metrics) if metrics else None,
+                "Prediction Time (ms)": _prediction_time_value(metrics) if metrics else None,
+                "Engine": result["model_name"],
+                "result": result,
+                "classifier": classifier,
+            }
+        )
+
+    if not comparison_rows:
+        result, classifier = _predict(
+            root,
+            combined_text,
+            transcript_model_key="nb",
+        )
+    else:
+        result, classifier = _render_transcript_model_comparison(root, comparison_rows)
+        if result is None:
+            result = comparison_rows[0]["result"]
+            classifier = comparison_rows[0]["classifier"]
+
     _record(history, result, combined_text)
-    _display_result(result, combined_text, classifier)
+    _display_result(root, result, combined_text, classifier)
 
 
 def _inject_transcript_input_css() -> None:
@@ -1349,7 +2334,6 @@ def _inject_transcript_input_css() -> None:
            TRANSCRIPT SOURCE CARDS - SYMMETRICAL PURPLE DESIGN
            ========================================================= */
 
-        .st-key-transcript_use_voice_card,
         .st-key-transcript_use_uploaded_audio_card,
         .st-key-transcript_use_text_card {
             width:100%!important;
@@ -1375,8 +2359,6 @@ def _inject_transcript_input_css() -> None:
             overflow:hidden!important;
         }
 
-        .st-key-transcript_use_voice_card
-        > div[data-testid="stHorizontalBlock"],
         .st-key-transcript_use_uploaded_audio_card
         > div[data-testid="stHorizontalBlock"],
         .st-key-transcript_use_text_card
@@ -1390,8 +2372,6 @@ def _inject_transcript_input_css() -> None:
             align-items:center!important;
         }
 
-        .st-key-transcript_use_voice_card
-        [data-testid="stHorizontalBlock"],
         .st-key-transcript_use_uploaded_audio_card
         [data-testid="stHorizontalBlock"],
         .st-key-transcript_use_text_card
@@ -1403,8 +2383,6 @@ def _inject_transcript_input_css() -> None:
             align-items:center!important;
         }
 
-        .st-key-transcript_use_voice_card
-        [data-testid="stElementContainer"],
         .st-key-transcript_use_uploaded_audio_card
         [data-testid="stElementContainer"],
         .st-key-transcript_use_text_card
@@ -1413,8 +2391,6 @@ def _inject_transcript_input_css() -> None:
             padding:0!important;
         }
 
-        .st-key-transcript_use_voice_card
-        [data-testid="column"],
         .st-key-transcript_use_uploaded_audio_card
         [data-testid="column"],
         .st-key-transcript_use_text_card
@@ -1481,8 +2457,6 @@ def _inject_transcript_input_css() -> None:
             text-overflow:ellipsis;
         }
 
-        .st-key-transcript_use_voice_card
-        [data-testid="column"]:last-child,
         .st-key-transcript_use_uploaded_audio_card
         [data-testid="column"]:last-child,
         .st-key-transcript_use_text_card
@@ -1490,8 +2464,6 @@ def _inject_transcript_input_css() -> None:
             justify-content:flex-end!important;
         }
 
-        .st-key-transcript_use_voice_card
-        [data-testid="stToggle"],
         .st-key-transcript_use_uploaded_audio_card
         [data-testid="stToggle"],
         .st-key-transcript_use_text_card
@@ -1504,8 +2476,6 @@ def _inject_transcript_input_css() -> None:
             padding:0!important;
         }
 
-        .st-key-transcript_use_voice_card
-        [data-testid="stToggle"] > div,
         .st-key-transcript_use_uploaded_audio_card
         [data-testid="stToggle"] > div,
         .st-key-transcript_use_text_card
@@ -1515,7 +2485,6 @@ def _inject_transcript_input_css() -> None:
             justify-content:flex-end!important;
         }
 
-        .st-key-transcript_use_voice_card [role="switch"],
         .st-key-transcript_use_uploaded_audio_card [role="switch"],
         .st-key-transcript_use_text_card [role="switch"] {
             margin-left:auto!important;
@@ -1523,7 +2492,6 @@ def _inject_transcript_input_css() -> None:
             transform-origin:right center;
         }
 
-        .st-key-transcript_use_voice_card:hover,
         .st-key-transcript_use_uploaded_audio_card:hover,
         .st-key-transcript_use_text_card:hover {
             border-color:rgba(167,139,250,.62)!important;
@@ -1532,20 +2500,17 @@ def _inject_transcript_input_css() -> None:
                 inset 0 1px 0 rgba(255,255,255,.035)!important;
         }
 
-        .st-key-transcript_use_voice_card:has(input:disabled),
         .st-key-transcript_use_uploaded_audio_card:has(input:disabled) {
             opacity:.46!important;
             filter:saturate(.62);
         }
 
-        .st-key-transcript_use_voice_card:has(input:disabled):hover,
         .st-key-transcript_use_uploaded_audio_card:has(input:disabled):hover {
             border-color:rgba(167,139,250,.20)!important;
             box-shadow:none!important;
         }
 
         @media(max-width:760px) {
-            .st-key-transcript_use_voice_card,
             .st-key-transcript_use_uploaded_audio_card,
             .st-key-transcript_use_text_card {
                 height:78px!important;
@@ -1751,117 +2716,6 @@ def _render_source_choice(
             )
 
 
-def _render_voice_session_manager() -> None:
-    """Select, rename, and remove saved recordings."""
-
-    sessions = _voice_sessions()
-    if not sessions:
-        return
-
-    active_session = _active_voice_session()
-    if active_session is None:
-        return
-
-    session_ids = [
-        str(session.get("session_id", ""))
-        for session in sessions
-    ]
-    active_id = str(active_session.get("session_id", ""))
-    selector_generation = int(
-        st.session_state.get("transcript_voice_selector_generation", 0)
-    )
-    selector_key = f"transcript_voice_session_selector_{selector_generation}"
-
-    st.markdown(
-        '<div class="transcript-session-label">Temporarily saved recordings</div>',
-        unsafe_allow_html=True,
-    )
-
-    selected_session_id = st.selectbox(
-        "Saved recording",
-        options=session_ids,
-        index=session_ids.index(active_id),
-        format_func=lambda session_id: next(
-            (
-                str(session.get("title", "Recorded voice"))
-                for session in sessions
-                if str(session.get("session_id", "")) == session_id
-            ),
-            "Recorded voice",
-        ),
-        key=selector_key,
-        on_change=_on_voice_session_selected,
-        help="Choose which saved recording should be used by Analyze Selected Evidence.",
-    )
-
-    selected_index = next(
-        (
-            index
-            for index, session in enumerate(sessions)
-            if str(session.get("session_id", "")) == str(selected_session_id)
-        ),
-        len(sessions) - 1,
-    )
-    selected_session = sessions[selected_index]
-    st.session_state["transcript_voice_active_index"] = selected_index
-    selected_id = str(
-        selected_session.get("session_id", f"voice_{selected_index}")
-    )
-
-    new_title = st.text_input(
-        "Recording title",
-        value=str(
-            selected_session.get(
-                "title",
-                f"Recorded voice {selected_index + 1}",
-            )
-        ),
-        key=f"voice_title_{selected_id}",
-        placeholder="Example: Bank verification call",
-    )
-
-    cleaned_title = new_title.strip()
-    if (
-        cleaned_title
-        and cleaned_title != str(selected_session.get("title", ""))
-    ):
-        sessions[selected_index]["title"] = cleaned_title
-        st.session_state["transcript_voice_sessions"] = sessions
-
-    record_col, remove_col, information_col = st.columns(
-        [0.24, 0.24, 0.52],
-        gap="small",
-        vertical_alignment="center",
-    )
-
-    with record_col:
-        if st.button(
-            "Record another",
-            key="transcript_record_another",
-            use_container_width=True,
-        ):
-            st.session_state["transcript_voice_mode"] = "record"
-            st.session_state["transcript_recorder_generation"] = (
-                int(st.session_state.get("transcript_recorder_generation", 0)) + 1
-            )
-            st.rerun()
-
-    with remove_col:
-        if st.button(
-            "Remove recording",
-            key=f"remove_voice_session_{selected_id}",
-            use_container_width=True,
-        ):
-            _delete_active_voice_session()
-            st.rerun()
-
-    with information_col:
-        st.caption(
-            f"Recording {selected_index + 1} of {len(sessions)} - "
-            f"{selected_session.get('created_at', '')}"
-        )
-
-
 def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
     _init_transcript_voice_state()
     _inject_transcript_input_css()
@@ -1869,8 +2723,8 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
     render_detection_tool_intro(
         title="Voice Transcript",
         description=(
-            "Record a speaker voice sample, upload an audio recording, upload or paste "
-            "a transcript, or combine sources for transcript scam analysis."
+            "Upload an audio recording, generate speech-to-text, upload or paste a transcript, "
+            "or combine both sources for transcript scam analysis."
         ),
         icon="solar:microphone-3-bold-duotone",
         accent="purple",
@@ -1884,41 +2738,22 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
         _transcript_step_header(
             "01",
             "Choose Evidence Sources",
-            "Select one or more sources. Audio-only analysis remains available even when no transcript text exists.",
+            "Select uploaded audio, transcript text, or both. Browser microphone recording has been removed.",
         )
 
-        voice_enabled = bool(
-            st.session_state.get("transcript_use_voice", False)
-        )
-        uploaded_audio_enabled = bool(
-            st.session_state.get("transcript_use_uploaded_audio", False)
-        )
-
-        source_a, source_b, source_c = st.columns(
-            3,
+        source_a, source_b = st.columns(
+            2,
             gap="small",
             vertical_alignment="top",
         )
         with source_a:
-            use_voice = _render_source_choice(
-                title="Speaker Voice Recorder",
-                description="Record speaker playback through the microphone.",
-                icon_url="https://api.iconify.design/solar/microphone-3-bold-duotone.svg",
-                state_key="transcript_use_voice",
-                disabled=uploaded_audio_enabled,
-                on_change=_on_voice_source_change,
-            )
-
-        with source_b:
             use_uploaded_audio = _render_source_choice(
                 title="Uploaded Audio Recording",
                 description="Upload WAV, MP3, or FLAC audio evidence.",
                 icon_url="https://api.iconify.design/solar/soundwave-bold-duotone.svg",
                 state_key="transcript_use_uploaded_audio",
-                disabled=voice_enabled,
-                on_change=_on_uploaded_audio_source_change,
             )
-        with source_c:
+        with source_b:
             use_text = _render_source_choice(
                 title="Uploaded or Pasted Transcript",
                 description="Upload TXT or CSV, or paste transcript text.",
@@ -1926,7 +2761,7 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
                 state_key="transcript_use_text",
             )
 
-        if not use_voice and not use_uploaded_audio and not use_text:
+        if not use_uploaded_audio and not use_text:
             st.warning("Select at least one evidence source.")
 
         st.markdown('<div class="transcript-step-divider"></div>', unsafe_allow_html=True)
@@ -1934,28 +2769,69 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
         _transcript_step_header(
             "02",
             "Configure Audio Investigation",
-            "Choose chunking, alert sensitivity, and the Whisper model used for recorded and uploaded audio.",
+            "Choose the transcript model, alert sensitivity, and Whisper settings used for recorded and uploaded audio.",
         )
 
-        audio_classifier = _load_audio_classifier(str(root))
-        behavioral_classifier = _load_behavioral_classifier(str(root))
-        text_classifier = _load_transcript_classifier_safe(str(root))
+        transcript_model_options = _available_transcript_models(root)
+        transcript_model_keys = _default_transcript_model_keys(transcript_model_options)
+        if transcript_model_options:
+            transcript_model_select_key = "transcript_text_model_key"
+            selected_model_keys = st.session_state.get(transcript_model_select_key)
+            if not isinstance(selected_model_keys, list):
+                selected_model_keys = _default_transcript_model_keys(transcript_model_options)
+            had_removed_best_model = "best" in selected_model_keys
+            selected_model_keys = [
+                key for key in selected_model_keys if key in transcript_model_options
+            ] or _default_transcript_model_keys(transcript_model_options)
+            if had_removed_best_model:
+                selected_model_keys = _default_transcript_model_keys(transcript_model_options)
+            st.session_state[transcript_model_select_key] = selected_model_keys
+            transcript_model_keys = st.multiselect(
+                "Transcript scam models",
+                transcript_model_options,
+                key=transcript_model_select_key,
+                format_func=lambda value: _transcript_model_label(root, value),
+                help=(
+                    "Enable multiple trained model families to compare agreement. "
+                    "The recommended model is shown from saved training metrics, not as a separate runtime artifact."
+                ),
+            )
+            if not transcript_model_keys:
+                st.warning("Select at least one transcript model.")
+                transcript_model_keys = _default_transcript_model_keys(transcript_model_options)
+
+        primary_transcript_model_key = transcript_model_keys[0]
 
         chunk_seconds = 5
         transcript_source = "Audio only"
-        whisper_size = "tiny"
+        whisper_size = "base.en"
+        whisper_language: str | None = "en"
+        whisper_task = "transcribe"
         manual_transcript = ""
 
-        if use_voice or use_uploaded_audio:
-            settings_a, settings_b, settings_c = st.columns(3, gap="small")
+        if use_uploaded_audio:
+            settings_a, settings_b, settings_c, settings_d = st.columns(4, gap="small")
+            chunk_key = "transcript_uploaded_audio_chunk_seconds"
+            chunk_max = 30
+            chunk_default = 15
+            try:
+                current_chunk_value = int(st.session_state.get(chunk_key, chunk_default))
+            except (TypeError, ValueError):
+                current_chunk_value = chunk_default
+            if current_chunk_value > chunk_max:
+                st.session_state[chunk_key] = chunk_default
 
             with settings_a:
                 chunk_seconds = st.slider(
                     "Chunk length",
                     min_value=3,
-                    max_value=10,
-                    value=5,
-                    key="transcript_recorder_chunk_seconds",
+                    max_value=chunk_max,
+                    value=chunk_default,
+                    key=chunk_key,
+                    help=(
+                        "Uploaded recordings can use longer chunks for better Whisper context. "
+                        "Microphone recording stays shorter for faster feedback."
+                    ),
                 )
 
             with settings_b:
@@ -1965,130 +2841,44 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
                     max_value=90,
                     value=70,
                     step=5,
-                    key="transcript_recorder_risk_threshold",
+                    key="transcript_uploaded_audio_risk_threshold",
                 )
 
             with settings_c:
+                whisper_options = _available_whisper_models()
+                default_whisper = _default_whisper_model(whisper_options)
+                whisper_key = "transcript_uploaded_audio_whisper_size"
+                if st.session_state.get(whisper_key) not in whisper_options:
+                    st.session_state[whisper_key] = default_whisper
                 whisper_size = st.selectbox(
                     "Whisper model",
-                    ["tiny", "base"],
-                    key="transcript_recorder_whisper_size",
-                    disabled=not WHISPER_AVAILABLE,
-                    help="Used for both Speaker Voice Recorder and Uploaded Audio Recording.",
+                    whisper_options,
+                    key=whisper_key,
+                    format_func=_whisper_model_label,
+                    help=(
+                        "English models are faster and less likely to drift into unrelated "
+                        "languages. Larger models improve accuracy but need more CPU/RAM. "
+                        "Requires requirements-local.txt; hosted cloud falls back to audio-only analysis if unavailable."
+                    ),
                 )
 
-            transcript_source = "Local Whisper" if WHISPER_AVAILABLE else "Audio only"
-            if not WHISPER_AVAILABLE:
-                st.warning(
-                    "Local Whisper is unavailable. Audio authenticity and behavioral analysis can still run, "
-                    "but automatic transcript generation will be skipped."
+            with settings_d:
+                force_english = st.checkbox(
+                    "Force English",
+                    value=True,
+                    key="transcript_force_english_whisper",
+                    help="Prevents multilingual Whisper from auto-switching to Chinese, Korean, or random gibberish on noisy chunks.",
+                )
+                whisper_language = "en" if force_english else None
+
+            transcript_source = "Local Whisper"
+            st.caption("Whisper loads only after Analyze. Hosted cloud can run audio-only if local Whisper is not installed.")
+            if chunk_seconds < 12:
+                st.info(
+                    "Uploaded audio works best with 12-30 second chunks because Whisper gets more speech context."
                 )
 
-            audio_left, audio_right = st.columns(2, gap="small")
-
-            with audio_left:
-                with st.container(border=True):
-                    st.markdown(
-                        '<div class="transcript-subcard-title">Speaker Voice Recorder</div>'
-                        '<div class="transcript-subcard-copy">'
-                        'Record a short voice sample played from your speaker through the microphone.'
-                        '</div>',
-                        unsafe_allow_html=True,
-                    )
-
-                    if use_voice:
-                        sessions = _voice_sessions()
-                        voice_mode = str(
-                            st.session_state.get("transcript_voice_mode", "record")
-                        )
-                        active_session = _active_voice_session()
-
-                        if voice_mode == "record" or not sessions:
-                            recorded_audio = st.audio_input(
-                                "Record voice sample",
-                                sample_rate=16_000,
-                                key=(
-                                    "transcript_voice_recorder_"
-                                    f"{int(st.session_state['transcript_recorder_generation'])}"
-                                ),
-                            )
-                        else:
-                            recorded_audio = None
-                            selected_audio_bytes = (
-                                active_session.get("audio_bytes", b"")
-                                if active_session
-                                else b""
-                            )
-
-                            if isinstance(selected_audio_bytes, bytes) and selected_audio_bytes:
-                                st.audio(selected_audio_bytes, format="audio/wav")
-                            else:
-                                st.info("The selected saved recording contains no playable audio.")
-
-                        if recorded_audio is not None:
-                            recorded_bytes = recorded_audio.getvalue()
-                            settings = json.dumps(
-                                [chunk_seconds, transcript_source, whisper_size],
-                                ensure_ascii=True,
-                            ).encode("utf-8")
-                            signature = hashlib.sha256(recorded_bytes + settings).hexdigest()
-                            signatures = {
-                                str(session.get("signature", ""))
-                                for session in _voice_sessions()
-                            }
-
-                            if signature not in signatures:
-                                with st.spinner("Analysing voice recording..."):
-                                    try:
-                                        whisper_model = (
-                                            _load_whisper_model(whisper_size)
-                                            if WHISPER_AVAILABLE
-                                            else None
-                                        )
-                                        active_transcript_source = (
-                                            "Local Whisper"
-                                            if whisper_model is not None
-                                            else "Audio only"
-                                        )
-
-                                        processed = _process_recording(
-                                            recorded_bytes,
-                                            chunk_seconds=chunk_seconds,
-                                            transcript_source=active_transcript_source,
-                                            manual_transcript="",
-                                            whisper_model=whisper_model,
-                                            audio_classifier=audio_classifier,
-                                            text_classifier=text_classifier,
-                                            behavioral_classifier=behavioral_classifier,
-                                        )
-                                    except Exception as exc:
-                                        st.session_state["transcript_recorder_error"] = str(exc)
-                                    else:
-                                        for chunk_index, result in enumerate(processed, 1):
-                                            result["clip"] = 1
-                                            result["clip_chunk"] = chunk_index
-                                            result["capture_mode"] = "Speaker Voice Recorder"
-                                        _create_voice_session(
-                                            audio_bytes=recorded_bytes,
-                                            signature=signature,
-                                            results=processed,
-                                        )
-                                        st.session_state["transcript_recorder_error"] = ""
-                                        st.session_state["transcript_pending_voice_analysis"] = True
-                                        render_analysis_ready("New voice recording analysed")
-                                        st.rerun()
-
-                        if st.session_state.get("transcript_recorder_error"):
-                            st.error(
-                                f"Recording analysis failed: "
-                                f"{st.session_state['transcript_recorder_error']}"
-                            )
-                        _render_voice_session_manager()
-                    else:
-                        st.info("Speaker Voice Recorder is not selected.")
-
-            with audio_right:
-                with st.container(border=True):
+            with st.container(border=True):
                     st.markdown(
                         '<div class="transcript-subcard-title">Uploaded Audio Recording</div>'
                         '<div class="transcript-subcard-copy">Upload WAV, MP3, or FLAC evidence from an existing call.</div>',
@@ -2156,108 +2946,100 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
 
         st.markdown('<div class="transcript-step-divider"></div>', unsafe_allow_html=True)
 
-        _transcript_step_header(
-            "03",
-            "Review Transcript Text",
-            "Upload TXT or CSV evidence, paste transcript text, or leave this step disabled for audio-only analysis.",
-        )
-
-        transcript_enabled = bool(
-            st.session_state.get("transcript_use_text", False)
-        )
-        transcript_left, transcript_right = st.columns([0.34, 0.66], gap="small")
-
-        with transcript_left:
-            uploaded_file = st.file_uploader(
-                "Upload transcript TXT or CSV",
-                type=["txt", "csv"],
-                key="transcript_text_upload",
-                disabled=not transcript_enabled,
-            )
-            uploaded = _read_upload(uploaded_file) if transcript_enabled else None
-
-        with transcript_right:
-            if isinstance(uploaded, str):
-                st.session_state["transcript_text_preview"] = uploaded
-
-            text = st.text_area(
-                "Transcript preview",
-                height=260,
-                placeholder=(
-                    "Paste a call, Zoom, Teams, or Google Meet transcript here."
-                    if transcript_enabled
-                    else "Transcript input is disabled. Enable 'Uploaded or Pasted Transcript' above."
-                ),
-                disabled=not transcript_enabled,
-                key="transcript_text_preview",
+        with st.form("transcript_analysis_form", clear_on_submit=False):
+            _transcript_step_header(
+                "03",
+                "Review Transcript Text",
+                "Upload TXT or CSV evidence, paste transcript text, or leave this step disabled for audio-only analysis.",
             )
 
-        st.markdown('<div class="transcript-step-divider"></div>', unsafe_allow_html=True)
+            transcript_enabled = bool(
+                st.session_state.get("transcript_use_text", False)
+            )
+            transcript_left, transcript_right = st.columns([0.34, 0.66], gap="small")
 
-        _transcript_step_header(
-            "04",
-            "Confirm and Analyze",
-            "Review source readiness, then run the selected transcript and audio investigations.",
-        )
+            with transcript_left:
+                uploaded_file = st.file_uploader(
+                    "Upload transcript TXT or CSV",
+                    type=["txt", "csv"],
+                    key="transcript_text_upload",
+                    disabled=not transcript_enabled,
+                )
+                uploaded = _read_upload(uploaded_file) if transcript_enabled else None
 
-        recorder_results = _active_recorder_results()
+            with transcript_right:
+                if isinstance(uploaded, str):
+                    st.session_state["transcript_text_preview"] = uploaded
 
-        uploaded_audio_results = st.session_state.get(
-            "transcript_uploaded_audio_results",
-            [],
-        )
-        if not isinstance(uploaded_audio_results, list):
-            uploaded_audio_results = []
+                text = st.text_area(
+                    "Transcript preview",
+                    height=260,
+                    placeholder=(
+                        "Paste a call, Zoom, Teams, or Google Meet transcript here."
+                        if transcript_enabled
+                        else "Transcript input is disabled. Enable 'Uploaded or Pasted Transcript' above."
+                    ),
+                    disabled=not transcript_enabled,
+                    key="transcript_text_preview",
+                )
 
-        voice_text_preview = _recorder_transcript_text()
-        uploaded_audio_text_preview = _uploaded_audio_transcript_text()
+            st.markdown('<div class="transcript-step-divider"></div>', unsafe_allow_html=True)
 
-        _render_combined_input_summary(
-            use_voice=use_voice,
-            use_uploaded_audio=use_uploaded_audio,
-            use_text=use_text,
-            voice_text=voice_text_preview,
-            uploaded_audio_text=uploaded_audio_text_preview,
-            transcript_text=text,
-            recorder_results=recorder_results,
-            uploaded_audio_results=uploaded_audio_results,
-        )
+            _transcript_step_header(
+                "04",
+                "Confirm and Analyze",
+                "Review source readiness, then run the selected transcript and audio investigations.",
+            )
 
-        ready_sources = sum(
-            [
-                bool(use_voice and recorder_results),
-                bool(
-                    use_uploaded_audio
-                    and st.session_state.get("transcript_uploaded_audio_file_bytes")
-                ),
-                bool(use_text and text.strip()),
-            ]
-        )
+            uploaded_audio_results = st.session_state.get(
+                "transcript_uploaded_audio_results",
+                [],
+            )
+            if not isinstance(uploaded_audio_results, list):
+                uploaded_audio_results = []
 
-        st.markdown(
-            '<div class="transcript-review-strip">'
-            f'<div class="transcript-review-item"><span>Sources Selected</span><b>{sum([use_voice, use_uploaded_audio, use_text])}</b></div>'
-            f'<div class="transcript-review-item"><span>Sources Ready</span><b>{ready_sources}</b></div>'
-            f'<div class="transcript-review-item"><span>Transcript Words</span><b>{len(text.split()) if use_text else 0}</b></div>'
-            f'<div class="transcript-review-item"><span>Alert Threshold</span><b>{risk_threshold}%</b></div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+            uploaded_audio_text_preview = _uploaded_audio_transcript_text()
 
-        voice_ready = bool(use_voice and _active_voice_session() is not None)
-        uploaded_audio_ready = bool(
-            use_uploaded_audio
-            and st.session_state.get("transcript_uploaded_audio_file_bytes")
-        )
-        text_ready = bool(use_text and text.strip())
+            _render_combined_input_summary(
+                use_uploaded_audio=use_uploaded_audio,
+                use_text=use_text,
+                uploaded_audio_text=uploaded_audio_text_preview,
+                transcript_text=text,
+                uploaded_audio_results=uploaded_audio_results,
+            )
 
-        analyze_button = st.button(
-            "* Analyze Selected Evidence",
-            type="primary",
-            use_container_width=True,
-            disabled=not (voice_ready or uploaded_audio_ready or text_ready),
-            key="transcript_analyze_selected_sources",
-        )
+            ready_sources = sum(
+                [
+                    bool(
+                        use_uploaded_audio
+                        and st.session_state.get("transcript_uploaded_audio_file_bytes")
+                    ),
+                    bool(use_text and text.strip()),
+                ]
+            )
+
+            st.markdown(
+                '<div class="transcript-review-strip">'
+                f'<div class="transcript-review-item"><span>Sources Selected</span><b>{sum([use_uploaded_audio, use_text])}</b></div>'
+                f'<div class="transcript-review-item"><span>Sources Ready</span><b>{ready_sources}</b></div>'
+                f'<div class="transcript-review-item"><span>Transcript Words</span><b>{len(text.split()) if use_text else 0}</b></div>'
+                f'<div class="transcript-review-item"><span>Alert Threshold</span><b>{risk_threshold}%</b></div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+            uploaded_audio_ready = bool(
+                use_uploaded_audio
+                and st.session_state.get("transcript_uploaded_audio_file_bytes")
+            )
+            text_ready = bool(use_text and text.strip())
+
+            analyze_button = st.form_submit_button(
+                "* Analyze Selected Evidence",
+                type="primary",
+                use_container_width=True,
+                disabled=not (uploaded_audio_ready or text_ready),
+            )
 
     if isinstance(uploaded, pd.DataFrame) and use_text:
         render_section_header("Batch transcript CSV analysis", eyebrow="Multiple rows")
@@ -2266,15 +3048,25 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
 
         if st.button("Analyze transcript CSV rows", use_container_width=True):
             texts = uploaded[text_column].fillna("").astype(str).tolist()
+            rows = []
             try:
-                classifier = _load_transcript_classifier(str(root))
-                results = classifier.predict_many(texts)
+                for selected_model_key in transcript_model_keys:
+                    classifier = _load_transcript_classifier(str(root), selected_model_key)
+                    batch = classifier.predict_many(texts)
+                    for row in batch.to_dict("records"):
+                        rows.append(
+                            {
+                                "model": _transcript_model_label(root, selected_model_key),
+                                **row,
+                            }
+                        )
+                results = pd.DataFrame(rows)
             except FileNotFoundError:
-                rows = []
                 for value in texts:
                     demo = rule_based_text_prediction(value)
                     rows.append(
                         {
+                            "model": "Demo rules",
                             "preview": value[:120],
                             "prediction": demo["label_name"],
                             "confidence": round(float(demo["confidence"]) * 100, 2),
@@ -2290,17 +3082,24 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
         render_content_card_close()
 
     if analyze_button:
-        if use_voice and use_uploaded_audio:
-            st.error(
-                "Speaker Voice Recorder and Uploaded Audio Recording cannot be analyzed together. "
-                "Select only one audio source."
-            )
-            return
-
         if use_uploaded_audio:
             current_signature = st.session_state.get(
                 "transcript_uploaded_audio_file_signature"
             )
+            upload_settings = json.dumps(
+                [
+                    chunk_seconds,
+                    transcript_source,
+                    whisper_size,
+                    whisper_language,
+                    whisper_task,
+                    primary_transcript_model_key,
+                ],
+                ensure_ascii=True,
+            ).encode("utf-8")
+            current_analysis_signature = hashlib.sha256(
+                str(current_signature).encode("utf-8") + upload_settings
+            ).hexdigest()
             processed_signature = st.session_state.get(
                 "transcript_uploaded_audio_last_processed_signature"
             )
@@ -2309,32 +3108,32 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
                 st.warning("Upload an audio recording before running the analysis.")
                 return
 
-            if current_signature != processed_signature:
+            if current_analysis_signature != processed_signature:
                 with st.spinner("Analyzing uploaded audio..."):
                     try:
                         _analyse_selected_uploaded_audio(
                             root,
                             chunk_seconds=chunk_seconds,
                             whisper_size=whisper_size,
+                            whisper_language=whisper_language,
+                            whisper_task=whisper_task,
+                            transcript_model_key=primary_transcript_model_key,
+                            analysis_signature=current_analysis_signature,
                         )
                     except Exception as exc:
                         st.session_state["transcript_uploaded_audio_error"] = str(exc)
                         st.error(f"Uploaded audio analysis failed: {exc}")
                         return
+                whisper_notice = st.session_state.pop("transcript_uploaded_audio_whisper_notice", None)
+                if whisper_notice:
+                    st.info(str(whisper_notice))
 
-        active_voice_session = _active_voice_session() if use_voice else None
-        recorder_results = (
-            list(active_voice_session.get("results", []))
-            if active_voice_session
-            else []
-        )
         uploaded_audio_results = (
             list(st.session_state.get("transcript_uploaded_audio_results", []))
             if use_uploaded_audio
             else []
         )
 
-        voice_text = _recorder_transcript_text() if use_voice else ""
         uploaded_audio_text = (
             _uploaded_audio_transcript_text()
             if use_uploaded_audio
@@ -2344,16 +3143,13 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
         _render_analysis_outputs(
             root=root,
             history=history,
-            use_voice=use_voice,
+            transcript_model_keys=transcript_model_keys,
             use_uploaded_audio=use_uploaded_audio,
             use_text=use_text,
-            voice_text=voice_text,
             uploaded_audio_text=uploaded_audio_text,
             transcript_text=text,
-            recorder_results=recorder_results,
             uploaded_audio_results=uploaded_audio_results,
             risk_threshold=risk_threshold,
         )
 
-        st.session_state["transcript_pending_voice_analysis"] = False
         st.session_state["transcript_pending_uploaded_audio_analysis"] = False

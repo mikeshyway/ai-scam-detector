@@ -274,8 +274,33 @@ def load_text_artifacts(
         ]
         raise FileNotFoundError("Missing model artifact(s): " + ", ".join(missing))
 
+    model = joblib.load(model_file)
+    _force_single_worker_prediction(model)
     return TextScamClassifier(
         vectorizer=joblib.load(vectorizer_file),
-        model=joblib.load(model_file),
+        model=model,
         model_name=model_name,
     )
+
+
+def _force_single_worker_prediction(model: Any) -> None:
+    """Avoid local runtime failures from joblib worker pools during prediction."""
+
+    if hasattr(model, "n_jobs"):
+        try:
+            setattr(model, "n_jobs", 1)
+        except Exception:
+            pass
+
+    for attribute in ("estimator", "base_estimator", "final_estimator"):
+        child = getattr(model, attribute, None)
+        if child is not None and child is not model:
+            _force_single_worker_prediction(child)
+
+    for attribute in ("estimators_", "calibrated_classifiers_"):
+        children = getattr(model, attribute, None)
+        if not children:
+            continue
+        for child in children:
+            if child is not model:
+                _force_single_worker_prediction(child)

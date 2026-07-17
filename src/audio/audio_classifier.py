@@ -123,7 +123,9 @@ def load_audio_model(model_path: str | Path) -> AudioDeepfakeClassifier:
     path = Path(model_path)
     if not path.exists():
         raise FileNotFoundError(path)
-    return AudioDeepfakeClassifier(joblib.load(path))
+    model = joblib.load(path)
+    _force_single_worker_prediction(model)
+    return AudioDeepfakeClassifier(model)
 
 
 def load_audio_behavior_model(model_path: str | Path) -> AudioDeepfakeClassifier:
@@ -136,4 +138,29 @@ def load_audio_behavior_model(model_path: str | Path) -> AudioDeepfakeClassifier
     path = Path(model_path)
     if not path.exists():
         raise FileNotFoundError(path)
-    return AudioDeepfakeClassifier(joblib.load(path))
+    model = joblib.load(path)
+    _force_single_worker_prediction(model)
+    return AudioDeepfakeClassifier(model)
+
+
+def _force_single_worker_prediction(model: Any) -> None:
+    """Avoid local runtime failures from joblib worker pools during prediction."""
+
+    if hasattr(model, "n_jobs"):
+        try:
+            setattr(model, "n_jobs", 1)
+        except Exception:
+            pass
+
+    for attribute in ("estimator", "base_estimator", "final_estimator"):
+        child = getattr(model, attribute, None)
+        if child is not None and child is not model:
+            _force_single_worker_prediction(child)
+
+    for attribute in ("estimators_", "calibrated_classifiers_"):
+        children = getattr(model, attribute, None)
+        if not children:
+            continue
+        for child in children:
+            if child is not model:
+                _force_single_worker_prediction(child)

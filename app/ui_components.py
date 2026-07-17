@@ -22,6 +22,8 @@ MODEL_ARTIFACTS = {
     "Email Decision Tree": "models/email_dt.pkl",
     "Transcript TF-IDF": "models/transcript_vectorizer.pkl",
     "Transcript Naive Bayes": "models/transcript_nb.pkl",
+    "Transcript SVM": "models/transcript_svm.pkl",
+    "Transcript DistilBERT": "models/transcript_distilbert",
     "Audio SVM": "models/audio_svm.pkl",
 }
 
@@ -43,20 +45,24 @@ CHART_THEME = {
 }
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=1)
 def get_demo_data() -> dict[str, object]:
     from src.data.demo_data import build_demo_bundle
 
     return build_demo_bundle()
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=60, max_entries=4)
 def get_model_status(root: str) -> dict[str, bool]:
     base = Path(root)
-    return {name: (base / relative).exists() for name, relative in MODEL_ARTIFACTS.items()}
+    status = {name: (base / relative).exists() for name, relative in MODEL_ARTIFACTS.items()}
+    status["Transcript DistilBERT"] = status.get("Transcript DistilBERT", False) or (
+        base / "archive" / "local_models" / "models" / "transcript_distilbert"
+    ).exists()
+    return status
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=60, max_entries=4)
 def get_dataset_status(root: str) -> dict[str, bool]:
     base = Path(root)
     checks = {
@@ -1643,15 +1649,15 @@ def render_kpi_row(history: list[dict[str, object]]) -> None:
         )
     )
 
-    confidence_values = [
-        float(item.get("confidence", 0))
+    risk_values = [
+        float(item.get("risk_score", item.get("confidence", 0)))
         for item in real_history
-        if isinstance(item.get("confidence"), (int, float))
+        if isinstance(item.get("risk_score", item.get("confidence")), (int, float))
     ]
 
     average_risk = (
-        sum(confidence_values) / len(confidence_values)
-        if confidence_values
+        sum(risk_values) / len(risk_values)
+        if risk_values
         else 0
     )
 
@@ -1801,12 +1807,15 @@ def _sidebar_model_status_items(
         ("Email Random Forest", models_dir / "email_rf.pkl", [models_dir / "email_vectorizer.pkl"]),
         ("Email XGBoost", models_dir / "email_xgb.pkl", [models_dir / "email_vectorizer.pkl"]),
     ]
+    local_distilbert = root / "archive" / "local_models" / "models" / "transcript_distilbert"
     transcript_models = [
         ("Transcript Naive Bayes", models_dir / "transcript_nb.pkl", [models_dir / "transcript_vectorizer.pkl"]),
-        ("Transcript Decision Tree", models_dir / "transcript_dt.pkl", [models_dir / "transcript_vectorizer.pkl"]),
         ("Transcript SVM", models_dir / "transcript_svm.pkl", [models_dir / "transcript_vectorizer.pkl"]),
-        ("Transcript Random Forest", models_dir / "transcript_rf.pkl", [models_dir / "transcript_vectorizer.pkl"]),
-        ("Transcript XGBoost", models_dir / "transcript_xgb.pkl", [models_dir / "transcript_vectorizer.pkl"]),
+        (
+            "Transcript DistilBERT",
+            local_distilbert if local_distilbert.exists() else models_dir / "transcript_distilbert",
+            [],
+        ),
     ]
     audio_models = [
         ("Audio SVM", models_dir / "audio_svm.pkl", []),

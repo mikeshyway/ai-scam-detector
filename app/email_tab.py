@@ -926,107 +926,107 @@ def _render_email_input_container(
 
         st.markdown('<div class="email-step-divider"></div>', unsafe_allow_html=True)
 
-        _step_header(
-            "02",
-            "Review Extracted Content",
-            "Preview, edit or paste the extracted content before running analysis.",
-        )
+        with st.form("email_analysis_form", clear_on_submit=False):
+            _step_header(
+                "02",
+                "Review Extracted Content",
+                "Preview, edit or paste the extracted content before running analysis.",
+            )
 
-        text = st.text_area(
-            "Evidence preview",
-            key="email_evidence_text",
-            height=205,
-            placeholder="Extracted content will appear here...",
-            help="The text shown here is the exact content sent to the selected AI models.",
-            label_visibility="collapsed",
-        )
+            text = st.text_area(
+                "Evidence preview",
+                key="email_evidence_text",
+                height=205,
+                placeholder="Extracted content will appear here...",
+                help="The text shown here is the exact content sent to the selected AI models.",
+                label_visibility="collapsed",
+            )
 
-        metadata_upload = uploaded_file
-        if metadata_upload is None and st.session_state.get("email_uploaded_file_name"):
-            metadata_upload = SimpleNamespace(name=st.session_state.email_uploaded_file_name)
+            metadata_upload = uploaded_file
+            if metadata_upload is None and st.session_state.get("email_uploaded_file_name"):
+                metadata_upload = SimpleNamespace(name=st.session_state.email_uploaded_file_name)
 
-        metadata = _email_evidence_metadata(text, metadata_upload, uploaded)
-        source_value = html.escape(str(metadata["source"]))
-        filename_value = html.escape(str(metadata["filename"]))
-        status_value = html.escape(str(metadata["status"]))
+            metadata = _email_evidence_metadata(text, metadata_upload, uploaded)
+            source_value = html.escape(str(metadata["source"]))
+            filename_value = html.escape(str(metadata["filename"]))
+            status_value = html.escape(str(metadata["status"]))
 
-        st.markdown(
-            '<div class="email-preview-meta">'
-            f'<div class="email-meta-item"><span class="email-meta-label">Source</span>'
-            f'<span class="email-meta-value">{source_value}<br>{filename_value}</span></div>'
-            f'<div class="email-meta-item"><span class="email-meta-label">Characters</span>'
-            f'<span class="email-meta-value">{metadata["characters"]:,}</span></div>'
-            f'<div class="email-meta-item"><span class="email-meta-label">Words</span>'
-            f'<span class="email-meta-value">{metadata["words"]:,}</span></div>'
-            f'<div class="email-meta-item"><span class="email-meta-label">Status</span>'
-            f'<span class="email-meta-value">{status_value}</span></div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+            st.markdown(
+                '<div class="email-preview-meta">'
+                f'<div class="email-meta-item"><span class="email-meta-label">Source</span>'
+                f'<span class="email-meta-value">{source_value}<br>{filename_value}</span></div>'
+                f'<div class="email-meta-item"><span class="email-meta-label">Characters</span>'
+                f'<span class="email-meta-value">{metadata["characters"]:,}</span></div>'
+                f'<div class="email-meta-item"><span class="email-meta-label">Words</span>'
+                f'<span class="email-meta-value">{metadata["words"]:,}</span></div>'
+                f'<div class="email-meta-item"><span class="email-meta-label">Status</span>'
+                f'<span class="email-meta-value">{status_value}</span></div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
 
-        st.markdown('<div class="email-step-divider"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="email-step-divider"></div>', unsafe_allow_html=True)
 
-        _step_header(
-            "03",
-            "Configure Investigation",
-            "Choose the AI models to compare for this evidence.",
-        )
+            _step_header(
+                "03",
+                "Configure Investigation",
+                "Choose the AI models to compare for this evidence.",
+            )
 
-        model_choices: list[str] = []
+            model_choices: list[str] = []
 
-        with st.container(key="email_config_section"):
-            with st.container(key="email_model_panel", border=True):
-                st.markdown(
-                    '<div class="email-model-title">AI Models</div>',
-                    unsafe_allow_html=True,
-                )
-
-                for model_name in model_options:
-                    model_key = f"email_model_{model_name.lower().replace(' ', '_')}"
-                    row_label, row_toggle = st.columns(
-                        [0.90, 0.10],
-                        gap="small",
-                        vertical_alignment="center",
+            with st.container(key="email_config_section"):
+                with st.container(key="email_model_panel", border=True):
+                    st.markdown(
+                        '<div class="email-model-title">AI Models</div>',
+                        unsafe_allow_html=True,
                     )
 
-                    with row_label:
-                        icon_name = model_icons.get(
-                            model_name,
-                            "solar:settings-bold-duotone",
+                    for model_name in model_options:
+                        model_key = f"email_model_{model_name.lower().replace(' ', '_')}"
+                        row_label, row_toggle = st.columns(
+                            [0.90, 0.10],
+                            gap="small",
+                            vertical_alignment="center",
                         )
 
-                        icon_url = (
-                            "https://api.iconify.design/"
-                            + icon_name.replace(":", "/")
-                            + ".svg"
-                        )
+                        with row_label:
+                            icon_name = model_icons.get(
+                                model_name,
+                                "solar:settings-bold-duotone",
+                            )
 
-                        st.markdown(
-                            '<div class="email-model-row-label">'
-                            f'<span class="email-model-icon" '
-                            f'style="--model-icon:url(\'{icon_url}\')"></span>'
-                            f'<span>{html.escape(model_name)}</span>'
-                            '</div>',
-                            unsafe_allow_html=True,
-                        )
+                            icon_url = (
+                                "https://api.iconify.design/"
+                                + icon_name.replace(":", "/")
+                                + ".svg"
+                            )
 
-                    with row_toggle:
-                        selected = st.toggle(
-                            f"Use {model_name}",
-                            key=model_key,
-                            label_visibility="collapsed",
-                        )
+                            st.markdown(
+                                '<div class="email-model-row-label">'
+                                f'<span class="email-model-icon" '
+                                f'style="--model-icon:url(\'{icon_url}\')"></span>'
+                                f'<span>{html.escape(model_name)}</span>'
+                                '</div>',
+                                unsafe_allow_html=True,
+                            )
 
-                    if selected:
-                        model_choices.append(model_name)
+                        with row_toggle:
+                            selected = st.toggle(
+                                f"Use {model_name}",
+                                key=model_key,
+                                label_visibility="collapsed",
+                            )
 
-        analyze_button = st.button(
-            "\u2726  Analyze Evidence",
-            type="primary",
-            use_container_width=True,
-            disabled=not text.strip() or not model_choices,
-            key="email_analyze_evidence",
-        )
+                        if selected:
+                            model_choices.append(model_name)
+
+            analyze_button = st.form_submit_button(
+                "\u2726  Analyze Evidence",
+                type="primary",
+                use_container_width=True,
+                disabled=not text.strip() or not model_choices,
+            )
 
     return uploaded_file, uploaded, text, model_choices, analyze_button
 

@@ -2734,8 +2734,8 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
         elif not has_usable_provider:
             disabled_reason = "Enable at least one live provider with a configured API key."
 
-        with st.container(key="phone_investigate_button"):
-            investigate = st.button(
+        with st.form("phone_investigation_form", clear_on_submit=False):
+            investigate = st.form_submit_button(
                 "Investigate Phone Number",
                 use_container_width=True,
                 disabled=bool(disabled_reason),
