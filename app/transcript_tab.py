@@ -144,19 +144,22 @@ def _load_transcript_classifier_safe(root: str, model_key: str = "nb"):
 
 
 @st.cache_resource(show_spinner=False)
-def _load_whisper_model(model_size: str):
-    whisper_module = _load_whisper_module()
-    if whisper_module is None:
-        return None
-    return whisper_module.load_model(model_size)
-
-
-def _load_whisper_module() -> Any | None:
+def _load_whisper_model(model_size: str) -> tuple[Any | None, str]:
     try:
         import whisper
-    except Exception:
-        return None
-    return whisper
+    except Exception as exc:
+        return (
+            None,
+            f"Whisper import failed: {type(exc).__name__}: {exc}",
+        )
+
+    try:
+        return whisper.load_model(model_size), ""
+    except Exception as exc:
+        return (
+            None,
+            f"Whisper model '{model_size}' failed to load: {type(exc).__name__}: {exc}",
+        )
 
 
 def _transcript_model_candidates(root: Path, model_key: str) -> list[Path]:
@@ -487,10 +490,12 @@ def _analyse_selected_uploaded_audio(
     if suffix not in {".wav", ".mp3", ".flac"}:
         raise RuntimeError("The selected uploaded audio must be WAV, MP3, or FLAC.")
 
-    whisper_model = _load_whisper_model(whisper_size)
+    whisper_model, whisper_error = _load_whisper_model(whisper_size)
     if whisper_model is None:
+        print(f"Whisper unavailable: {whisper_error}", flush=True)
         st.session_state["transcript_uploaded_audio_whisper_notice"] = (
-            "Local Whisper is unavailable in this environment, so uploaded audio was analysed without speech-to-text."
+            "Whisper is unavailable in this environment, so uploaded audio was analysed without speech-to-text. "
+            f"Details: {whisper_error}"
         )
     else:
         st.session_state.pop("transcript_uploaded_audio_whisper_notice", None)
