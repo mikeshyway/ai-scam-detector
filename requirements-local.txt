@@ -1,7 +1,6 @@
 -r requirements.txt
 
-# Local-only audio capture and optional speech/transformer inference.
+# Local-only audio capture for microphone/internal-device workflows.
 sounddevice
-openai-whisper
 torch
 transformers

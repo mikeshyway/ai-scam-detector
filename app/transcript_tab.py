@@ -253,7 +253,7 @@ def _default_whisper_model(options: list[str]) -> str:
     for model_name in ("base.en", "base", "tiny.en", "tiny"):
         if model_name in options and model_name in cached:
             return model_name
-    for model_name in ("base.en", "base", "tiny.en", "tiny"):
+    for model_name in ("tiny.en", "tiny", "base.en", "base"):
         if model_name in options:
             return model_name
     return options[0]
@@ -2863,7 +2863,7 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
                     help=(
                         "English models are faster and less likely to drift into unrelated "
                         "languages. Larger models improve accuracy but need more CPU/RAM. "
-                        "Requires requirements-local.txt; hosted cloud falls back to audio-only analysis if unavailable."
+                        "Whisper loads after Analyze; the first hosted run may download the selected model."
                     ),
                 )
 
@@ -2877,7 +2877,7 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
                 whisper_language = "en" if force_english else None
 
             transcript_source = "Local Whisper"
-            st.caption("Whisper loads only after Analyze. Hosted cloud can run audio-only if local Whisper is not installed.")
+            st.caption("Whisper loads only after Analyze. The first hosted run may be slower while the selected model downloads.")
             if chunk_seconds < 12:
                 st.info(
                     "Uploaded audio works best with 12-30 second chunks because Whisper gets more speech context."
