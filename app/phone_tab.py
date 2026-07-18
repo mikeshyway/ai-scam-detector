@@ -2646,6 +2646,10 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
                 key="phone_investigation_number",
             )
             st.caption("Examples: 012-345 6789, +60 12-345 6789, (03) 1234 5678")
+            st.caption(
+                "Need a test case? Open [PenipuMY Hall of Shame](https://penipu.my/hall-of-shame) "
+                "and paste a reported phone number here if one is available."
+            )
 
         with identity_col:
             claimed_identity = st.text_input(
