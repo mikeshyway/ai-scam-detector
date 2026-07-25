@@ -1,4 +1,4 @@
-"""Veriphone metadata provider adapter."""
+"""Veriphone.io metadata provider adapter."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from src.phone.veriphone_client import lookup_veriphone_phone
 
 
 PROVIDER_ID = "veriphone"
-PROVIDER_NAME = "Veriphone"
+PROVIDER_NAME = "Veriphone.io Carrier Lookup"
 PRIMARY_TIMEOUT_SECONDS = 10.0
 RETRY_TIMEOUT_SECONDS = 20.0
 DEFAULT_LOOKUP_MODE = "static"
@@ -101,7 +101,7 @@ def _lookup_with_timeout_retry(
     )
     if retry_error_code == "timeout":
         retry_result = dict(retry_result)
-        retry_result["error"] = f"Veriphone timed out after retry ({int(timeout)}s then {int(retry_timeout)}s)."
+        retry_result["error"] = f"Veriphone.io timed out after retry ({int(timeout)}s then {int(retry_timeout)}s)."
     return retry_result, True
 
 
@@ -138,7 +138,7 @@ def test_veriphone_connection(
             fallback_used=False,
             request_id="",
             error_code="missing_key",
-            error_message="Veriphone API key is not configured.",
+            error_message="Veriphone.io API key is not configured.",
         )
 
     ok, message = validate_phone_query(test_number)
@@ -228,7 +228,7 @@ def lookup_veriphone_metadata(
             success=False,
             normalized_number=normalized,
             error_code="missing_key",
-            error_message="Veriphone API key is not configured.",
+            error_message="Veriphone.io API key is not configured.",
         )
 
     started = time.perf_counter()
@@ -267,7 +267,7 @@ def lookup_veriphone_metadata(
         normalized_number=normalized,
         data=_normalise_veriphone_payload(payload) if payload else {},
         error_code=normalize_error_code(status_code if isinstance(status_code, int) else None, error_message),
-        error_message=error_message or "Veriphone unavailable.",
+        error_message=error_message or "Veriphone.io unavailable.",
         response_time_ms=elapsed_ms,
         rate_limit=dict(live.get("rate_limit", {})),
         request_id=_request_id(payload) or None,

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import html
-import inspect
 import json
 import os
-import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,9 +23,7 @@ from app.ui_components import (
     render_result_card,
     render_section_header,
 )
-from src.phone.omkar_client import lookup_omkar_phone
 from src.phone.phone_lookup import lookup_phone, normalise_phone_query, validate_phone_query
-from src.phone.phone_number import format_phone_for_omkar
 from src.phone.providers import (
     lookup_penipumy_reputation,
     test_penipumy_connection,
@@ -93,9 +89,15 @@ def _key_result(key: str, source: str, variable: str) -> dict[str, object]:
 def _resolve_api_key(provider: str) -> dict[str, object]:
     """Resolve provider API key and safe source metadata."""
 
-    env_names = ["OMKAR_API_KEY", "OMKAR_CARRIER_API_KEY"]
-    direct_secret_names = ["OMKAR_API_KEY", "OMKAR_CARRIER_API_KEY"]
-    sections = [("omkar", "api_key"), ("carrier_lookup", "api_key")]
+    provider_key = str(provider or "").strip().lower()
+    if provider_key == "penipumy":
+        env_names = ["PENIPUMY_API_KEY", "PENIPU_API_KEY"]
+        direct_secret_names = ["PENIPUMY_API_KEY", "PENIPU_API_KEY"]
+        sections = [("penipumy", "api_key"), ("penipu", "api_key")]
+    else:
+        env_names = ["VERIPHONE_API_KEY"]
+        direct_secret_names = ["VERIPHONE_API_KEY"]
+        sections = [("veriphone", "api_key"), ("phone_metadata", "api_key")]
 
     for name in env_names:
         value = os.environ.get(name, "").strip()
@@ -127,21 +129,14 @@ def _configured_ipqs_api_key() -> str:
     return ""
 
 
-def _configured_omkar_api_key() -> str:
-    """Read an Omkar Carrier Lookup API key from environment variables or Streamlit secrets."""
-
-    return str(_resolve_api_key("omkar_carrier_lookup").get("key", ""))
-
-
 def _source_label(source: str) -> str:
     labels = {
-        "veriphone_api": "Veriphone",
+        "veriphone_api": "Veriphone.io Carrier Lookup",
         "penipumy_api": "PenipuMY API",
         "ipqualityscore_api": "IPQualityScore API",
-        "omkar_carrier_lookup_api": "Omkar Carrier Lookup",
-        "local_fallback": "Legacy fallback record",
+        "local_fallback": "Legacy local record",
         "demo_fallback": "Demo record",
-        "unknown_fallback": "Unknown fallback",
+        "unknown_fallback": "Unknown result",
         "local_processed": "Local processed dataset",
     }
     return labels.get(source, source.replace("_", " ").title())
@@ -152,8 +147,8 @@ def _provider_key(provider_label: str) -> str:
         return "ipqualityscore"
     if "Veriphone" in provider_label:
         return "veriphone"
-    if "Carrier" in provider_label or "Omkar" in provider_label:
-        return "omkar_carrier_lookup"
+    if "Carrier" in provider_label:
+        return "veriphone"
     return "penipumy"
 
 
@@ -161,9 +156,7 @@ def _provider_label(provider_key: str) -> str:
     if provider_key == "ipqualityscore":
         return "IPQualityScore"
     if provider_key == "veriphone":
-        return "Veriphone"
-    if provider_key == "omkar_carrier_lookup":
-        return "Omkar Carrier Lookup"
+        return "Veriphone.io Carrier Lookup"
     return "PenipuMY"
 
 
@@ -191,7 +184,7 @@ def _lookup_phone_compat(
     if provider != "penipumy":
         raise ValueError(
             "The phone lookup backend loaded by Streamlit is stale. "
-            "Refresh or restart Streamlit once so Omkar Carrier Lookup support is loaded."
+            "Refresh or restart Streamlit once so live phone provider support is loaded."
         )
 
     return lookup_phone(phone_number, root, api_key=api_key)
@@ -216,9 +209,9 @@ def _render_api_setup(provider: str, root: Path) -> dict[str, object]:
     provider_label = _provider_label(provider)
     key_meta = _resolve_api_key(provider)
     configured_key = str(key_meta.get("key", ""))
-    docs_url = "https://github.com/omkarcloud/phone-lookup-api"
-    env_name = "OMKAR_API_KEY"
-    help_text = "The key is sent only to Omkar Carrier Lookup through the API-Key request header."
+    docs_url = "https://veriphone.io/docs/v3"
+    env_name = "VERIPHONE_API_KEY"
+    help_text = "The key is sent only to Veriphone.io through the Authorization request header."
 
     with st.expander(f"{provider_label} API setup", expanded=not bool(configured_key)):
         if configured_key:
@@ -231,29 +224,23 @@ def _render_api_setup(provider: str, root: Path) -> dict[str, object]:
                 code="API KEY",
             )
 
-        render_info_banner(
-            "After registering an Omkar account, you must verify your phone number before the API key can perform live lookups.",
-            kind="warning",
-            code="VERIFY",
-        )
-
         st.link_button(
-            "Open Omkar Carrier Lookup API Documentation",
+            "Open Veriphone.io API Documentation",
             docs_url,
             use_container_width=True,
         )
         st.link_button(
-            "Verify Omkar Account Phone Number",
-            "https://www.omkar.cloud/account/verify-phone",
+            "Open Veriphone.io API Key Portal",
+            "https://veriphone.io/app",
             use_container_width=True,
         )
 
-        guide_path = root / "docs" / "omkar_api_setup_guide.html"
+        guide_path = root / "docs" / "veriphone_api_setup_guide.html"
         if guide_path.exists():
             st.download_button(
-                "Download Omkar API Setup Guide",
+                "Download Veriphone.io API Setup Guide",
                 data=guide_path.read_bytes(),
-                file_name="omkar_api_setup_guide.html",
+                file_name="veriphone_api_setup_guide.html",
                 mime="text/html",
                 use_container_width=True,
             )
@@ -333,9 +320,9 @@ def _diagnostic_category(provider: str, status_code: object, error: str, payload
         return "server_error"
     if provider == "ipqualityscore" and payload.get("valid") is False:
         return "invalid_phone"
-    omkar_valid = payload.get("is_valid_number")
-    if provider == "omkar_carrier_lookup" and (
-        omkar_valid is False or str(omkar_valid).strip().lower() == "false"
+    metadata_valid = payload.get("is_valid_number")
+    if provider == "veriphone" and (
+        metadata_valid is False or str(metadata_valid).strip().lower() == "false"
     ):
         return "invalid_phone"
     if "malformed" in error_text or "non-json" in error_text:
@@ -381,7 +368,7 @@ def _provider_evidence_rows(provider: str, payload: dict[str, Any]) -> pd.DataFr
             ("SMS Pumping", "Message", "sms_pumping.message"),
             ("SMS Pumping", "Velocity", "sms_pumping.velocity"),
         ]
-    elif provider == "omkar_carrier_lookup":
+    elif provider == "veriphone":
         fields = [
             ("Validation", "Valid", "is_valid_number"),
             ("Network", "Carrier", "carrier"),
@@ -422,7 +409,7 @@ def _provider_response_statistics(provider: str, payload: dict[str, Any]) -> pd.
         risk_fields = ["fraud_score", "recent_abuse", "risky", "spammer", "leaked", "do_not_call"]
         identity_fields = ["name", "carrier", "line_type", "active_status", "user_activity"]
         location_fields = ["country", "region", "city", "timezone", "zip_code"]
-    elif provider == "omkar_carrier_lookup":
+    elif provider == "veriphone":
         risk_fields = ["is_valid_number", "line_type"]
         identity_fields = ["carrier", "phone_number", "national_format", "mobile_country_code", "mobile_network_code"]
         location_fields = ["country_code", "calling_country_code"]
@@ -589,7 +576,7 @@ def _caller_claim_consistency_chart(record: dict[str, Any], claimed_identity: st
 
 
 def _response_completeness_chart(record: dict[str, Any]) -> go.Figure:
-    omkar_supported_fields = [
+    metadata_supported_fields = [
         "valid",
         "carrier",
         "line_type",
@@ -608,8 +595,8 @@ def _response_completeness_chart(record: dict[str, Any]) -> go.Figure:
         "verified_report_count",
         "fraud_score",
     ]
-    populated = sum(1 for key in omkar_supported_fields if _is_populated(record.get(key)))
-    empty = len(omkar_supported_fields) - populated
+    populated = sum(1 for key in metadata_supported_fields if _is_populated(record.get(key)))
+    empty = len(metadata_supported_fields) - populated
     unsupported = len(not_supplied_fields)
 
     fig = go.Figure(
@@ -637,7 +624,12 @@ def _session_lookup_history_chart(history: list[dict[str, object]]) -> go.Figure
     if len(phone_rows) <= 1:
         return None
 
-    live = sum(1 for item in phone_rows if "omkar" in str(item.get("source", "")).lower() or "carrier lookup" in str(item.get("source", "")).lower())
+    live = sum(
+        1
+        for item in phone_rows
+        if "veriphone" in str(item.get("source", "")).lower()
+        or "carrier lookup" in str(item.get("source", "")).lower()
+    )
     non_live = sum(1 for item in phone_rows if "fallback" in str(item.get("source", "")).lower() or "unknown" in str(item.get("source", "")).lower())
     unknown = sum(1 for item in phone_rows if "unknown" in str(item.get("source", "")).lower() or str(item.get("prediction", "")).lower() == "unknown")
     provider_failures = max(0, non_live + unknown)
@@ -666,7 +658,6 @@ def _run_provider_connection_test(provider: str, phone_number: str, key_meta: di
     api_key = str(key_meta.get("key", "") or "")
     configured = bool(api_key)
     normalized = normalise_phone_query(phone_number)
-    started = time.perf_counter()
     result: dict[str, Any] = {
         "provider": provider,
         "configured": configured,
@@ -698,32 +689,39 @@ def _run_provider_connection_test(provider: str, phone_number: str, key_meta: di
         result["error_category"] = "missing_key"
         return result
 
-    live = lookup_omkar_phone(format_phone_for_omkar(normalized), api_key, timeout=10.0)
-    elapsed_ms = (time.perf_counter() - started) * 1000
-    payload = dict(live.get("record", {})) if isinstance(live.get("record"), dict) else {}
-    field_summary = _response_field_summary(payload)
+    if provider != "veriphone":
+        result["error"] = f"{_provider_label(provider)} is not supported by this legacy diagnostic path."
+        result["error_category"] = "unsupported_provider"
+        return result
+
+    diagnostic = test_veriphone_connection(
+        normalized,
+        api_key,
+        key_source=str(key_meta.get("source", "Not configured")),
+        key_variable=str(key_meta.get("variable", "-")),
+    ).as_dict()
+    payload = {}
     result.update(
         {
-            "connected": live.get("status_code") is not None,
-            "authenticated": bool(live.get("ok")),
-            "http_status": live.get("status_code"),
-            "provider_success": payload.get("is_valid_number"),
-            "response_time_ms": elapsed_ms,
-            "request_id": str(payload.get("request_id") or ""),
-            "rate_limit": dict(live.get("rate_limit", {})),
-            "total_fields": field_summary["total_fields"],
-            "populated_fields": field_summary["populated_fields"],
-            "empty_fields": field_summary["empty_fields"],
-            "error": live.get("error"),
+            "connected": diagnostic.get("reachable"),
+            "authenticated": diagnostic.get("authentication_status") == "Not rejected",
+            "http_status": diagnostic.get("http_status"),
+            "provider_success": diagnostic.get("provider_success"),
+            "response_time_ms": diagnostic.get("response_time_ms"),
+            "request_id": str(diagnostic.get("request_id") or ""),
+            "rate_limit": {"status": diagnostic.get("rate_limit")},
+            "total_fields": diagnostic.get("fields_returned", 0),
+            "populated_fields": diagnostic.get("fields_populated", 0),
+            "empty_fields": max(
+                0,
+                int(diagnostic.get("fields_returned", 0) or 0)
+                - int(diagnostic.get("fields_populated", 0) or 0),
+            ),
+            "error": diagnostic.get("error_message"),
             "payload": payload,
         }
     )
-    result["error_category"] = _diagnostic_category(
-        provider,
-        result["http_status"],
-        str(result["error"] or ""),
-        payload,
-    )
+    result["error_category"] = diagnostic.get("error_code") or "none"
     return result
 
 
@@ -756,7 +754,7 @@ def _diagnostic_rows(diagnostic: dict[str, Any]) -> pd.DataFrame:
 
     return pd.DataFrame(
         [
-            {"Check": "Live provider", "Result": _provider_label(str(diagnostic.get("provider"))), "Detail": "Omkar Carrier Lookup"},
+            {"Check": "Live provider", "Result": _provider_label(str(diagnostic.get("provider"))), "Detail": "Veriphone.io Carrier Lookup"},
             {"Check": "API key detected", "Result": success if diagnostic.get("configured") else failure, "Detail": str(diagnostic.get("configuration_source", ""))},
             {"Check": "Key variable", "Result": str(diagnostic.get("key_variable", "-")), "Detail": "Value hidden"},
             {"Check": "Provider reachable", "Result": "Success" if diagnostic.get("connected") else failure, "Detail": f"Status {diagnostic.get('http_status') or 'N/A'}"},
@@ -777,8 +775,8 @@ def _diagnostic_rows(diagnostic: dict[str, Any]) -> pd.DataFrame:
 
 def _render_provider_connection_check(provider: str, key_meta: dict[str, object]) -> None:
     render_section_header(
-        "Omkar connection check",
-        "Test whether Omkar Carrier Lookup is configured, reachable, authenticated, and returning usable fields.",
+        "Veriphone.io connection check",
+        "Test whether Veriphone.io Carrier Lookup is configured, reachable, authenticated, and returning usable fields.",
         "API diagnostics",
     )
     render_content_card_open("violet")
@@ -803,7 +801,7 @@ def _render_provider_connection_check(provider: str, key_meta: dict[str, object]
         "Connection test phone number",
         value=st.session_state.get("phone_connection_test_number", default_number),
         key="phone_connection_test_number",
-        help="Use a number you are comfortable sending to Omkar Carrier Lookup for testing.",
+        help="Use a number you are comfortable sending to Veriphone.io Carrier Lookup for testing.",
     )
 
     if st.button("Test Provider Connection", use_container_width=True, key="phone_test_provider_connection"):
@@ -815,14 +813,6 @@ def _render_provider_connection_check(provider: str, key_meta: dict[str, object]
     if isinstance(diagnostic, dict) and diagnostic.get("provider") == provider:
         if diagnostic.get("authenticated") and diagnostic.get("populated_fields", 0):
             render_analysis_ready("Provider connection successful")
-        elif diagnostic.get("error_category") == "account_phone_verification_required":
-            render_info_banner(
-                "Carrier Lookup is reachable, but the Omkar account must verify a phone number before "
-                "free-plan lookups are enabled. Open https://www.omkar.cloud/account/verify-phone, "
-                "complete verification, then test again.",
-                kind="warning",
-                code="VERIFY ACCOUNT",
-            )
         elif diagnostic.get("configured"):
             render_info_banner(
                 f"Provider test completed with status: {diagnostic.get('error_category')}. "
@@ -913,7 +903,7 @@ def _record_phone_result(
             "type": "Phone",
             "prediction": risk.get("risk_level", "Unknown"),
             "confidence": float(risk.get("risk_score", 0)),
-            "model": f"{_provider_label(str(result.get('requested_provider', 'omkar_carrier_lookup')))} reputation rules",
+            "model": f"{_provider_label(str(result.get('requested_provider', 'veriphone')))} reputation rules",
             "source": _source_label(str(result.get("source", ""))),
             "preview": phone_number,
             "flags": flags,
@@ -930,22 +920,22 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
     explanation = dict(lookup_result.get("explanation", {}))
     metrics = dict(explanation.get("metrics", {}))
     source = str(lookup_result.get("source", "unknown_fallback"))
-    requested_provider = str(lookup_result.get("requested_provider", "omkar_carrier_lookup"))
+    requested_provider = str(lookup_result.get("requested_provider", "veriphone"))
     fallback_reason = str(lookup_result.get("fallback_reason") or "")
     phone = str(record.get("phone") or "")
     is_demo = bool(lookup_result.get("is_demo") or record.get("is_demo"))
     score = float(risk.get("risk_score", 0))
     risk_level = str(risk.get("risk_level", "Unknown"))
-    is_omkar_result = source == "omkar_carrier_lookup_api"
-    fallback_used = source != "omkar_carrier_lookup_api"
+    is_metadata_result = source == "veriphone_api"
+    fallback_used = source != "veriphone_api"
     reputation_available = _has_reputation_evidence(record)
     metadata_available = _has_value(record, "carrier", "line_type", "valid", "country", "formatted", "national_format")
 
     render_analysis_ready("Phone lookup complete - results ready below")
 
-    if is_omkar_result and risk_level == "Unknown":
+    if is_metadata_result and risk_level == "Unknown":
         render_info_banner(
-            "Omkar returned carrier metadata. This confirms lookup context only; it does not provide scam reports or prove the caller is safe.",
+            "Veriphone.io returned carrier metadata. This confirms lookup context only; it does not provide scam reports or prove the caller is safe.",
             kind="info",
             code="METADATA",
         )
@@ -974,13 +964,13 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
     cols = st.columns(3)
     cols[0].metric("Risk Level", risk_level)
     cols[1].metric("Source Used", _source_label(source))
-    if is_omkar_result:
+    if is_metadata_result:
         cols[2].metric("Line Type", str(record.get("line_type") or "N/A"))
     else:
         cols[2].metric("Reports Found", _safe_int(record.get("police_report_count")) + _safe_int(record.get("verified_report_count")))
 
     cols = st.columns(3)
-    if is_omkar_result:
+    if is_metadata_result:
         cols[0].metric("Carrier", str(record.get("carrier") or "N/A"))
     else:
         cols[0].metric("Business Status", metrics.get("Business Status", "No match"))
@@ -1009,7 +999,7 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
     st.dataframe(
         pd.DataFrame(
             [
-                {"Item": "Live provider", "Value": "Omkar Carrier Lookup"},
+                {"Item": "Live provider", "Value": _provider_label(requested_provider)},
                 {"Item": "Fallback used", "Value": "Yes" if fallback_used else "No"},
                 {
                     "Item": "Provider returned",
@@ -1201,7 +1191,7 @@ def _phone_provider_status_key_from_session(session_key: str) -> str:
         return "phone_penipumy_provider_status"
     if "veriphone" in session_key:
         return "phone_veriphone_provider_status"
-    return "phone_omkar_provider_status"
+    return "phone_unknown_provider_status"
 
 
 def _record_phone_provider_status(session_key: str, result: dict[str, Any], *, source: str) -> None:
@@ -1263,9 +1253,9 @@ def _phone_provider_key_config(provider_id: str) -> dict[str, object]:
             "sections": [("veriphone", "api_key"), ("phone_metadata", "api_key")],
         }
     return {
-        "env_names": ["OMKAR_API_KEY", "OMKAR_CARRIER_API_KEY"],
-        "secret_names": ["OMKAR_API_KEY", "OMKAR_CARRIER_API_KEY"],
-        "sections": [("omkar", "api_key"), ("carrier_lookup", "api_key")],
+        "env_names": [],
+        "secret_names": [],
+        "sections": [],
     }
 
 
@@ -1305,8 +1295,6 @@ def _provider_api_portal_url(provider_id: str) -> str:
         return "https://penipu.my"
     if provider_id == "veriphone":
         return "https://veriphone.io/app"
-    if provider_id == "omkar_carrier_lookup":
-        return "https://www.omkar.cloud"
     return ""
 
 
@@ -1491,7 +1479,7 @@ def _render_status_row(
 ) -> None:
     rows = [
         {
-            "Provider": "Veriphone",
+            "Provider": "Veriphone.io Carrier Lookup",
             "Status": "Ready"
             if veriphone_enabled and veriphone_key.get("configured")
             else "Not configured"
@@ -1534,7 +1522,7 @@ def _build_phone_investigation(
         "status": "not_configured" if veriphone_enabled else "unavailable",
         "data": {},
         "error_code": "missing_key" if veriphone_enabled and not veriphone_key else None,
-        "error_message": "Veriphone API key is not configured." if veriphone_enabled and not veriphone_key else None,
+        "error_message": "Veriphone.io API key is not configured." if veriphone_enabled and not veriphone_key else None,
     }
     reputation = {
         "provider": "penipumy",
@@ -2089,7 +2077,7 @@ def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
         contributions.append(
             {
                 "indicator": "Provider marked number invalid",
-                "source": "Veriphone",
+                "source": "Veriphone.io",
                 "points": CONCERN_WEIGHTS["invalid_number"],
                 "effect": "raises_concern",
             }
@@ -2098,7 +2086,7 @@ def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
         neutral.append(
             {
                 "indicator": validity_label,
-                "source": "Veriphone",
+                "source": "Veriphone.io",
                 "points": 0,
                 "effect": "neutral",
             }
@@ -2108,7 +2096,7 @@ def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
         neutral.append(
             {
                 "indicator": f"Carrier identified: {profile.get('carrier')}",
-                "source": "Veriphone",
+                "source": "Veriphone.io",
                 "points": 0,
                 "effect": "neutral",
             }
@@ -2118,7 +2106,7 @@ def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
         neutral.append(
             {
                 "indicator": f"Line type identified: {profile.get('line_type')}",
-                "source": "Veriphone",
+                "source": "Veriphone.io",
                 "points": 0,
                 "effect": "neutral",
             }
@@ -2128,7 +2116,7 @@ def _build_phone_assessment(investigation: dict[str, Any]) -> dict[str, Any]:
         neutral.append(
             {
                 "indicator": f"Country identified: {profile.get('country_code')}",
-                "source": "Veriphone",
+                "source": "Veriphone.io",
                 "points": 0,
                 "effect": "neutral",
             }
@@ -2185,7 +2173,7 @@ def _record_phone_investigation(
     confidence_value = float(confidence) if isinstance(confidence, (int, float)) else 0.0
     coverage = dict(output_view.get("coverage", {}))
     source_name = (
-        f"Veriphone: {coverage.get('veriphone', 'unavailable')}; "
+        f"Veriphone.io: {coverage.get('veriphone', 'unavailable')}; "
         f"PenipuMY: {coverage.get('penipumy', 'unavailable')}"
     )
     total_reports = (
@@ -2310,7 +2298,7 @@ def _coverage_summary(output_view: dict[str, Any]) -> str:
 
 def _line_profile_summary(profile: dict[str, Any]) -> tuple[str, str]:
     if not any(_is_populated(profile.get(key)) for key in ("line_type", "carrier", "country_code", "phone_number")):
-        return "Line profile unavailable", "Veriphone metadata unavailable"
+        return "Line profile unavailable", "Veriphone.io metadata unavailable"
     title = str(profile.get("line_type") or "Line type unknown").title()
     detail_parts = [
         str(profile.get("carrier") or "").strip(),
@@ -2379,10 +2367,10 @@ def _render_phone_line_profile(output_view: dict[str, Any]) -> None:
     _render_phone_step(
         "05",
         "Phone Line Profile",
-        "Veriphone number, carrier, line-type, and formatting metadata only.",
+        "Veriphone.io number, carrier, line-type, and formatting metadata only.",
     )
     with st.container(border=True):
-        st.caption("Source: Veriphone")
+        st.caption("Source: Veriphone.io")
         if rows:
             st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         else:
@@ -2449,7 +2437,7 @@ def _combined_evidence_rows(output_view: dict[str, Any], assessment: dict[str, A
         rows.append(
             {
                 "Finding": "Number is structurally valid",
-                "Source": "Veriphone",
+                "Source": "Veriphone.io",
                 "Role": "Number metadata",
                 "Effect": "Neutral",
             }
@@ -2458,7 +2446,7 @@ def _combined_evidence_rows(output_view: dict[str, Any], assessment: dict[str, A
         rows.append(
             {
                 "Finding": "Provider marked number invalid",
-                "Source": "Veriphone",
+                "Source": "Veriphone.io",
                 "Role": "Number metadata",
                 "Effect": "Raises concern",
             }
@@ -2468,7 +2456,7 @@ def _combined_evidence_rows(output_view: dict[str, Any], assessment: dict[str, A
         rows.append(
             {
                 "Finding": f"Carrier identified as {profile.get('carrier')}",
-                "Source": "Veriphone",
+                "Source": "Veriphone.io",
                 "Role": "Network metadata",
                 "Effect": "Neutral",
             }
@@ -2478,7 +2466,7 @@ def _combined_evidence_rows(output_view: dict[str, Any], assessment: dict[str, A
         rows.append(
             {
                 "Finding": f"Line type is {profile.get('line_type')}",
-                "Source": "Veriphone",
+                "Source": "Veriphone.io",
                 "Role": "Network metadata",
                 "Effect": "Neutral",
             }
@@ -2734,7 +2722,7 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
         with provider_cols[0]:
             veriphone_info = _render_live_provider_card(
                 provider_id="veriphone",
-                title="Veriphone",
+                title="Veriphone.io",
                 purpose="Carrier and number metadata",
                 icon="solar:radio-bold-duotone",
                 enabled_key="phone_veriphone_enabled",

@@ -1,4 +1,4 @@
-"""Tests for the Veriphone phone metadata client."""
+"""Tests for the Veriphone.io phone metadata client."""
 
 from __future__ import annotations
 

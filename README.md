@@ -14,9 +14,8 @@ not a commercial security, telecom, or forensic product.
 - **Voice Transcript**: analyses pasted/uploaded transcripts and optional
   `.wav`, `.mp3`, `.m4a`, or `.flac` evidence using Whisper, the transcript
   classifiers, MFCC + calibrated SVM, and the optional behavioral model.
-- **Phone Number**: queries Veriphone and PenipuMY when configured,
-  uses local/demo fallback only where allowed, and explains provider evidence
-  without inventing scam probabilities.
+- **Phone Number**: queries Veriphone.io and PenipuMY when configured,
+  then explains provider evidence without inventing scam probabilities.
 - **AI Report Generator**: builds downloadable evidence reports from saved
   detections.
 
@@ -144,16 +143,16 @@ directly in `scripts/`. See
 
 The Phone Number tab can use configured live providers:
 
-- Veriphone for carrier, line-type, country-code, and formatting
+- Veriphone.io for carrier, line-type, country-code, and formatting
   metadata.
 - PenipuMY for reputation/report fields where a valid provider key is supplied.
 
-Provider evidence is not a locally trained phone-risk model. Veriphone metadata
+Provider evidence is not a locally trained phone-risk model. Veriphone.io metadata
 does not provide police reports or a scam probability by itself, and PenipuMY
 results depend on live provider availability and the submitted number.
 
 For normal dashboard demos, paste the provider key directly into the Phone
-Number tab. The tab has provider cards for Veriphone and PenipuMY, can test each
+Number tab. The tab has provider cards for Veriphone.io and PenipuMY, can test each
 connection, and keeps pasted keys only in the current Streamlit session.
 
 Environment variables or Streamlit secrets are optional. Use them when you want
@@ -166,17 +165,21 @@ $env:PENIPUMY_API_KEY="your-penipumy-key"
 py -m streamlit run app\main.py
 ```
 
-Create or manage Veriphone API keys at <https://veriphone.io/app>. Omkar is
-archived under `archive/deprecated/phone_providers/omkar/` because its current
-free/demo response requires a paid Carrier Lookup plan. Never commit real API
-keys in `.env`, `.streamlit/secrets.toml`, notebooks, screenshots, or report
-files.
+Create or manage Veriphone.io API keys at <https://veriphone.io/app>. Veriphone.io
+currently lists 1,000 free credits per month; standard validation costs 1
+credit and current carrier lookup costs 10 credits. PenipuMY currently lists a
+Free API tier at 100 requests per day. Confirm the latest limits on the provider
+websites before a live demo.
 
-Phone lookups can use real records in `data/processed/phone/phone_dataset.csv`
-and then return an Unknown result when no usable provider/fallback evidence is
+Omkar is archived under `archive/deprecated/phone_providers/omkar/` because its
+current free/demo response requires a paid Carrier Lookup plan. Never commit
+real API keys in `.env`, `.streamlit/secrets.toml`, notebooks, screenshots, or
+report files.
+
+Phone lookups return an Unknown result when no usable provider evidence is
 available. Fictional presentation rows belong in `data/demo/phone_demo_dataset.csv`
-or `data/demo/demo_phone_numbers.csv` and are searched only when the relevant
-demo flow is explicitly enabled. The full behavior is documented in
+or `data/demo/demo_phone_numbers.csv` and are reserved for explicit demo
+workflows. The full behavior is documented in
 [docs/PHONE_MODULE.md](docs/PHONE_MODULE.md).
 
 ## Generated Artifacts

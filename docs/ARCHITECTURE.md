@@ -12,7 +12,7 @@ main evidence record for reviewers.
 | `app/` | Streamlit rendering, navigation, session state, and user actions |
 | `src/audio/` | Audio decoding, feature extraction, inference, and recording helpers |
 | `src/text/` | Text preprocessing, classifier loading, rules, and explainability |
-| `src/phone/` | Veriphone carrier lookup, PenipuMY reputation lookup, rules, and explanations |
+| `src/phone/` | Veriphone.io carrier lookup, PenipuMY reputation lookup, rules, and explanations |
 | `src/reporting/` | Saved history and TXT/PDF/DOCX report generation |
 | `src/data/` | Synthetic/demo data helpers only |
 | `src/utils/` | Cross-cutting time and system diagnostic helpers |
@@ -65,7 +65,7 @@ User evidence
 
 Email and transcript tabs load saved text model artifacts from `models/`.
 Audio analysis uses audio feature/inference helpers and saved audio artifacts
-where available. Phone checks use provider evidence from Veriphone and PenipuMY
+where available. Phone checks use provider evidence from Veriphone.io and PenipuMY
 where configured, plus transparent rules; they are not a locally trained phone
 ML model.
 

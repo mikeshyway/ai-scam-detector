@@ -6,7 +6,6 @@ __all__ = [
     "lookup_phone",
     "normalise_phone_query",
     "ipqs_client",
-    "omkar_client",
     "penipumy_client",
     "phone_digits",
     "phone_lookup",

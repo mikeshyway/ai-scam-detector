@@ -1,4 +1,4 @@
-"""Low-level Veriphone phone metadata client."""
+"""Low-level Veriphone.io phone metadata client."""
 
 from __future__ import annotations
 
@@ -60,23 +60,23 @@ def lookup_veriphone_phone(
     timeout: float = 10.0,
     base_url: str = VERIPHONE_API_BASE_URL,
 ) -> dict[str, object]:
-    """Call Veriphone's phone verification API."""
+    """Call Veriphone.io's phone verification API."""
 
     api_key = str(api_key or "").strip()
     phone = str(phone or "").strip()
     mode = str(mode or "static").strip().lower()
 
     if not api_key:
-        return _failure(status_code=None, error="Veriphone API key is missing.")
+        return _failure(status_code=None, error="Veriphone.io API key is missing.")
     if not phone:
         return _failure(status_code=None, error="Phone number is missing.")
     if mode not in SUPPORTED_LOOKUP_MODES:
-        return _failure(status_code=None, error=f"Unsupported Veriphone lookup mode: {mode}.")
+        return _failure(status_code=None, error=f"Unsupported Veriphone.io lookup mode: {mode}.")
 
     try:
         import requests
     except Exception as exc:
-        return _failure(status_code=None, error=f"Install `requests` to use the Veriphone integration: {exc}")
+        return _failure(status_code=None, error=f"Install `requests` to use the Veriphone.io integration: {exc}")
 
     endpoint = f"{base_url.rstrip('/')}/verify"
     try:
@@ -87,11 +87,11 @@ def lookup_veriphone_phone(
             timeout=timeout,
         )
     except requests.Timeout:
-        return _failure(status_code=None, error="Veriphone lookup timed out.")
+        return _failure(status_code=None, error="Veriphone.io lookup timed out.")
     except requests.ConnectionError:
-        return _failure(status_code=None, error="Veriphone network connection failed.")
+        return _failure(status_code=None, error="Veriphone.io network connection failed.")
     except requests.RequestException as exc:
-        return _failure(status_code=None, error=f"Veriphone lookup failed: {_safe_error(exc, api_key)}")
+        return _failure(status_code=None, error=f"Veriphone.io lookup failed: {_safe_error(exc, api_key)}")
 
     rate_limit = _rate_limit_from_headers(response.headers)
 
@@ -100,14 +100,14 @@ def lookup_veriphone_phone(
     except ValueError:
         return _failure(
             status_code=response.status_code,
-            error=f"Veriphone returned malformed JSON with status {response.status_code}.",
+            error=f"Veriphone.io returned malformed JSON with status {response.status_code}.",
             rate_limit=rate_limit,
         )
 
     if not isinstance(payload, dict):
         return _failure(
             status_code=response.status_code,
-            error="Veriphone returned an unexpected response format.",
+            error="Veriphone.io returned an unexpected response format.",
             rate_limit=rate_limit,
         )
 
@@ -115,7 +115,7 @@ def lookup_veriphone_phone(
         message = _response_message(payload, response.reason or "Unknown API error")
         return _failure(
             status_code=response.status_code,
-            error=f"Veriphone returned {response.status_code}: {_safe_error(message, api_key)}",
+            error=f"Veriphone.io returned {response.status_code}: {_safe_error(message, api_key)}",
             rate_limit=rate_limit,
             record=payload,
         )
@@ -125,7 +125,7 @@ def lookup_veriphone_phone(
         status_code = int(code) if isinstance(code, int) else response.status_code
         return _failure(
             status_code=status_code,
-            error=f"Veriphone returned {status_code}: {_safe_error(_response_message(payload), api_key)}",
+            error=f"Veriphone.io returned {status_code}: {_safe_error(_response_message(payload), api_key)}",
             rate_limit=rate_limit,
             record=payload,
         )
@@ -133,7 +133,7 @@ def lookup_veriphone_phone(
     if payload.get("status") != "success":
         return _failure(
             status_code=response.status_code,
-            error="Veriphone returned an unexpected status.",
+            error="Veriphone.io returned an unexpected status.",
             rate_limit=rate_limit,
             record=payload,
         )

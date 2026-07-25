@@ -6,9 +6,8 @@
 User phone number
   -> normalize to canonical international format
   -> configured live provider checks
-  -> Veriphone metadata evidence
+  -> Veriphone.io metadata evidence
   -> PenipuMY reputation/report evidence where configured
-  -> local/demo fallback where allowed
   -> unknown result when evidence is unavailable
   -> shared normalized record
   -> transparent rules and explanation
@@ -16,7 +15,7 @@ User phone number
 ```
 
 The final prototype evidence notebook treats phone checks as provider evidence,
-not local ML training. Veriphone supplies carrier/line metadata. PenipuMY supplies
+not local ML training. Veriphone.io supplies carrier/line metadata. PenipuMY supplies
 reputation or report-oriented fields where a valid key is configured. Older
 IPQualityScore client files may remain in `src/phone/` for compatibility or
 history, but they are not the primary documented final flow.
@@ -43,14 +42,14 @@ Canonical internal examples:
 +60312345678
 ```
 
-Veriphone receives the canonical E.164-style value, such as `+60123456789`. The app
+Veriphone.io receives the canonical E.164-style value, such as `+60123456789`. The app
 rejects clearly invalid text, repeated plus signs, and alphabetic input.
 
 ## Live Provider
 
-### Veriphone
+### Veriphone.io Carrier Lookup
 
-Veriphone is used as the active carrier and number metadata provider. It can
+Veriphone.io is used as the active carrier and number metadata provider. It can
 return validity, carrier, line type, E.164 phone number, national/local
 formatting, country, country code, calling country code, region, timezone, and
 current-carrier metadata when the selected lookup mode supports it.
@@ -58,6 +57,12 @@ current-carrier metadata when the selected lookup mode supports it.
 Documentation: <https://veriphone.io/docs/v3>
 
 API keys: <https://veriphone.io/app>
+
+Free-tier note: Veriphone.io currently gives free accounts 1,000 credits per
+month with no credit card required. Standard validation uses 1 credit. Current
+carrier lookup uses 10 credits, and the API returns HTTP 402 when credits are
+exhausted. See <https://veriphone.io/pricing> and
+<https://veriphone.io/docs/v3>.
 
 Carrier metadata is not scam reputation. A valid phone number does not prove a
 caller is safe, and a VoIP/mobile/landline classification does not prove fraud
@@ -68,6 +73,10 @@ by itself.
 PenipuMY is used as a reputation/report evidence provider when configured. Its
 fields can support the phone concern explanation, but provider reports are still
 evidence, not a trained local caller-risk model and not legal proof.
+
+Free-tier note: PenipuMY currently lists a Free API tier at 100 requests per
+day, authenticated with the `X-API-Key` header, with the daily limit resetting
+at midnight Malaysia time. See <https://penipu.my/api/v1/docs>.
 
 ## API Key
 
@@ -113,13 +122,14 @@ Omkar is no longer active in the dashboard because its current free/demo
 response requires a paid Carrier Lookup plan. Restore it only if Omkar access
 becomes available again.
 
-## Local Fallback And Demo Evidence
+## Legacy Local And Demo Evidence
 
 Path: `data/processed/phone/phone_dataset.csv`
 
-This file is for real, traceable fallback records only. Do not place synthetic
-demo records in this file. If Veriphone does not succeed and no real local row
-matches, the correct result is Unknown.
+This file is retained for older helper workflows and traceable historical
+records. The active dashboard phone investigation uses live Veriphone.io and
+PenipuMY provider evidence, then returns Unknown when no usable provider
+evidence is available. Do not place synthetic demo records in this file.
 
 Required columns:
 
@@ -152,12 +162,10 @@ Path: `data/demo/demo_phone_numbers.csv`
 This smaller demo file may be used by notebook/demo workflows as repeatable
 presentation input. It should not be described as trained phone-risk data.
 
-Fallback order:
+Active dashboard order:
 
 ```text
 Configured live providers
-  -> real local processed phone dataset where allowed
-  -> demo phone dataset only when demo flow is enabled
   -> unknown result
 ```
 
@@ -172,8 +180,7 @@ Configured live providers
 The UI shows provenance for each result:
 
 ```text
-Live provider: Veriphone / PenipuMY where configured
-Fallback used: Yes/No
+Live provider: Veriphone.io / PenipuMY where configured
 Provider returned: Carrier or validation metadata / No usable carrier metadata
 Scam reputation available: Yes/No
 ```
@@ -195,10 +202,9 @@ not change the final lookup result.
 The phone module intentionally remains:
 
 ```text
-Veriphone API
+Veriphone.io API
 + PenipuMY API where configured
 + normalization
-+ local fallback
 + transparent consistency rules
 + explainability
 ```
@@ -209,8 +215,8 @@ without that dataset would create weak or misleading evidence.
 
 ## Unknown Result
 
-If neither Veriphone nor the local dataset contains the number, the module returns an
-Unknown result. Unknown does not mean safe. The UI should continue to advise
+If neither Veriphone.io nor PenipuMY returns usable evidence, the module returns
+an Unknown result. Unknown does not mean safe. The UI should continue to advise
 verification and never sharing OTPs, passwords, banking details, or personal
 information.
 
@@ -227,7 +233,7 @@ or network availability change.
 
 ## Module Responsibilities
 
-- `veriphone_client.py`: Veriphone HTTP communication and response parsing
+- `veriphone_client.py`: Veriphone.io HTTP communication and response parsing
 - `penipumy_client.py`: PenipuMY HTTP communication and response parsing
 - `phone_lookup.py`: provider -> local -> demo/unknown orchestration
 - `phone_rules.py`: transparent evidence-based reputation/context level

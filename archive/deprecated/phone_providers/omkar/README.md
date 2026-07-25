@@ -4,6 +4,7 @@ This folder preserves the previous Omkar Carrier Lookup implementation:
 
 - `omkar_client.py`
 - `omkar_provider.py`
+- `omkar_api_setup_guide.html`
 
 The active dashboard now uses Veriphone for carrier, line-type, country, and
 formatting metadata. Omkar was archived because its current free/demo response

@@ -187,5 +187,5 @@ def lookup_local_reputation(root: Path, number: str) -> PhoneProviderResult:
         normalized_number=normalized,
         data=_normalise_row(record, normalized),
         fallback_used=True,
-        fallback_reason="Local fallback dataset matched the normalized number.",
+        fallback_reason="Legacy local reputation record matched the normalized number.",
     )

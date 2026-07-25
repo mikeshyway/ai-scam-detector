@@ -64,12 +64,12 @@ def build_phone_evidence_rows(record: dict[str, Any], risk_result: dict[str, obj
                 "Not found",
                 "Unknown caller reputation",
                 "Low",
-                "No API/local match",
+                "No live provider match",
                 "No known evidence, but not guaranteed safe.",
             )
         ]
 
-    if provider in {"omkar_carrier_lookup", "veriphone"}:
+    if provider == "veriphone":
         valid = record.get("valid")
         valid_false = valid is False or str(valid).strip().lower() == "false"
         valid_true = valid is True or str(valid).strip().lower() == "true"
@@ -434,10 +434,10 @@ def explain_phone_result(record: dict[str, Any], risk_result: dict[str, object])
 
     if not found:
         summary = (
-            "This number was not found in the live API or local dataset. "
+            "This number was not found in configured live provider evidence. "
             "This does not guarantee the number is safe."
         )
-    elif provider in {"omkar_carrier_lookup", "veriphone"}:
+    elif provider == "veriphone":
         valid = record.get("valid")
         valid_false = valid is False or str(valid).strip().lower() == "false"
         carrier = str(record.get("carrier") or "").strip()

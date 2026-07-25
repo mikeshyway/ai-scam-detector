@@ -1826,7 +1826,7 @@ def _sidebar_model_status_items(
     transcript_details = [_artifact_status_item(*item) for item in transcript_models]
     audio_details = [_artifact_status_item(*item) for item in audio_models]
     api_details = [
-        _phone_api_status_item("Veriphone Carrier Lookup API", "veriphone"),
+        _phone_api_status_item("Veriphone.io Carrier Lookup", "veriphone"),
         _phone_api_status_item("PenipuMY", "penipumy"),
     ]
 
@@ -1979,9 +1979,7 @@ def _configured_phone_provider_key(provider_id: str) -> str:
         env_keys = ("VERIPHONE_API_KEY",)
         secret_sections = ("veriphone", "phone_metadata")
     else:
-        session_key = "phone_omkar_api_key"
-        env_keys = ("OMKAR_API_KEY", "OMKAR_CARRIER_API_KEY")
-        secret_sections = ("omkar", "carrier_lookup")
+        return ""
 
     session_value = str(st.session_state.get(session_key, "") or "").strip()
     if not session_value:

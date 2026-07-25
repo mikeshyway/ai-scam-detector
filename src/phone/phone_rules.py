@@ -65,7 +65,7 @@ def evaluate_phone_risk(record: dict[str, Any]) -> dict[str, object]:
             "risk_score": 0,
             "risk_level": UNKNOWN_RISK_LEVEL,
             "review_required": True,
-            "decision_basis": ["Number not found in live API or local fallback dataset."],
+            "decision_basis": ["Number not found in configured live provider evidence."],
             "recommended_action": (
                 "Treat as unverified. Do not share OTPs, passwords, banking details, or personal information."
             ),
@@ -83,7 +83,7 @@ def evaluate_phone_risk(record: dict[str, Any]) -> dict[str, object]:
 
     basis: list[str] = []
 
-    if provider in {"omkar_carrier_lookup", "veriphone"}:
+    if provider == "veriphone":
         valid = record.get("valid")
         valid_false = valid is False or str(valid).strip().lower() == "false"
         line_type = str(record.get("line_type") or "").strip()

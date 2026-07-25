@@ -86,7 +86,7 @@ def _evidence_family(row: dict[str, object]) -> str:
             _text(row.get("prediction"), ""),
         ]
     ).lower()
-    if any(term in text for term in ("phone", "caller", "veriphone", "omkar", "carrier", "fallback dataset")):
+    if any(term in text for term in ("phone", "caller", "veriphone", "carrier")):
         return "Phone"
     if any(term in text for term in ("audio", "voice", "deepfake", "mfcc", "speaker", "recording")):
         return "Audio"
@@ -157,7 +157,7 @@ def _short_source(row: dict[str, object]) -> str:
         return source[:70]
     family = _evidence_family(row)
     if family == "Phone":
-        return "Veriphone lookup / local fallback"
+        return "Veriphone.io lookup"
     if family == "Audio":
         return "Recorded or uploaded audio"
     if family == "Transcript":
@@ -172,7 +172,7 @@ def _engine_text(row: dict[str, object]) -> str:
     if engine:
         return engine
     if _evidence_family(row) == "Phone":
-        return "Veriphone + local fallback"
+        return "Veriphone.io + PenipuMY"
     return "-"
 
 
@@ -468,7 +468,7 @@ def _scope_lines() -> list[str]:
         "- Email: TF-IDF with trained email classifiers.",
         "- Transcript: multi-model text classification after manual input or Whisper transcription.",
         "- Audio: MFCC voice-authenticity analysis, behavioral audio features, and transcript analysis.",
-        "- Phone: Veriphone carrier metadata, PenipuMY reputation evidence, and transparent rules.",
+        "- Phone: Veriphone.io carrier metadata, PenipuMY reputation evidence, and transparent rules.",
         "- This report is an educational capstone prototype output, not legal or forensic proof.",
     ]
 
@@ -702,7 +702,7 @@ def build_pdf(rows: list[dict[str, object]], report_note: str, sections: dict[st
         story.append(
             Paragraph(
                 "Scores across different evidence types are not always equivalent. Phone lookup Unknown is reported as N/A, "
-                "because carrier metadata and local fallback evidence are not trained-model probabilities.",
+                "because carrier metadata and provider reputation evidence are not trained-model probabilities.",
                 styles["Muted"],
             )
         )
@@ -728,7 +728,7 @@ def build_pdf(rows: list[dict[str, object]], report_note: str, sections: dict[st
             ["Email", "TF-IDF with trained email classifiers"],
             ["Transcript", "Multi-model text classification after manual input or Whisper transcription"],
             ["Audio", "MFCC voice-authenticity analysis, behavioral audio features, and transcript analysis"],
-            ["Phone", "Veriphone carrier metadata, PenipuMY reputation evidence, and transparent rules"],
+            ["Phone", "Veriphone.io carrier metadata, PenipuMY reputation evidence, and transparent rules"],
             ["Scope", "Educational scam awareness support. Not enterprise security, telecom verification, or legal evidence."],
         ]
         table = Table(appendix, colWidths=[4 * cm, 11 * cm])
@@ -879,7 +879,7 @@ def build_docx(rows: list[dict[str, object]], report_note: str, sections: dict[s
             document.add_picture(io.BytesIO(indicator_chart), width=Inches(6.1))
         body(
             "Scores across different evidence types are not always equivalent. Phone lookup Unknown is reported as N/A, "
-            "because carrier metadata and local fallback evidence are not trained-model probabilities."
+            "because carrier metadata and provider reputation evidence are not trained-model probabilities."
         )
 
     if sections.get("recommendations", True):
@@ -903,7 +903,7 @@ def build_docx(rows: list[dict[str, object]], report_note: str, sections: dict[s
                 ("Email", "TF-IDF with trained email classifiers"),
                 ("Transcript", "Multi-model text classification after manual input or Whisper transcription"),
                 ("Audio", "MFCC voice-authenticity analysis, behavioral audio features, and transcript analysis"),
-                ("Phone", "Veriphone carrier metadata, PenipuMY reputation evidence, and transparent rules"),
+                ("Phone", "Veriphone.io carrier metadata, PenipuMY reputation evidence, and transparent rules"),
                 ("Scope", "Educational scam awareness support. Not enterprise security, telecom verification, or legal evidence."),
             ]
         )

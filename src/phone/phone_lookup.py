@@ -1,4 +1,4 @@
-"""Phone lookup orchestration with API, local fallback, and unknown fallback."""
+"""Phone lookup orchestration with live providers and unknown fallback."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from src.phone.penipumy_client import (
 )
 from src.phone.phone_number import (
     format_phone_for_ipqs,
-    format_phone_for_omkar,
     format_phone_for_penipumy,
     format_phone_for_veriphone,
     normalise_phone_query,
@@ -22,7 +21,6 @@ from src.phone.phone_number import (
     validate_phone_query,
 )
 from src.phone.ipqs_client import lookup_ipqs_phone
-from src.phone.omkar_client import lookup_omkar_phone
 from src.phone.veriphone_client import lookup_veriphone_phone
 from src.phone.phone_explainability import explain_phone_result
 from src.phone.phone_rules import evaluate_phone_risk
@@ -30,7 +28,7 @@ from src.phone.phone_rules import evaluate_phone_risk
 
 LOCAL_PHONE_DATASET = Path("data") / "processed" / "phone" / "phone_dataset.csv"
 DEMO_PHONE_DATASET = Path("data") / "demo" / "phone_demo_dataset.csv"
-SUPPORTED_PROVIDERS = {"penipumy", "ipqualityscore", "omkar_carrier_lookup", "veriphone"}
+SUPPORTED_PROVIDERS = {"penipumy", "ipqualityscore", "veriphone"}
 
 
 def _match_keys(value: str) -> set[str]:
@@ -181,30 +179,6 @@ def _bool_or_none(value: object) -> bool | None:
     return None
 
 
-def _normalize_omkar_record(record: dict[str, Any], phone_number: str) -> dict[str, Any]:
-    line_type = str(record.get("line_type") or "").strip()
-    normalized = _normalized_base(phone_number, "omkar_carrier_lookup", "omkar_carrier_lookup_api")
-    normalized.update(
-        {
-            "phone": str(record.get("phone_number") or normalise_phone_query(phone_number)),
-            "provider": "omkar_carrier_lookup",
-            "source": "omkar_carrier_lookup_api",
-            "valid": _bool_or_none(record.get("is_valid_number")),
-            "active": None,
-            "line_type": line_type,
-            "carrier": record.get("carrier"),
-            "country": record.get("country_code"),
-            "voip": line_type.lower() == "voip",
-            "formatted": record.get("phone_number"),
-            "national_format": record.get("national_format"),
-            "calling_country_code": record.get("calling_country_code"),
-            "mobile_country_code": record.get("mobile_country_code"),
-            "mobile_network_code": record.get("mobile_network_code"),
-        }
-    )
-    return normalized
-
-
 def _normalize_veriphone_record(record: dict[str, Any], phone_number: str) -> dict[str, Any]:
     line_type = str(record.get("current_line_type") or record.get("phone_type") or "").strip().replace("_", " ")
     current_mccmnc = "".join(char for char in str(record.get("current_mccmnc") or "") if char.isdigit())
@@ -346,12 +320,10 @@ def _normalize_provider_key(provider: str) -> str:
         "veriphone": "veriphone",
         "veriphoneapi": "veriphone",
         "veriphonecarrierlookup": "veriphone",
+        "veriphone.iocarrierlookup": "veriphone",
         "carrier": "veriphone",
         "carrierlookup": "veriphone",
         "carrier_lookup": "veriphone",
-        "omkar": "omkar_carrier_lookup",
-        "omkarcarrierlookup": "omkar_carrier_lookup",
-        "omkar_carrier_lookup": "omkar_carrier_lookup",
     }
     return aliases.get(key, key)
 
@@ -435,33 +407,14 @@ def lookup_phone(
                     live_provider_status="success",
                     raw_provider_record=raw_record,
                 )
-            fallback_reason = str(live_result.get("error") or "Veriphone lookup unavailable.")
-        else:
-            live_result = lookup_omkar_phone(format_phone_for_omkar(normalized), api_key)
-            rate_limit = dict(live_result.get("rate_limit", {}))
-            if bool(live_result.get("ok")):
-                raw_record = dict(live_result.get("record", {}))
-                record = _normalize_omkar_record(raw_record, phone_number)
-                return _build_result(
-                    source="omkar_carrier_lookup_api",
-                    fallback_reason="",
-                    found=True,
-                    record=record,
-                    rate_limit=rate_limit,
-                    requested_provider=provider_key,
-                    live_provider_status="success",
-                    raw_provider_record=raw_record,
-                )
-            fallback_reason = str(live_result.get("error") or "Omkar Carrier Lookup unavailable.")
+            fallback_reason = str(live_result.get("error") or "Veriphone.io lookup unavailable.")
     else:
         if provider_key == "penipumy":
             fallback_reason = "PenipuMY API key unavailable."
         elif provider_key == "ipqualityscore":
             fallback_reason = "IPQualityScore API key unavailable."
         elif provider_key == "veriphone":
-            fallback_reason = "Veriphone API key unavailable."
-        else:
-            fallback_reason = "Omkar Carrier Lookup API key unavailable."
+            fallback_reason = "Veriphone.io API key unavailable."
 
     local_record = _lookup_local_dataset(root, normalized, include_demo=demo_mode)
     if local_record is not None:
