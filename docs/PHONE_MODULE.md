@@ -70,8 +70,14 @@ evidence, not a trained local caller-risk model and not legal proof.
 
 ## API Key
 
-Configure the key through an environment variable, Streamlit secrets, or the
-temporary session input in the Phone Number tab.
+For normal dashboard use, configure provider keys directly inside the Phone
+Number tab. Each provider card lets the user enable the provider, paste a
+session-only key, test the connection, and view diagnostics. This is the
+simplest path for capstone demonstrations.
+
+Environment variables and Streamlit secrets are optional. Use them when keys
+should be available automatically after a local restart or in a hosted
+deployment.
 
 ```powershell
 $env:OMKAR_API_KEY="your-omkar-key"
@@ -92,7 +98,7 @@ api_key = "..."
 ```
 
 Never commit `.env`, `.streamlit/secrets.toml`, or real API keys. The repository
-includes `.env.example` with a blank Omkar placeholder only.
+includes `.env.example` with blank provider placeholders only.
 
 ## Setup Guide
 
@@ -103,7 +109,8 @@ docs/omkar_api_setup_guide.html
 ```
 
 The Phone Number tab offers this file as a download so the main page stays
-concise.
+concise. The guide is for provider onboarding and persistent configuration;
+manual session-key entry in the dashboard is still enough for a normal demo.
 
 ## Account Verification Handling
 

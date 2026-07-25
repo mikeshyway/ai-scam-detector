@@ -152,7 +152,13 @@ Provider evidence is not a locally trained phone-risk model. Omkar metadata
 does not provide police reports or a scam probability by itself, and PenipuMY
 results depend on live provider availability and the submitted number.
 
-Use these environment variable names when needed:
+For normal dashboard demos, paste the provider key directly into the Phone
+Number tab. The tab has provider cards for Omkar and PenipuMY, can test each
+connection, and keeps pasted keys only in the current Streamlit session.
+
+Environment variables or Streamlit secrets are optional. Use them when you want
+the app to remember provider keys across local restarts or when configuring a
+hosted deployment:
 
 ```powershell
 $env:OMKAR_API_KEY="your-omkar-key"
@@ -162,8 +168,8 @@ py -m streamlit run app\main.py
 
 After creating an Omkar account, verify the account phone number at
 <https://www.omkar.cloud/account/verify-phone> before expecting live requests
-to succeed. Alternatively, store the key in the untracked
-`.streamlit/secrets.toml` file. Never commit real API keys.
+to succeed. Never commit real API keys in `.env`, `.streamlit/secrets.toml`,
+notebooks, screenshots, or report files.
 
 Phone lookups can use real records in `data/processed/phone/phone_dataset.csv`
 and then return an Unknown result when no usable provider/fallback evidence is

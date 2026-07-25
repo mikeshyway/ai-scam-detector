@@ -24,7 +24,7 @@ code{padding:.12rem .35rem} pre{padding:12px;overflow:auto}
 <section class="hero">
 <span class="badge">Omkar Carrier Lookup</span>
 <h1>Omkar API Setup Guide</h1>
-<p>Configure Omkar Carrier Lookup for live phone-number metadata checks. Store the API key outside source code and fall back to the local processed dataset when live lookup is unavailable.</p>
+<p>Configure Omkar Carrier Lookup for live phone-number metadata checks. For a normal dashboard demo, paste the key into the Phone Number tab provider card. Store the API key outside source code when persistent local or hosted configuration is needed.</p>
 </section>
 
 <section class="card">
@@ -34,8 +34,9 @@ code{padding:.12rem .35rem} pre{padding:12px;overflow:auto}
 <li>Verify the registered phone number before using live API requests.</li>
 <li>Open <a href="https://www.omkar.cloud/account/verify-phone" target="_blank" rel="noopener noreferrer">https://www.omkar.cloud/account/verify-phone</a> and complete verification.</li>
 <li>Copy the Carrier Lookup API key from your account.</li>
-<li>Add the key to your local <code>.env</code> file or Streamlit secrets.</li>
-<li>Restart Streamlit after changing environment variables.</li>
+<li>For a quick demo, paste the key into the Omkar provider card inside the Phone Number tab.</li>
+<li>For persistent setup, add the key to your local <code>.env</code> file or Streamlit secrets.</li>
+<li>Restart Streamlit after changing environment variables or secrets.</li>
 </ol>
 <pre>OMKAR_API_KEY=your_omkar_key_here</pre>
 <p><a href="https://github.com/omkarcloud/phone-lookup-api" target="_blank" rel="noopener noreferrer">Open Omkar Carrier Lookup API documentation</a></p>
