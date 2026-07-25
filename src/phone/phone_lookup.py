@@ -13,14 +13,12 @@ from src.phone.penipumy_client import (
     fetch_phone_reputation,
 )
 from src.phone.phone_number import (
-    format_phone_for_ipqs,
     format_phone_for_penipumy,
     format_phone_for_veriphone,
     normalise_phone_query,
     phone_digits,
     validate_phone_query,
 )
-from src.phone.ipqs_client import lookup_ipqs_phone
 from src.phone.veriphone_client import lookup_veriphone_phone
 from src.phone.phone_explainability import explain_phone_result
 from src.phone.phone_rules import evaluate_phone_risk
@@ -28,7 +26,7 @@ from src.phone.phone_rules import evaluate_phone_risk
 
 LOCAL_PHONE_DATASET = Path("data") / "processed" / "phone" / "phone_dataset.csv"
 DEMO_PHONE_DATASET = Path("data") / "demo" / "phone_demo_dataset.csv"
-SUPPORTED_PROVIDERS = {"penipumy", "ipqualityscore", "veriphone"}
+SUPPORTED_PROVIDERS = {"penipumy", "veriphone"}
 
 
 def _match_keys(value: str) -> set[str]:
@@ -129,40 +127,6 @@ def _normalize_penipumy_record(record: dict[str, Any], phone_number: str) -> dic
         )
         normalized["spoofing_report_count"] = int(business.get("spoofing_report_count") or 0)
 
-    return normalized
-
-
-def _normalize_ipqs_record(record: dict[str, Any], phone_number: str) -> dict[str, Any]:
-    normalized = _normalized_base(phone_number, "ipqualityscore", "ipqualityscore_api")
-    normalized.update(
-        {
-            "phone": str(record.get("formatted") or record.get("local_format") or normalise_phone_query(phone_number)),
-            "provider": "ipqualityscore",
-            "source": "ipqualityscore_api",
-            "valid": record.get("valid"),
-            "active": record.get("active"),
-            "fraud_score": record.get("fraud_score"),
-            "recent_abuse": record.get("recent_abuse"),
-            "risky": record.get("risky"),
-            "spammer": record.get("spammer"),
-            "line_type": record.get("line_type"),
-            "carrier": record.get("carrier"),
-            "country": record.get("country"),
-            "region": record.get("region"),
-            "city": record.get("city"),
-            "voip": record.get("VOIP", record.get("voip")),
-            "prepaid": record.get("prepaid"),
-            "do_not_call": record.get("do_not_call"),
-            "leaked": record.get("leaked"),
-            "user_activity": record.get("user_activity"),
-            "active_status": record.get("active_status"),
-            "formatted": record.get("formatted"),
-            "local_format": record.get("local_format"),
-            "name": record.get("name"),
-            "timezone": record.get("timezone"),
-            "zip_code": record.get("zip_code"),
-        }
-    )
     return normalized
 
 
@@ -315,8 +279,6 @@ def _normalize_provider_key(provider: str) -> str:
     aliases = {
         "penipu": "penipumy",
         "penipumy": "penipumy",
-        "ipqs": "ipqualityscore",
-        "ipqualityscore": "ipqualityscore",
         "veriphone": "veriphone",
         "veriphoneapi": "veriphone",
         "veriphonecarrierlookup": "veriphone",
@@ -374,23 +336,6 @@ def lookup_phone(
                 fallback_reason = str(exc)
             except PenipuClientError as exc:
                 fallback_reason = str(exc)
-        elif provider_key == "ipqualityscore":
-            live_result = lookup_ipqs_phone(format_phone_for_ipqs(normalized), api_key)
-            rate_limit = dict(live_result.get("rate_limit", {}))
-            if bool(live_result.get("ok")):
-                raw_record = dict(live_result.get("record", {}))
-                record = _normalize_ipqs_record(raw_record, normalized)
-                return _build_result(
-                    source="ipqualityscore_api",
-                    fallback_reason="",
-                    found=True,
-                    record=record,
-                    rate_limit=rate_limit,
-                    requested_provider=provider_key,
-                    live_provider_status="success",
-                    raw_provider_record=raw_record,
-                )
-            fallback_reason = str(live_result.get("error") or "IPQualityScore lookup unavailable.")
         elif provider_key == "veriphone":
             live_result = lookup_veriphone_phone(format_phone_for_veriphone(normalized), api_key)
             rate_limit = dict(live_result.get("rate_limit", {}))
@@ -411,8 +356,6 @@ def lookup_phone(
     else:
         if provider_key == "penipumy":
             fallback_reason = "PenipuMY API key unavailable."
-        elif provider_key == "ipqualityscore":
-            fallback_reason = "IPQualityScore API key unavailable."
         elif provider_key == "veriphone":
             fallback_reason = "Veriphone.io API key unavailable."
 

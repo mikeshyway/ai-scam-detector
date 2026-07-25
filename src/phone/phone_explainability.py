@@ -9,7 +9,6 @@ from src.phone.phone_rules import (
     business_tier,
     spoofing_report_count,
     to_bool,
-    to_float,
     to_int,
 )
 
@@ -177,136 +176,6 @@ def build_phone_evidence_rows(record: dict[str, Any], risk_result: dict[str, obj
 
         return rows
 
-    if provider == "ipqualityscore":
-        fraud_score = to_float(record.get("fraud_score"))
-        valid = record.get("valid")
-        active = record.get("active")
-        recent_abuse = to_bool(record.get("recent_abuse"))
-        risky = to_bool(record.get("risky"))
-        spammer = to_bool(record.get("spammer"))
-        voip = to_bool(record.get("voip"))
-        prepaid = to_bool(record.get("prepaid"))
-        line_type = str(record.get("line_type") or "").strip()
-        carrier = str(record.get("carrier") or "").strip()
-        country = str(record.get("country") or "").strip()
-        city = str(record.get("city") or "").strip()
-        region = str(record.get("region") or "").strip()
-
-        if fraud_score:
-            rows.append(
-                _row(
-                    "Fraud score",
-                    "Provider risk metadata",
-                    "High" if fraud_score >= 85 else "Medium" if fraud_score >= 50 else "Low",
-                    f"{fraud_score:.0f}/100",
-                    "Provider reports elevated fraud-risk metadata.",
-                )
-            )
-        if recent_abuse:
-            rows.append(
-                _row(
-                    "Recent abuse",
-                    "Abuse signal",
-                    "High",
-                    "Detected",
-                    "Recent abusive activity was associated.",
-                )
-            )
-        if risky:
-            rows.append(
-                _row(
-                    "Risky number",
-                    "Provider risk metadata",
-                    "Medium",
-                    "risky=true",
-                    "Provider marks the number as risky.",
-                )
-            )
-        if spammer:
-            rows.append(
-                _row(
-                    "Spammer signal",
-                    "Provider abuse metadata",
-                    "High",
-                    "spammer=true",
-                    "Provider associates number with spam activity.",
-                )
-            )
-        if valid is not None:
-            rows.append(
-                _row(
-                    "Valid number",
-                    "Validation",
-                    "Context",
-                    "Yes" if valid is True else "No",
-                    "Number routing validity was checked.",
-                )
-            )
-        if active is not None:
-            rows.append(
-                _row(
-                    "Active line",
-                    "Validation",
-                    "Context",
-                    "Yes" if active is True else "No",
-                    "Line activity is validation context.",
-                )
-            )
-        if voip:
-            rows.append(
-                _row(
-                    "VoIP line",
-                    "Line type",
-                    "Context",
-                    line_type or "VoIP",
-                    "Internet-based number; verify identity independently.",
-                )
-            )
-        if prepaid:
-            rows.append(
-                _row(
-                    "Prepaid line",
-                    "Line type",
-                    "Context",
-                    "prepaid=true",
-                    "Prepaid service is contextual only.",
-                )
-            )
-        if carrier and carrier.upper() != "N/A":
-            rows.append(
-                _row(
-                    "Carrier",
-                    "Telecom metadata",
-                    "Context",
-                    carrier,
-                    "Carrier information supports verification context.",
-                )
-            )
-        location = ", ".join(value for value in [city, region, country] if value and value.upper() != "N/A")
-        if location:
-            rows.append(
-                _row(
-                    "Location metadata",
-                    "Provider context",
-                    "Context",
-                    location,
-                    "Location may help verify caller claims.",
-                )
-            )
-
-        if not rows:
-            rows.append(
-                _row(
-                    "No provider risk indicators",
-                    "Provider metadata",
-                    "Low",
-                    source,
-                    "No strong IPQS abuse signals returned.",
-                )
-            )
-
-        return rows
-
     if fraud:
         rows.append(
             _row(
@@ -449,14 +318,6 @@ def explain_phone_result(record: dict[str, Any], risk_result: dict[str, object])
             summary = f"Carrier lookup returned number metadata: {details}."
         else:
             summary = "Carrier lookup returned limited metadata. This does not prove the caller is safe."
-    elif provider == "ipqualityscore":
-        fraud_score = to_float(record.get("fraud_score"))
-        if risk_level == "High Risk":
-            summary = f"IPQualityScore returned high-risk phone metadata with fraud score {fraud_score:.0f}/100."
-        elif risk_level == "Medium Risk":
-            summary = f"IPQualityScore returned review-worthy phone metadata with fraud score {fraud_score:.0f}/100."
-        else:
-            summary = "IPQualityScore did not return strong abuse indicators, but the caller still needs verification."
     elif fraud:
         summary = "The reputation data contains a direct fraud flag for this phone number."
     elif police_reports or verified_reports:

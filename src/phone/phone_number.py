@@ -76,12 +76,6 @@ def format_phone_for_penipumy(value: str) -> str:
     return phone_digits(normalise_phone_query(value))
 
 
-def format_phone_for_ipqs(value: str) -> str:
-    """Return canonical E.164-style input for IPQualityScore."""
-
-    return normalise_phone_query(value)
-
-
 def format_phone_for_veriphone(value: str) -> str:
     """Return E.164-style input for Veriphone.io."""
 

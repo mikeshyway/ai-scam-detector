@@ -24,13 +24,6 @@ def to_int(value: object) -> int:
         return 0
 
 
-def to_float(value: object) -> float:
-    try:
-        return float(value or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
 def business_tier(record: dict[str, Any]) -> str:
     business = record.get("business")
     if isinstance(business, dict):
@@ -119,85 +112,6 @@ def evaluate_phone_risk(record: dict[str, Any]) -> dict[str, object]:
             "recommended_action": (
                 "Carrier data supports context only. It does not provide scam reputation or prove the caller is safe."
             ),
-        }
-
-    if provider == "ipqualityscore":
-        fraud_score = to_float(record.get("fraud_score"))
-        recent_abuse = to_bool(record.get("recent_abuse"))
-        risky = to_bool(record.get("risky"))
-        spammer = to_bool(record.get("spammer"))
-        valid = record.get("valid")
-        active = record.get("active")
-        voip = to_bool(record.get("voip"))
-        prepaid = to_bool(record.get("prepaid"))
-        line_type = str(record.get("line_type") or "").strip()
-        carrier = str(record.get("carrier") or "").strip()
-
-        if fraud_score:
-            basis.append(f"IPQS fraud score: {fraud_score:.0f}/100")
-        if recent_abuse:
-            basis.append("recent abuse signal")
-        if risky:
-            basis.append("risky phone metadata")
-        if spammer:
-            basis.append("spammer signal")
-        if valid is False:
-            basis.append("invalid number signal")
-        if active is False:
-            basis.append("inactive or disconnected signal")
-        if voip:
-            basis.append("VoIP line type context")
-        if prepaid:
-            basis.append("prepaid line context")
-        if line_type:
-            basis.append(f"line type: {line_type}")
-        if carrier and carrier.upper() != "N/A":
-            basis.append(f"carrier: {carrier}")
-
-        high_risk = (
-            fraud_score >= 85
-            or recent_abuse
-            or spammer
-            or (risky and fraud_score >= 60)
-            or (valid is False and (risky or fraud_score >= 50))
-        )
-        medium_risk = (
-            risky
-            or fraud_score >= 50
-            or active is False
-            or valid is False
-        )
-
-        if high_risk:
-            score = max(78, min(99, int(round(fraud_score)) if fraud_score else 82))
-            if recent_abuse:
-                score = max(score, 88)
-            if spammer:
-                score = max(score, 86)
-            return {
-                "risk_score": score,
-                "risk_level": HIGH_RISK_LEVEL,
-                "review_required": True,
-                "decision_basis": basis or ["high-risk IPQualityScore metadata"],
-                "recommended_action": "Do not trust the caller identity. Verify through an official channel first.",
-            }
-
-        if medium_risk:
-            score = max(42, min(69, int(round(fraud_score)) if fraud_score else 48))
-            return {
-                "risk_score": score,
-                "risk_level": MEDIUM_RISK_LEVEL,
-                "review_required": True,
-                "decision_basis": basis or ["limited IPQualityScore risk metadata"],
-                "recommended_action": "Verify the caller before sharing personal, banking, or authentication details.",
-            }
-
-        return {
-            "risk_score": 14 if record.get("valid") is True else 24,
-            "risk_level": LOW_RISK_LEVEL,
-            "review_required": True,
-            "decision_basis": basis or ["IPQualityScore did not return strong abuse indicators"],
-            "recommended_action": "A lower-risk validation result is not proof of safety. Verify sensitive requests independently.",
         }
 
     high_risk = (

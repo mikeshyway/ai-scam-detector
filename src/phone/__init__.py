@@ -5,7 +5,6 @@ from src.phone.phone_lookup import lookup_phone, normalise_phone_query, phone_di
 __all__ = [
     "lookup_phone",
     "normalise_phone_query",
-    "ipqs_client",
     "penipumy_client",
     "phone_digits",
     "phone_lookup",

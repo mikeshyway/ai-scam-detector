@@ -23,7 +23,7 @@ from app.ui_components import (
     render_result_card,
     render_section_header,
 )
-from src.phone.phone_lookup import lookup_phone, normalise_phone_query, validate_phone_query
+from src.phone.phone_lookup import normalise_phone_query, validate_phone_query
 from src.phone.providers import (
     lookup_penipumy_reputation,
     test_penipumy_connection,
@@ -117,23 +117,10 @@ def _resolve_api_key(provider: str) -> dict[str, object]:
     return _key_result("", "Not configured", "-")
 
 
-def _configured_penipumy_api_key() -> str:
-    """Backward-compatible helper; PenipuMY is no longer visible in the UI."""
-
-    return ""
-
-
-def _configured_ipqs_api_key() -> str:
-    """Backward-compatible helper; IPQS is no longer visible in the UI."""
-
-    return ""
-
-
 def _source_label(source: str) -> str:
     labels = {
         "veriphone_api": "Veriphone.io Carrier Lookup",
         "penipumy_api": "PenipuMY API",
-        "ipqualityscore_api": "IPQualityScore API",
         "local_fallback": "Legacy local record",
         "demo_fallback": "Demo record",
         "unknown_fallback": "Unknown result",
@@ -143,8 +130,6 @@ def _source_label(source: str) -> str:
 
 
 def _provider_key(provider_label: str) -> str:
-    if "IPQualityScore" in provider_label:
-        return "ipqualityscore"
     if "Veriphone" in provider_label:
         return "veriphone"
     if "Carrier" in provider_label:
@@ -153,41 +138,9 @@ def _provider_key(provider_label: str) -> str:
 
 
 def _provider_label(provider_key: str) -> str:
-    if provider_key == "ipqualityscore":
-        return "IPQualityScore"
     if provider_key == "veriphone":
         return "Veriphone.io Carrier Lookup"
     return "PenipuMY"
-
-
-def _lookup_phone_compat(
-    phone_number: str,
-    root: Path,
-    *,
-    provider: str,
-    api_key: str,
-    demo_mode: bool = False,
-) -> dict[str, Any]:
-    """Call lookup_phone while tolerating a stale old import during Streamlit reruns."""
-
-    try:
-        signature = inspect.signature(lookup_phone)
-    except (TypeError, ValueError):
-        signature = None
-
-    if signature is not None and "provider" in signature.parameters:
-        kwargs: dict[str, Any] = {"provider": provider, "api_key": api_key}
-        if "demo_mode" in signature.parameters:
-            kwargs["demo_mode"] = demo_mode
-        return lookup_phone(phone_number, root, **kwargs)
-
-    if provider != "penipumy":
-        raise ValueError(
-            "The phone lookup backend loaded by Streamlit is stale. "
-            "Refresh or restart Streamlit once so live phone provider support is loaded."
-        )
-
-    return lookup_phone(phone_number, root, api_key=api_key)
 
 
 def _render_phone_step(index: str, title: str, body: str) -> None:
@@ -318,8 +271,6 @@ def _diagnostic_category(provider: str, status_code: object, error: str, payload
         return "network_error"
     if status_code in {500, 502, 503} or "server error" in error_text:
         return "server_error"
-    if provider == "ipqualityscore" and payload.get("valid") is False:
-        return "invalid_phone"
     metadata_valid = payload.get("is_valid_number")
     if provider == "veriphone" and (
         metadata_valid is False or str(metadata_valid).strip().lower() == "false"
@@ -343,32 +294,7 @@ def _provider_evidence_rows(provider: str, payload: dict[str, Any]) -> pd.DataFr
     if not payload:
         return pd.DataFrame()
 
-    if provider == "ipqualityscore":
-        fields = [
-            ("Validation", "Valid", "valid"),
-            ("Validation", "Active", "active"),
-            ("Risk", "Fraud score", "fraud_score"),
-            ("Risk", "Risky", "risky"),
-            ("Risk", "Recent abuse", "recent_abuse"),
-            ("Risk", "Spammer", "spammer"),
-            ("Risk", "Leaked", "leaked"),
-            ("Network", "Carrier", "carrier"),
-            ("Network", "Line type", "line_type"),
-            ("Network", "VoIP", "VOIP"),
-            ("Network", "Prepaid", "prepaid"),
-            ("Location", "Country", "country"),
-            ("Location", "Region", "region"),
-            ("Location", "City", "city"),
-            ("Identity", "Name", "name"),
-            ("Metadata", "Do not call", "do_not_call"),
-            ("Metadata", "Active status", "active_status"),
-            ("Metadata", "User activity", "user_activity"),
-            ("Metadata", "Request ID", "request_id"),
-            ("SMS Pumping", "Risk score", "sms_pumping.risk_score"),
-            ("SMS Pumping", "Message", "sms_pumping.message"),
-            ("SMS Pumping", "Velocity", "sms_pumping.velocity"),
-        ]
-    elif provider == "veriphone":
+    if provider == "veriphone":
         fields = [
             ("Validation", "Valid", "is_valid_number"),
             ("Network", "Carrier", "carrier"),
@@ -405,11 +331,7 @@ def _provider_evidence_rows(provider: str, payload: dict[str, Any]) -> pd.DataFr
 
 def _provider_response_statistics(provider: str, payload: dict[str, Any]) -> pd.DataFrame:
     summary = _response_field_summary(payload)
-    if provider == "ipqualityscore":
-        risk_fields = ["fraud_score", "recent_abuse", "risky", "spammer", "leaked", "do_not_call"]
-        identity_fields = ["name", "carrier", "line_type", "active_status", "user_activity"]
-        location_fields = ["country", "region", "city", "timezone", "zip_code"]
-    elif provider == "veriphone":
+    if provider == "veriphone":
         risk_fields = ["is_valid_number", "line_type"]
         identity_fields = ["carrier", "phone_number", "national_format", "mobile_country_code", "mobile_network_code"]
         location_fields = ["country_code", "calling_country_code"]
