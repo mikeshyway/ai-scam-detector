@@ -14,11 +14,34 @@ not a commercial security, telecom, or forensic product.
 - **Voice Transcript**: analyses pasted/uploaded transcripts and optional
   `.wav`, `.mp3`, `.m4a`, or `.flac` evidence using Whisper, the transcript
   classifiers, MFCC + calibrated SVM, and the optional behavioral model.
-- **Phone Number**: queries Omkar Carrier Lookup when configured, falls back to
-  the local educational dataset, and explains carrier/reputation evidence
+- **Phone Number**: queries Omkar Carrier Lookup and PenipuMY when configured,
+  uses local/demo fallback only where allowed, and explains provider evidence
   without inventing scam probabilities.
 - **AI Report Generator**: builds downloadable evidence reports from saved
   detections.
+
+## Final Prototype Evidence
+
+The main evidence record for the final proposal is
+[notebooks/00_final_prototype_evidence_notebook.ipynb](notebooks/00_final_prototype_evidence_notebook.ipynb).
+It documents the current methodology, final dashboard scope, dataset purpose,
+training principles, saved metrics, source traceability, report generator proof,
+and reviewer-facing limitations.
+
+The final prototype surface is:
+
+```text
+Detection Center
+  |-- Email/message tab
+  |-- Transcript and uploaded/recorded audio tab
+  `-- Phone-number tab
+
+AI Report Generator
+  `-- TXT/PDF/DOCX report export from saved evidence
+```
+
+For a text companion to the notebook, see
+[docs/FINAL_PROTOTYPE_EVIDENCE_SUMMARY.md](docs/FINAL_PROTOTYPE_EVIDENCE_SUMMARY.md).
 
 ## Directory Structure
 
@@ -41,7 +64,7 @@ ai-scam-detector/
 |   `-- processed/           Generated channel-specific datasets
 |-- models/                  Runtime model artifacts
 |-- reports/metrics/         Saved evaluation metrics
-|-- notebooks/               Exploratory capstone notebooks
+|-- notebooks/               Final evidence notebook and focused EDA appendices
 |-- tests/                   Automated unit tests
 |-- docs/                    Architecture and setup documentation
 `-- archive/deprecated/      Superseded files kept for reference
@@ -119,14 +142,21 @@ directly in `scripts/`. See
 
 ## Phone API Configuration
 
-The Phone Number tab uses Omkar Carrier Lookup as the visible live provider.
-Omkar returns carrier, line-type, country-code, and formatting metadata. It does
-not provide police reports, community scam reports, or a scam probability.
+The Phone Number tab can use configured live providers:
 
-Use this environment variable name:
+- Omkar Carrier Lookup for carrier, line-type, country-code, and formatting
+  metadata.
+- PenipuMY for reputation/report fields where a valid provider key is supplied.
+
+Provider evidence is not a locally trained phone-risk model. Omkar metadata
+does not provide police reports or a scam probability by itself, and PenipuMY
+results depend on live provider availability and the submitted number.
+
+Use these environment variable names when needed:
 
 ```powershell
 $env:OMKAR_API_KEY="your-omkar-key"
+$env:PENIPUMY_API_KEY="your-penipumy-key"
 py -m streamlit run app\main.py
 ```
 
@@ -135,10 +165,11 @@ After creating an Omkar account, verify the account phone number at
 to succeed. Alternatively, store the key in the untracked
 `.streamlit/secrets.toml` file. Never commit real API keys.
 
-Omkar falls back to real records in `data/processed/phone/phone_dataset.csv`
-and then to an Unknown result. Fictional presentation rows belong in
-`data/demo/phone_demo_dataset.csv` and are searched only when Demo Mode is
-explicitly enabled. The full behavior is documented in
+Phone lookups can use real records in `data/processed/phone/phone_dataset.csv`
+and then return an Unknown result when no usable provider/fallback evidence is
+available. Fictional presentation rows belong in `data/demo/phone_demo_dataset.csv`
+or `data/demo/demo_phone_numbers.csv` and are searched only when the relevant
+demo flow is explicitly enabled. The full behavior is documented in
 [docs/PHONE_MODULE.md](docs/PHONE_MODULE.md), and the downloadable setup guide
 is [docs/omkar_api_setup_guide.html](docs/omkar_api_setup_guide.html).
 
@@ -149,6 +180,8 @@ is [docs/omkar_api_setup_guide.html](docs/omkar_api_setup_guide.html).
 - Local diagnostics: `logs/`
 - Report/history database: `data/session_history.db` is deployable when saved
   evidence should be available in the AI Report Generator
+- Reviewer evidence: `notebooks/00_final_prototype_evidence_notebook.ipynb`
+  and any exported HTML/PDF version of that notebook
 
 Raw datasets, transient SQLite sidecar files, logs, caches, and secrets are
 ignored. Keep only the artifacts required for the final offline or hosted

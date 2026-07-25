@@ -5,17 +5,21 @@
 ```text
 User phone number
   -> normalize to canonical international format
-  -> Omkar Carrier Lookup
-  -> local fallback CSV
-  -> unknown result
+  -> configured live provider checks
+  -> Omkar metadata evidence
+  -> PenipuMY reputation/report evidence where configured
+  -> local/demo fallback where allowed
+  -> unknown result when evidence is unavailable
   -> shared normalized record
   -> transparent rules and explanation
   -> Streamlit result/history
 ```
 
-Omkar Carrier Lookup is the only visible live provider in the Phone Number tab.
-Older PenipuMY and IPQualityScore client files may remain in `src/phone/` for
-compatibility/history, but they are not part of the active UI flow.
+The final prototype evidence notebook treats phone checks as provider evidence,
+not local ML training. Omkar supplies carrier/line metadata. PenipuMY supplies
+reputation or report-oriented fields where a valid key is configured. Older
+IPQualityScore client files may remain in `src/phone/` for compatibility or
+history, but they are not the primary documented final flow.
 
 ## Phone Number Normalization
 
@@ -58,6 +62,12 @@ Carrier metadata is not scam reputation. A valid phone number does not prove a
 caller is safe, and a VoIP/mobile/landline classification does not prove fraud
 by itself.
 
+### PenipuMY
+
+PenipuMY is used as a reputation/report evidence provider when configured. Its
+fields can support the phone concern explanation, but provider reports are still
+evidence, not a trained local caller-risk model and not legal proof.
+
 ## API Key
 
 Configure the key through an environment variable, Streamlit secrets, or the
@@ -65,14 +75,19 @@ temporary session input in the Phone Number tab.
 
 ```powershell
 $env:OMKAR_API_KEY="your-omkar-key"
+$env:PENIPUMY_API_KEY="your-penipumy-key"
 ```
 
 Streamlit secrets are also supported:
 
 ```toml
 OMKAR_API_KEY = "..."
+PENIPUMY_API_KEY = "..."
 
 [omkar]
+api_key = "..."
+
+[penipumy]
 api_key = "..."
 ```
 
@@ -103,7 +118,7 @@ https://www.omkar.cloud/account/verify-phone
 The app labels this as `account_phone_verification_required`, not invalid phone
 format.
 
-## Local Fallback
+## Local Fallback And Demo Evidence
 
 Path: `data/processed/phone/phone_dataset.csv`
 
@@ -131,20 +146,23 @@ last_verified
 
 Rows in this file should use `record_type=real` and `is_demo=false`.
 
-## Demo Fallback
-
 Path: `data/demo/phone_demo_dataset.csv`
 
 This file contains fictional capstone examples only. The Phone Number tab will
 not search it unless Demo Mode is explicitly enabled. Demo results are labelled
 as demonstration data and excluded from dashboard headline KPIs.
 
+Path: `data/demo/demo_phone_numbers.csv`
+
+This smaller demo file may be used by notebook/demo workflows as repeatable
+presentation input. It should not be described as trained phone-risk data.
+
 Fallback order:
 
 ```text
-Omkar Carrier Lookup
-  -> real local processed phone dataset
-  -> demo phone dataset only when Demo Mode is enabled
+Configured live providers
+  -> real local processed phone dataset where allowed
+  -> demo phone dataset only when demo flow is enabled
   -> unknown result
 ```
 
@@ -159,7 +177,7 @@ Omkar Carrier Lookup
 The UI shows provenance for each result:
 
 ```text
-Live provider: Omkar Carrier Lookup
+Live provider: Omkar Carrier Lookup / PenipuMY where configured
 Fallback used: Yes/No
 Provider returned: Carrier or validation metadata / No usable carrier metadata
 Scam reputation available: Yes/No
@@ -183,6 +201,7 @@ The phone module intentionally remains:
 
 ```text
 Omkar API
++ PenipuMY API where configured
 + normalization
 + local fallback
 + transparent consistency rules
@@ -200,11 +219,22 @@ Unknown result. Unknown does not mean safe. The UI should continue to advise
 verification and never sharing OTPs, passwords, banking details, or personal
 information.
 
+## History Database
+
+Phone rows saved in `data/session_history.db` are report evidence rows. They can
+contain masked phone numbers, provider status, provider-derived fields, concern
+labels, concern scores, and recommended verification actions.
+
+This database is not a locally trained phone-risk database. Stored phone
+outcomes come from provider-pulled evidence plus deterministic rules at lookup
+time. A future lookup can differ if provider data, API keys, quota, rate limits,
+or network availability change.
+
 ## Module Responsibilities
 
 - `omkar_client.py`: Omkar Carrier Lookup HTTP communication and response parsing
-- `phone_lookup.py`: Omkar -> local -> demo/unknown orchestration
+- `penipumy_client.py`: PenipuMY HTTP communication and response parsing
+- `phone_lookup.py`: provider -> local -> demo/unknown orchestration
 - `phone_rules.py`: transparent evidence-based reputation/context level
 - `phone_explainability.py`: readable evidence and recommendations
-- `penipumy_client.py`: deprecated provider client kept out of the active UI
 - `ipqs_client.py`: deprecated provider client kept out of the active UI
