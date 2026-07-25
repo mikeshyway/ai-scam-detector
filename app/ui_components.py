@@ -1788,7 +1788,7 @@ def render_sidebar_status(root: Path) -> None:
         '<div class="aifds-sidebar-status-panel">'
         '<div class="aifds-sidebar-status-heading">'
         '<span class="aifds-sidebar-status-live-dot"></span>'
-        '<span>AI MODEL STATUS</span>'
+        '<span>AI MODEL / API STATUS</span>'
         '</div>'
         '<div class="aifds-sidebar-status-divider"></div>'
         f'<div class="aifds-sidebar-model-list">{"".join(rows)}</div>'
@@ -1826,7 +1826,7 @@ def _sidebar_model_status_items(
     transcript_details = [_artifact_status_item(*item) for item in transcript_models]
     audio_details = [_artifact_status_item(*item) for item in audio_models]
     api_details = [
-        _phone_api_status_item("Veriphone.io Carrier Lookup", "veriphone"),
+        _phone_api_status_item("Veriphone.io", "veriphone"),
         _phone_api_status_item("PenipuMY", "penipumy"),
     ]
 
