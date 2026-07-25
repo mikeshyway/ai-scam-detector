@@ -616,6 +616,25 @@ def _mfcc_figure(results: list[dict[str, object]]) -> go.Figure | None:
     return apply_chart_theme(fig)
 
 
+def _mfcc_explanation(results: list[dict[str, object]], latest: dict[str, object] | None) -> str:
+    chunk_count = len(results)
+    if not latest:
+        return "MFCC evidence appears after the first processed audio chunk."
+    quality = latest.get("audio_quality", {})
+    if not isinstance(quality, dict):
+        quality = {}
+    notes = latest.get("audio_evidence_notes", [])
+    note_text = ", ".join(str(note) for note in notes if str(note).strip()) if isinstance(notes, list) else ""
+    conclusion = str(latest.get("authenticity_level", "voice authenticity not yet available")).lower()
+    return (
+        "Each heatmap column is a recent chunk, and each row is an MFCC coefficient: a compact fingerprint "
+        "of vocal tone, timbre, and spectral shape used by the voice model. The heatmap supports the raw "
+        "voice score, but reliability checks decide whether that pattern is strong enough to trust. "
+        f"Current reading: {chunk_count} chunk(s), {float(quality.get('duration_seconds', 0.0)):.1f}s latest audio, "
+        f"{conclusion}. Reliability limits: {note_text or 'none'}."
+    )
+
+
 def _frequency_figure(result: dict[str, object] | None) -> go.Figure | None:
     if not result:
         return None
@@ -721,9 +740,10 @@ def _risk_number(value: object, default: float = 0.0) -> float:
     if value is None or value == "":
         return default
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return default
+    return number if np.isfinite(number) else default
 
 
 def _clip_decision_score(results: list[dict[str, object]], threshold: int) -> float:
@@ -761,6 +781,232 @@ def _behavioral_feature_rows(result: dict[str, object]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _metric_bar_color(name: str, value: float) -> str:
+    lowered = name.casefold()
+    if "raw" in lowered:
+        return "#7C3AED"
+    if "behavioral" in lowered:
+        return "#0E7490"
+    if "voice" in lowered:
+        return "#2563EB"
+    if "content" in lowered or "transcript" in lowered:
+        return "#DC2626"
+    if "reliability" in lowered:
+        if value >= 60:
+            return "#16A34A"
+        if value >= 35:
+            return "#D97706"
+        return "#DC2626"
+    return "#0891B2"
+
+
+def _percent_metric_figure(
+    metrics: list[tuple[str, float | None, str]],
+    *,
+    height: int = 330,
+) -> go.Figure | None:
+    filtered = [
+        (label, float(value), detail)
+        for label, value, detail in metrics
+        if value is not None
+    ]
+    if not filtered:
+        return None
+
+    labels = [item[0] for item in filtered]
+    values = [max(0.0, min(100.0, item[1])) for item in filtered]
+    details = [item[2] for item in filtered]
+    colors = [_metric_bar_color(label, value) for label, value in zip(labels, values)]
+    fig = go.Figure(
+        go.Bar(
+            x=list(reversed(values)),
+            y=list(reversed(labels)),
+            orientation="h",
+            marker_color=list(reversed(colors)),
+            customdata=list(reversed(details)),
+            hovertemplate="%{y}<br>%{x:.1f}%<br>%{customdata}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        height=height,
+        margin=dict(l=10, r=20, t=20, b=35),
+        xaxis_title="0-100 evidence scale",
+        yaxis_title="",
+        xaxis=dict(range=[0, 100]),
+        bargap=0.32,
+    )
+    return apply_chart_theme(fig)
+
+
+def _voice_evidence_metric_figure(result: dict[str, object]) -> go.Figure | None:
+    behavioral_evidence = result.get("behavioral_evidence_risk")
+    behavioral_raw = result.get("behavioral_risk")
+    behavioral_reliability = result.get("behavioral_reliability")
+    metrics = [
+        (
+            "Decision risk",
+            _risk_number(result.get("risk")),
+            "Final verdict score after content, authenticity, and reliability policy.",
+        ),
+        (
+            "Transcript scam risk",
+            _risk_number(result.get("transcript_risk")),
+            "Text model and rule indicators from the transcript.",
+        ),
+        (
+            "Voice evidence risk",
+            _risk_number(result.get("voice_evidence_risk")),
+            "MFCC voice score after audio reliability weighting.",
+        ),
+        (
+            "Raw voice AI model score",
+            _risk_number(result.get("voice_risk")),
+            "MFCC + SVM probability before reliability gates.",
+        ),
+        (
+            "Behavioral evidence risk",
+            _risk_number(behavioral_evidence) if behavioral_evidence is not None else None,
+            "Behavioral RF score after duration, silence, activity, and energy checks.",
+        ),
+        (
+            "Raw behavioral RF score",
+            _risk_number(behavioral_raw) if behavioral_raw is not None else None,
+            "Behavioral RF probability before reliability gates.",
+        ),
+        (
+            "Voice reliability",
+            _risk_number(result.get("voice_reliability")),
+            "How trustworthy the voice model is for this clip.",
+        ),
+        (
+            "Behavioral reliability",
+            _risk_number(behavioral_reliability) if behavioral_reliability is not None else None,
+            "How trustworthy the behavioral RF signal is for this clip.",
+        ),
+        (
+            "Content reliability",
+            _risk_number(result.get("content_reliability")),
+            "How much transcript text and rule evidence support the content verdict.",
+        ),
+    ]
+    return _percent_metric_figure(metrics, height=360)
+
+
+def _voice_evidence_explanation(result: dict[str, object]) -> str:
+    raw_voice = _risk_number(result.get("voice_risk"))
+    voice_evidence = _risk_number(result.get("voice_evidence_risk"))
+    voice_reliability = _risk_number(result.get("voice_reliability"))
+    behavioral_raw = result.get("behavioral_risk")
+    behavioral_evidence = result.get("behavioral_evidence_risk")
+    label = str(result.get("decision_label", "No decision"))
+    if raw_voice >= 85.0 and voice_evidence < 40.0:
+        voice_reading = "the raw voice model is high, but it is not strong evidence after reliability checks"
+    elif voice_evidence >= 70.0 and voice_reliability >= 70.0:
+        voice_reading = "the raw voice model and reliability gate agree, so voice authenticity can support review"
+    else:
+        voice_reading = "the voice signal is supporting context rather than the main verdict driver"
+
+    behavioral_reading = "behavioral RF is unavailable"
+    if behavioral_raw is not None and behavioral_evidence is not None:
+        behavioral_reading = (
+            f"behavioral RF moved from {_risk_value_text(behavioral_raw)} raw to "
+            f"{_risk_value_text(behavioral_evidence)} evidence"
+        )
+
+    return (
+        "This chart separates raw model probabilities from reliability-weighted evidence. "
+        f"Conclusion: {label}; {voice_reading}; {behavioral_reading}."
+    )
+
+
+def _normalized_signal(value: object, scale: float, *, invert: bool = False) -> float:
+    number = _risk_number(value)
+    score = max(0.0, min(100.0, (number / max(scale, 1e-9)) * 100.0))
+    return 100.0 - score if invert else score
+
+
+def _behavioral_signal_metric_figure(result: dict[str, object]) -> go.Figure | None:
+    features = result.get("behavioral_features", {})
+    if not isinstance(features, dict):
+        return None
+
+    quality = result.get("audio_quality", {})
+    if not isinstance(quality, dict):
+        quality = {}
+
+    duration = features.get("duration_seconds", quality.get("duration_seconds"))
+    speech_activity = features.get("speech_activity_ratio", quality.get("speech_activity_ratio"))
+    silence = features.get("silence_ratio", quality.get("silence_ratio"))
+    rms = features.get("rms_energy_mean", quality.get("rms"))
+    metrics = [
+        (
+            "Duration coverage",
+            _normalized_signal(duration, 20.0),
+            f"{_risk_number(duration):.2f}s available; longer clips make RF behavior more stable.",
+        ),
+        (
+            "Speech activity",
+            _normalized_signal(speech_activity, 1.0),
+            f"{_risk_number(speech_activity) * 100:.1f}% voiced frames; sparse speech weakens confidence.",
+        ),
+        (
+            "Silence load",
+            _normalized_signal(silence, 1.0),
+            f"{_risk_number(silence) * 100:.1f}% silent frames; high silence is a reliability warning.",
+        ),
+        (
+            "Recording energy",
+            _normalized_signal(rms, 0.05),
+            f"RMS {_risk_number(rms):.4f}; very quiet clips are less comparable to training audio.",
+        ),
+        (
+            "Energy movement",
+            _normalized_signal(features.get("rms_energy_std"), 0.04),
+            f"RMS std {_risk_number(features.get('rms_energy_std')):.4f}; variation helps describe speech rhythm.",
+        ),
+        (
+            "Zero-crossing level",
+            _normalized_signal(features.get("zero_crossing_rate_mean"), 0.20),
+            f"ZCR mean {_risk_number(features.get('zero_crossing_rate_mean')):.4f}; tracks noisiness and articulation.",
+        ),
+        (
+            "Spectral centroid",
+            _normalized_signal(features.get("spectral_centroid_mean"), 4_000.0),
+            f"{_risk_number(features.get('spectral_centroid_mean')):.1f} Hz center of brightness.",
+        ),
+        (
+            "Spectral bandwidth",
+            _normalized_signal(features.get("spectral_bandwidth_mean"), 4_000.0),
+            f"{_risk_number(features.get('spectral_bandwidth_mean')):.1f} Hz spread of frequency energy.",
+        ),
+        (
+            "Speech rate",
+            _normalized_signal(features.get("estimated_speech_rate"), 8.0),
+            f"{_risk_number(features.get('estimated_speech_rate')):.2f} onset events/sec; extreme values reduce trust.",
+        ),
+        (
+            "Pause count",
+            _normalized_signal(features.get("pause_count"), 12.0),
+            f"{_risk_number(features.get('pause_count')):.0f} pauses detected in the chunk.",
+        ),
+    ]
+    return _percent_metric_figure(metrics, height=380)
+
+
+def _behavioral_signal_explanation(result: dict[str, object]) -> str:
+    reliability = _risk_value_text(result.get("behavioral_reliability"))
+    raw = _risk_value_text(result.get("behavioral_risk"))
+    evidence = _risk_value_text(result.get("behavioral_evidence_risk"))
+    notes = result.get("audio_evidence_notes", [])
+    note_text = ", ".join(str(note) for note in notes if str(note).strip()) if isinstance(notes, list) else ""
+    return (
+        "Behavioral RF looks at duration, voiced activity, silence, energy, spectral shape, pauses, and speech rate. "
+        "The bars are normalized so mixed units can be compared visually; hover details keep the raw measurement. "
+        f"Conclusion: RF is {raw} raw, {evidence} after {reliability} reliability. "
+        f"Reliability limits: {note_text or 'none'}."
+    )
+
+
 def _render_live_dashboard(
     results: list[dict[str, object]],
     threshold: int,
@@ -773,7 +1019,8 @@ def _render_live_dashboard(
     transcript_placeholder,
     mfcc_placeholder,
     frequency_placeholder,
-    features_placeholder,
+    acoustic_metrics_placeholder,
+    behavioral_metrics_placeholder,
 ) -> None:
     latest = results[-1] if results else None
     peak = max((float(item.get("risk", 0)) for item in results), default=0.0)
@@ -867,6 +1114,7 @@ def _render_live_dashboard(
         figure = _mfcc_figure(results)
         if figure is not None:
             st.plotly_chart(figure, use_container_width=True)
+            st.caption(_mfcc_explanation(results, latest))
         else:
             st.caption("MFCC heatmap appears after the first processed chunk.")
 
@@ -877,46 +1125,27 @@ def _render_live_dashboard(
         else:
             st.caption("Frequency spectrum appears after the first processed chunk.")
 
-    with features_placeholder.container():
+    with acoustic_metrics_placeholder.container():
         if not latest:
             st.caption("Acoustic feature values appear after the first processed chunk.")
         else:
-            features = latest.get("features", {})
-            if not isinstance(features, dict):
-                features = {}
-            feature_rows = pd.DataFrame(
-                [
-                    {"Feature": "Decision risk", "Value": f"{float(latest.get('risk', 0)):.2f}%"},
-                    {"Feature": "Raw blended model score", "Value": f"{float(latest.get('raw_combined_risk', latest.get('risk', 0))):.2f}%"},
-                    {"Feature": "Decision label", "Value": str(latest.get("decision_label", "-"))},
-                    {"Feature": "Content concern", "Value": str(latest.get("content_level", "-"))},
-                    {"Feature": "Voice authenticity concern", "Value": str(latest.get("authenticity_level", "-"))},
-                    {"Feature": "Voice evidence risk", "Value": _risk_value_text(latest.get("voice_evidence_risk"))},
-                    {"Feature": "Raw voice AI model score", "Value": f"{float(latest.get('voice_risk', 0)):.2f}%"},
-                    {"Feature": "Transcript scam risk", "Value": f"{float(latest.get('transcript_risk', 0)):.2f}%"},
-                    {"Feature": "Behavioral evidence risk", "Value": _risk_value_text(latest.get("behavioral_evidence_risk"))},
-                    {"Feature": "Raw behavioral RF score", "Value": _risk_value_text(latest.get("behavioral_risk"))},
-                    {"Feature": "Voice reliability", "Value": _risk_value_text(latest.get("voice_reliability"))},
-                    {"Feature": "Behavioral reliability", "Value": _risk_value_text(latest.get("behavioral_reliability"))},
-                    {"Feature": "Content reliability", "Value": _risk_value_text(latest.get("content_reliability"))},
-                    {"Feature": "Effective authenticity risk", "Value": _risk_value_text(latest.get("effective_authenticity_risk"))},
-                    {"Feature": "Effective content risk", "Value": _risk_value_text(latest.get("effective_content_risk"))},
-                    {"Feature": "Speech quality", "Value": str(audio_quality.get("reason", "Usable speech-like audio")) if isinstance(audio_quality, dict) else "Unknown"},
-                    {"Feature": "Pitch variance", "Value": f"{float(features.get('pitch_variance', 0)):.2f} Hz"},
-                    {"Feature": "Spectral centroid", "Value": f"{float(features.get('spectral_centroid', 0)) / 1000:.2f} kHz"},
-                    {"Feature": "Dominant frequency", "Value": f"{float(features.get('dominant_frequency', 0)):.1f} Hz"},
-                    {"Feature": "Zero crossing rate", "Value": f"{float(features.get('zero_crossing_rate', 0)):.4f}"},
-                    {"Feature": "RMS energy", "Value": f"{float(features.get('rms_energy', 0)):.4f}"},
-                ]
-            )
-            st.dataframe(feature_rows, hide_index=True, use_container_width=True)
-
-            behavioral_rows = _behavioral_feature_rows(latest)
-            if behavioral_rows.empty:
-                st.caption("Behavioral feature values appear after the first processed chunk.")
+            figure = _voice_evidence_metric_figure(latest)
+            if figure is not None:
+                st.plotly_chart(figure, use_container_width=True)
+                st.caption(_voice_evidence_explanation(latest))
             else:
-                st.caption(str(latest.get("behavioral_engine", "Behavioral model unavailable")))
-                st.dataframe(behavioral_rows, hide_index=True, use_container_width=True)
+                st.caption("Voice evidence metrics appear after the first processed chunk.")
+
+    with behavioral_metrics_placeholder.container():
+        if not latest:
+            st.caption("Behavioral RF metrics appear after the first processed chunk.")
+        else:
+            figure = _behavioral_signal_metric_figure(latest)
+            if figure is not None:
+                st.plotly_chart(figure, use_container_width=True)
+                st.caption(_behavioral_signal_explanation(latest))
+            else:
+                st.caption("Behavioral RF metrics are unavailable for this chunk.")
 
 
 def _render_dashboard_section(
@@ -937,13 +1166,37 @@ def _render_dashboard_section(
     with display_a:
         render_section_header(transcript_heading, eyebrow="Analysis evidence")
         transcript_placeholder = st.empty()
-        render_section_header("MFCC feature heatmap", eyebrow="Audio pattern")
-        mfcc_placeholder = st.empty()
     with display_b:
         render_section_header(frequency_heading, eyebrow="Frequency analysis")
         frequency_placeholder = st.empty()
-        render_section_header("Latest acoustic features", eyebrow="Voice indicators")
-        features_placeholder = st.empty()
+
+    render_section_header(
+        "MFCC feature heatmap",
+        (
+            "Shows the acoustic fingerprint used by the voice model. This explains what the model heard, "
+            "not whether the clip is automatically fake."
+        ),
+        "Audio pattern",
+    )
+    mfcc_placeholder = st.empty()
+    render_section_header(
+        "Voice evidence metrics",
+        (
+            "Compares raw model probabilities with reliability-weighted evidence so short or sparse clips "
+            "do not overrule the final verdict."
+        ),
+        "Voice indicators",
+    )
+    acoustic_metrics_placeholder = st.empty()
+    render_section_header(
+        "Behavioral RF signal metrics",
+        (
+            "Normalizes duration, silence, energy, spectral shape, and rhythm into readable signals behind "
+            "the behavioral RF score."
+        ),
+        "Behavior indicators",
+    )
+    behavioral_metrics_placeholder = st.empty()
 
     _render_live_dashboard(
         results,
@@ -956,7 +1209,8 @@ def _render_dashboard_section(
         transcript_placeholder=transcript_placeholder,
         mfcc_placeholder=mfcc_placeholder,
         frequency_placeholder=frequency_placeholder,
-        features_placeholder=features_placeholder,
+        acoustic_metrics_placeholder=acoustic_metrics_placeholder,
+        behavioral_metrics_placeholder=behavioral_metrics_placeholder,
     )
 
 
