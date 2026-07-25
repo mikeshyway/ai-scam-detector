@@ -183,6 +183,37 @@ class LiveAudioAnalysisTests(unittest.TestCase):
         self.assertEqual(result["authenticity_level"], "Weak voice-authenticity evidence")
         self.assertIn("limited voice evidence", str(result["decision_label"]).lower())
 
+    def test_short_sparse_audio_downweights_voice_and_behavioral_rf_evidence(self) -> None:
+        result = decision_layer(
+            transcript="Interesting, interesting.",
+            voice_risk=99.9,
+            transcript_risk=30.9,
+            behavioral_risk=76.3,
+            speech_quality={
+                "usable_speech": True,
+                "duration_seconds": 2.904,
+                "speech_activity_ratio": 0.315,
+                "silence_ratio": 0.685,
+                "estimated_speech_rate": 2.066,
+                "rms": 0.0117,
+                "peak": 0.2166,
+                "warnings": [],
+            },
+            behavioral_features={"rms_energy_mean": 0.0117},
+            findings=[],
+            audio_engine="MFCC + SVM",
+            text_engine="Transcript DistilBERT",
+            behavioral_engine="Behavioral RF",
+        )
+
+        self.assertLess(float(result["voice_reliability"]), 15.0)
+        self.assertLess(float(result["behavioral_reliability"]), 5.0)
+        self.assertLess(float(result["voice_evidence_risk"]), 15.0)
+        self.assertLess(float(result["behavioral_evidence_risk"]), 5.0)
+        self.assertLess(float(result["effective_authenticity_risk"]), 15.0)
+        self.assertEqual(result["authenticity_level"], "Weak voice-authenticity evidence")
+        self.assertIn("clip is under 3 seconds", result["audio_evidence_notes"])
+
     def test_high_scam_transcript_still_drives_high_risk(self) -> None:
         result = analyse_live_chunk(
             self._speech_like_audio(),

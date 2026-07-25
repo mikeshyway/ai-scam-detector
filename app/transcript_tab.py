@@ -686,10 +686,15 @@ def _result_table(results: list[dict[str, object]]) -> pd.DataFrame:
                 "Decision": str(result.get("decision_label", result.get("risk_level", "-"))),
                 "Decision Risk": f"{float(result.get('risk', 0)):.1f}%",
                 "Raw Blend": f"{float(result.get('raw_combined_risk', result.get('risk', 0))):.1f}%",
-                "Voice": f"{float(result.get('voice_risk', 0)):.1f}%",
+                "Voice Evidence": _risk_value_text(result.get("voice_evidence_risk", result.get("voice_risk"))),
+                "Raw Voice AI": f"{float(result.get('voice_risk', 0)):.1f}%",
                 "Transcript": f"{float(result.get('transcript_risk', 0)):.1f}%",
-                "Behavioral": _risk_value_text(result.get("behavioral_risk")),
+                "Behavioral Evidence": _risk_value_text(
+                    result.get("behavioral_evidence_risk", result.get("behavioral_risk"))
+                ),
+                "Raw Behavioral RF": _risk_value_text(result.get("behavioral_risk")),
                 "Voice Reliability": _risk_value_text(result.get("voice_reliability")),
+                "Behavioral Reliability": _risk_value_text(result.get("behavioral_reliability")),
                 "Content Reliability": _risk_value_text(result.get("content_reliability")),
                 "Content Level": str(result.get("content_level", "-")),
                 "Voice Level": str(result.get("authenticity_level", "-")),
@@ -710,6 +715,15 @@ def _risk_value_text(value: object) -> str:
         return f"{float(value):.1f}%"
     except (TypeError, ValueError):
         return "Unavailable"
+
+
+def _risk_number(value: object, default: float = 0.0) -> float:
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _clip_decision_score(results: list[dict[str, object]], threshold: int) -> float:
@@ -769,7 +783,20 @@ def _render_live_dashboard(
         else 0.0
     )
     alert_count = sum(1 for item in results if float(item.get("risk", 0)) >= threshold)
-    voice_peak = max((float(item.get("voice_risk", 0)) for item in results), default=0.0)
+    voice_peak = max(
+        (
+            _risk_number(item.get("voice_evidence_risk", item.get("voice_risk")))
+            for item in results
+        ),
+        default=0.0,
+    )
+    behavioral_peak = max(
+        (
+            _risk_number(item.get("behavioral_evidence_risk", item.get("behavioral_risk")))
+            for item in results
+        ),
+        default=0.0,
+    )
     content_peak = max((float(item.get("transcript_risk", 0)) for item in results), default=0.0)
 
     with metrics_placeholder.container():
@@ -778,7 +805,8 @@ def _render_live_dashboard(
                 {"label": "Chunks Analysed", "value": len(results), "color": "#2563EB"},
                 {"label": "Current Decision", "value": f"{float(latest.get('risk', 0)):.0f}%" if latest else "0%", "color": "#D97706"},
                 {"label": "Content Risk", "value": f"{content_peak:.0f}%", "color": "#DC2626"},
-                {"label": "Voice AI Risk", "value": f"{voice_peak:.0f}%", "color": "#7C3AED"},
+                {"label": "Voice Evidence", "value": f"{voice_peak:.0f}%", "color": "#7C3AED"},
+                {"label": "Behavioral Evidence", "value": f"{behavioral_peak:.0f}%", "color": "#0E7490"},
                 {"label": "Peak Decision", "value": f"{peak:.0f}%", "color": "#DC2626"},
                 {"label": "Average Decision", "value": f"{average:.0f}%", "color": "#0891B2"},
                 {"label": "Alerts", "value": alert_count, "color": "#DC2626"},
@@ -863,12 +891,15 @@ def _render_live_dashboard(
                     {"Feature": "Decision label", "Value": str(latest.get("decision_label", "-"))},
                     {"Feature": "Content concern", "Value": str(latest.get("content_level", "-"))},
                     {"Feature": "Voice authenticity concern", "Value": str(latest.get("authenticity_level", "-"))},
-                    {"Feature": "Voice AI risk", "Value": f"{float(latest.get('voice_risk', 0)):.2f}%"},
+                    {"Feature": "Voice evidence risk", "Value": _risk_value_text(latest.get("voice_evidence_risk"))},
+                    {"Feature": "Raw voice AI model score", "Value": f"{float(latest.get('voice_risk', 0)):.2f}%"},
                     {"Feature": "Transcript scam risk", "Value": f"{float(latest.get('transcript_risk', 0)):.2f}%"},
-                    {"Feature": "Behavioral risk", "Value": _risk_value_text(latest.get("behavioral_risk"))},
+                    {"Feature": "Behavioral evidence risk", "Value": _risk_value_text(latest.get("behavioral_evidence_risk"))},
+                    {"Feature": "Raw behavioral RF score", "Value": _risk_value_text(latest.get("behavioral_risk"))},
                     {"Feature": "Voice reliability", "Value": _risk_value_text(latest.get("voice_reliability"))},
+                    {"Feature": "Behavioral reliability", "Value": _risk_value_text(latest.get("behavioral_reliability"))},
                     {"Feature": "Content reliability", "Value": _risk_value_text(latest.get("content_reliability"))},
-                    {"Feature": "Effective voice risk", "Value": _risk_value_text(latest.get("effective_authenticity_risk"))},
+                    {"Feature": "Effective authenticity risk", "Value": _risk_value_text(latest.get("effective_authenticity_risk"))},
                     {"Feature": "Effective content risk", "Value": _risk_value_text(latest.get("effective_content_risk"))},
                     {"Feature": "Speech quality", "Value": str(audio_quality.get("reason", "Usable speech-like audio")) if isinstance(audio_quality, dict) else "Unknown"},
                     {"Feature": "Pitch variance", "Value": f"{float(features.get('pitch_variance', 0)):.2f} Hz"},
@@ -957,7 +988,14 @@ def _render_recording_carousel(
     clip_number, clip_results = groups[current_index]
     peak = _clip_decision_score(clip_results, risk_threshold)
     peak_chunk = max(float(item.get("risk", 0)) for item in clip_results)
-    voice_peak = max(float(item.get("voice_risk", 0)) for item in clip_results)
+    voice_peak = max(
+        _risk_number(item.get("voice_evidence_risk", item.get("voice_risk")))
+        for item in clip_results
+    )
+    behavioral_peak = max(
+        _risk_number(item.get("behavioral_evidence_risk", item.get("behavioral_risk")))
+        for item in clip_results
+    )
     content_peak = max(float(item.get("transcript_risk", 0)) for item in clip_results)
     flags = sorted(
         {
@@ -973,7 +1011,8 @@ def _render_recording_carousel(
         (
             f"Recording {current_index + 1} of {len(groups)} | Clip {clip_number} | "
             f"Decision score {peak:.1f}% | Peak chunk {peak_chunk:.1f}% | "
-            f"Voice AI {voice_peak:.1f}% | Content {content_peak:.1f}%"
+            f"Voice evidence {voice_peak:.1f}% | Behavioral evidence {behavioral_peak:.1f}% | "
+            f"Content {content_peak:.1f}%"
         ),
         "Recording carousel",
     )
@@ -2009,7 +2048,20 @@ def _render_combined_input_summary(
     rows = []
     if use_uploaded_audio:
         upload_decision_peak = max((float(item.get("risk", 0)) for item in uploaded_audio_results), default=0.0)
-        upload_voice_peak = max((float(item.get("voice_risk", 0)) for item in uploaded_audio_results), default=0.0)
+        upload_voice_peak = max(
+            (
+                _risk_number(item.get("voice_evidence_risk", item.get("voice_risk")))
+                for item in uploaded_audio_results
+            ),
+            default=0.0,
+        )
+        upload_behavioral_peak = max(
+            (
+                _risk_number(item.get("behavioral_evidence_risk", item.get("behavioral_risk")))
+                for item in uploaded_audio_results
+            ),
+            default=0.0,
+        )
         rows.append(
             {
                 "Source": "Uploaded audio recording",
@@ -2017,7 +2069,8 @@ def _render_combined_input_summary(
                 "Usable text": f"{upload_words} word(s)" if uploaded_audio_text else "No transcript text yet",
                 "Audio chunks": upload_chunks,
                 "Peak decision risk": f"{upload_decision_peak:.1f}%" if uploaded_audio_results else "-",
-                "Peak voice AI risk": f"{upload_voice_peak:.1f}%" if uploaded_audio_results else "-",
+                "Peak voice evidence": f"{upload_voice_peak:.1f}%" if uploaded_audio_results else "-",
+                "Peak behavioral evidence": f"{upload_behavioral_peak:.1f}%" if uploaded_audio_results else "-",
             }
         )
     if use_text:
@@ -2028,7 +2081,8 @@ def _render_combined_input_summary(
                 "Usable text": f"{transcript_words} word(s)" if transcript_text.strip() else "No text yet",
                 "Audio chunks": "-",
                 "Peak decision risk": "-",
-                "Peak voice AI risk": "-",
+                "Peak voice evidence": "-",
+                "Peak behavioral evidence": "-",
             }
         )
 

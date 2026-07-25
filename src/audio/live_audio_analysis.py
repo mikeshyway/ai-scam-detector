@@ -663,6 +663,36 @@ def _authenticity_score(voice_risk: float, behavioral_risk: float | None) -> flo
     return _bounded_score((float(voice_risk) * 0.7) + (float(behavioral_risk) * 0.3))
 
 
+def _float_or_none(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _speech_quality_notes(speech_quality: dict[str, object]) -> list[str]:
+    notes: list[str] = []
+    duration = float(speech_quality.get("duration_seconds", 0.0))
+    speech_activity = float(speech_quality.get("speech_activity_ratio", 0.0))
+    silence_ratio = float(speech_quality.get("silence_ratio", 1.0))
+    rms = _float_or_none(speech_quality.get("rms"))
+
+    if duration < 3.0:
+        notes.append("clip is under 3 seconds")
+    elif duration < 6.0:
+        notes.append("clip is shorter than the preferred voice-authenticity window")
+    if silence_ratio > 0.65:
+        notes.append("silence ratio is high")
+    if speech_activity < 0.35:
+        notes.append("speech activity is sparse")
+    if rms is not None and rms < 0.015:
+        notes.append("recording energy is below the reliable comparison range")
+
+    return notes
+
+
 def _voice_reliability_score(
     speech_quality: dict[str, object],
     voice_risk: float,
@@ -677,6 +707,8 @@ def _voice_reliability_score(
     silence_ratio = float(speech_quality.get("silence_ratio", 1.0))
     speech_density = max(speech_activity, 1.0 - silence_ratio)
     speech_rate = float(speech_quality.get("estimated_speech_rate", 0.0))
+    rms = _float_or_none(speech_quality.get("rms"))
+    peak = _float_or_none(speech_quality.get("peak"))
 
     if duration >= 20.0:
         duration_points = 35.0
@@ -706,6 +738,28 @@ def _voice_reliability_score(
 
     engine_points = 10.0 if "MFCC + SVM" in audio_engine else 6.0
     warning_penalty = min(10.0, 5.0 * len(speech_quality.get("warnings", [])))
+    evidence_penalty = 0.0
+    if duration < 3.0:
+        evidence_penalty += 10.0
+    elif duration < 6.0:
+        evidence_penalty += 4.0
+    if silence_ratio > 0.65:
+        evidence_penalty += 15.0
+    elif silence_ratio > 0.55:
+        evidence_penalty += 6.0
+    if speech_activity < 0.35:
+        evidence_penalty += 12.0
+    elif speech_activity < 0.45:
+        evidence_penalty += 5.0
+    if rms is not None:
+        if rms < 0.006:
+            evidence_penalty += 18.0
+        elif rms < 0.015:
+            evidence_penalty += 12.0
+        elif rms < 0.025:
+            evidence_penalty += 5.0
+    if peak is not None and peak < 0.04:
+        evidence_penalty += 8.0
 
     return _bounded_score(
         duration_points
@@ -715,7 +769,98 @@ def _voice_reliability_score(
         + engine_points
         + 5.0
         - warning_penalty
+        - evidence_penalty
     )
+
+
+def _behavioral_reliability_score(
+    speech_quality: dict[str, object],
+    behavioral_features: dict[str, object] | None,
+    behavioral_risk: float | None,
+    behavioral_engine: str,
+) -> float:
+    if behavioral_risk is None or "unavailable" in behavioral_engine.casefold():
+        return 0.0
+    if not bool(speech_quality.get("usable_speech", True)):
+        return 0.0
+
+    feature_source = behavioral_features if isinstance(behavioral_features, dict) else {}
+    duration = float(speech_quality.get("duration_seconds", feature_source.get("duration_seconds", 0.0)))
+    speech_activity = float(speech_quality.get("speech_activity_ratio", feature_source.get("speech_activity_ratio", 0.0)))
+    silence_ratio = float(speech_quality.get("silence_ratio", feature_source.get("silence_ratio", 1.0)))
+    speech_density = max(speech_activity, 1.0 - silence_ratio)
+    speech_rate = float(speech_quality.get("estimated_speech_rate", feature_source.get("estimated_speech_rate", 0.0)))
+    rms = _float_or_none(speech_quality.get("rms"))
+    if rms is None:
+        rms = _float_or_none(feature_source.get("rms_energy_mean"))
+
+    if duration >= 20.0:
+        duration_points = 25.0
+    elif duration >= 10.0:
+        duration_points = 21.0
+    elif duration >= 6.0:
+        duration_points = 16.0
+    elif duration >= 3.0:
+        duration_points = 12.0
+    elif duration >= 1.5:
+        duration_points = 8.0
+    else:
+        duration_points = 0.0
+
+    density_points = _clamp_ratio((speech_density - 0.30) / 0.35) * 25.0
+    if 1.5 <= speech_rate <= 7.0:
+        rate_points = 10.0
+    elif 0.8 <= speech_rate <= 9.0:
+        rate_points = 6.0
+    elif speech_rate > 0.0:
+        rate_points = 3.0
+    else:
+        rate_points = 0.0
+
+    if rms is None:
+        energy_points = 8.0
+    elif rms >= 0.030:
+        energy_points = 15.0
+    elif rms >= 0.020:
+        energy_points = 10.0
+    elif rms >= 0.012:
+        energy_points = 5.0
+    else:
+        energy_points = 0.0
+
+    engine_points = 10.0 if "Behavioral RF" in behavioral_engine else 5.0
+    evidence_penalty = 0.0
+    if duration < 3.0:
+        evidence_penalty += 8.0
+    if silence_ratio > 0.65:
+        evidence_penalty += 18.0
+    elif silence_ratio > 0.55:
+        evidence_penalty += 8.0
+    if speech_activity < 0.35:
+        evidence_penalty += 15.0
+    elif speech_activity < 0.45:
+        evidence_penalty += 6.0
+    if rms is not None and rms < 0.015:
+        evidence_penalty += 12.0
+
+    return _bounded_score(
+        duration_points
+        + density_points
+        + rate_points
+        + energy_points
+        + engine_points
+        + 5.0
+        - evidence_penalty
+    )
+
+
+def _weighted_authenticity_evidence(
+    voice_evidence_risk: float,
+    behavioral_evidence_risk: float | None,
+) -> float:
+    if behavioral_evidence_risk is None:
+        return _bounded_score(voice_evidence_risk)
+    return _bounded_score((float(voice_evidence_risk) * 0.75) + (float(behavioral_evidence_risk) * 0.25))
 
 
 def _authenticity_level(
@@ -723,25 +868,47 @@ def _authenticity_level(
     behavioral_risk: float | None,
     speech_quality: dict[str, object],
     audio_engine: str,
+    behavioral_features: dict[str, object] | None = None,
+    behavioral_engine: str = "",
 ) -> str:
     if not bool(speech_quality.get("usable_speech", True)):
         return "Inconclusive"
 
-    score = _authenticity_score(voice_risk, behavioral_risk)
-    reliability = _voice_reliability_score(
+    raw_score = _authenticity_score(voice_risk, behavioral_risk)
+    voice_reliability = _voice_reliability_score(
         speech_quality,
         voice_risk,
         behavioral_risk,
         audio_engine,
     )
+    behavioral_reliability = _behavioral_reliability_score(
+        speech_quality,
+        behavioral_features,
+        behavioral_risk,
+        behavioral_engine,
+    )
+    voice_evidence_risk = _bounded_score(voice_risk * (voice_reliability / 100.0))
+    behavioral_evidence_risk = (
+        _bounded_score(float(behavioral_risk) * (behavioral_reliability / 100.0))
+        if behavioral_risk is not None
+        else None
+    )
+    effective_score = _weighted_authenticity_evidence(
+        voice_evidence_risk,
+        behavioral_evidence_risk,
+    )
 
-    if reliability < 35:
+    if voice_reliability < 35 and behavioral_reliability < 35:
+        if raw_score >= 85:
+            return "Weak voice-authenticity evidence"
         return "Inconclusive voice-authenticity evidence"
-    if score >= 90 and reliability >= 75:
+    if raw_score >= 90 and effective_score >= 70 and voice_reliability >= 70 and (
+        behavioral_risk is None or behavioral_reliability >= 55
+    ):
         return "High voice-authenticity concern"
-    if score >= 70 and reliability >= 60:
+    if raw_score >= 70 and effective_score >= 40 and max(voice_reliability, behavioral_reliability) >= 45:
         return "Needs voice-authenticity review"
-    if score >= 85:
+    if raw_score >= 85:
         return "Weak voice-authenticity evidence"
     return "Lower voice-authenticity concern"
 
@@ -756,6 +923,8 @@ def decision_layer(
     findings: list[dict[str, object]],
     audio_engine: str,
     text_engine: str,
+    behavioral_features: dict[str, object] | None = None,
+    behavioral_engine: str = "",
 ) -> dict[str, object]:
     """Convert model scores into reliability-weighted evidence decisions."""
 
@@ -779,15 +948,32 @@ def decision_layer(
         behavioral_risk,
         audio_engine,
     )
+    behavioral_reliability = _behavioral_reliability_score(
+        speech_quality,
+        behavioral_features,
+        behavioral_risk,
+        behavioral_engine,
+    )
     authenticity_level = _authenticity_level(
         voice_risk,
         behavioral_risk,
         speech_quality,
         audio_engine,
+        behavioral_features,
+        behavioral_engine,
     )
     usable_speech = bool(speech_quality.get("usable_speech", True))
     effective_content_risk = _bounded_score(transcript_risk * (content_reliability / 100.0))
-    effective_authenticity_risk = _bounded_score(authenticity_score * (voice_reliability / 100.0))
+    voice_evidence_risk = _bounded_score(voice_risk * (voice_reliability / 100.0))
+    behavioral_evidence_risk = (
+        _bounded_score(float(behavioral_risk) * (behavioral_reliability / 100.0))
+        if behavioral_risk is not None
+        else None
+    )
+    effective_authenticity_risk = _weighted_authenticity_evidence(
+        voice_evidence_risk,
+        behavioral_evidence_risk,
+    )
 
     if not usable_speech:
         decision_score = 0.0
@@ -870,8 +1056,12 @@ def decision_layer(
         "authenticity_score": round(authenticity_score, 2),
         "content_reliability": round(content_reliability, 2),
         "voice_reliability": round(voice_reliability, 2),
+        "behavioral_reliability": round(behavioral_reliability, 2),
+        "voice_evidence_risk": round(voice_evidence_risk, 2),
+        "behavioral_evidence_risk": round(behavioral_evidence_risk, 2) if behavioral_evidence_risk is not None else None,
         "effective_content_risk": round(effective_content_risk, 2),
         "effective_authenticity_risk": round(effective_authenticity_risk, 2),
+        "audio_evidence_notes": _speech_quality_notes(speech_quality),
         "evidence_policy": "Reliability-weighted content/authenticity evidence jury",
     }
 
@@ -938,19 +1128,36 @@ def analyse_live_chunk(
         findings=findings,
         audio_engine=audio_engine,
         text_engine=text_engine,
+        behavioral_features=behavioral_features,
+        behavioral_engine=behavioral_engine,
     )
     total_risk = float(decision["decision_score"])
     level = risk_level(total_risk)
-    behavioral_text = f"{behavioral_risk:.1f}% using {behavioral_engine}" if behavioral_risk is not None else behavioral_engine
+    behavioral_evidence = decision.get("behavioral_evidence_risk")
+    behavioral_text = (
+        f"{behavioral_risk:.1f}% raw using {behavioral_engine}; "
+        f"{float(behavioral_evidence):.1f}% evidence after "
+        f"{decision['behavioral_reliability']:.1f}% reliability"
+        if behavioral_risk is not None and behavioral_evidence is not None
+        else behavioral_engine
+    )
     quality_text = (
         str(speech_quality.get("reason", "Usable speech-like audio"))
         if not usable_speech
         else "usable speech-like audio"
     )
+    voice_evidence = float(decision.get("voice_evidence_risk", voice_risk))
     audio_text = (
-        f"Voice signal {voice_risk:.1f}% using {audio_engine}"
+        f"Voice signal {voice_risk:.1f}% raw using {audio_engine}; "
+        f"{voice_evidence:.1f}% evidence after {decision['voice_reliability']:.1f}% reliability"
         if usable_speech
         else f"Voice signal skipped by {audio_engine}: {quality_text}"
+    )
+    evidence_notes = decision.get("audio_evidence_notes", [])
+    evidence_note_text = (
+        "; ".join(str(note) for note in evidence_notes if str(note).strip())
+        if isinstance(evidence_notes, list)
+        else ""
     )
 
     return {
@@ -981,8 +1188,9 @@ def analyse_live_chunk(
             f"{audio_text}; "
             f"transcript signal {transcript_risk:.1f}% using {text_engine}. "
             f"Behavioral signal {behavioral_text}. "
-            f"Voice reliability {decision['voice_reliability']:.1f}%; "
+            f"Authenticity evidence {decision['effective_authenticity_risk']:.1f}%; "
             f"content reliability {decision['content_reliability']:.1f}%. "
+            f"Reliability limits: {evidence_note_text or 'none'}. "
             f"Detected phrase indicators: {', '.join(flags) if flags else 'none'}. "
             f"Raw blended model score for evidence: {raw_combined_risk:.1f}%."
         ),
