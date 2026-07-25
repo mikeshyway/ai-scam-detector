@@ -35,6 +35,7 @@ from src.text.explainability import (
     find_legitimate_indicators,
     find_suspicious_phrases,
     highlighted_html,
+    type_intention,
 )
 try:
     from src.reporting.history_db import record_history_item
@@ -1230,10 +1231,28 @@ def _baseline_signal_map(rows: list[dict[str, object]]) -> dict[str, dict[str, o
     return signals
 
 
-def _baseline_vocabulary_highlight_html(text: str, rows: list[dict[str, object]]) -> str:
-    signals = _baseline_signal_map(rows)
-    if not signals:
-        return html.escape(text).replace("\n", "<br>")
+def _indicator_token_map(items: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+    signals: dict[str, dict[str, object]] = {}
+    for item in items:
+        indicator = str(item.get("phrase", item.get("indicator", ""))).strip()
+        if not indicator:
+            continue
+        for part in indicator.split():
+            token = _clean_vocabulary_token(part)
+            if token and token not in signals:
+                signals[token] = item
+    return signals
+
+
+def _combined_transcript_evidence_html(
+    text: str,
+    findings: list[dict[str, object]],
+    legitimate_indicators: list[dict[str, object]],
+    vocabulary_rows: list[dict[str, object]],
+) -> str:
+    rule_signals = _indicator_token_map(findings)
+    context_signals = _indicator_token_map(legitimate_indicators)
+    vocabulary_signals = _baseline_signal_map(vocabulary_rows)
 
     html_tokens = []
     for token in re.split(r"(\s+)", text):
@@ -1245,26 +1264,61 @@ def _baseline_vocabulary_highlight_html(text: str, rows: list[dict[str, object]]
 
         clean = _clean_vocabulary_token(token)
         escaped = html.escape(token)
-        signal = signals.get(clean)
-        if not signal:
+        tooltip_parts = []
+        style_kind = ""
+
+        if clean in rule_signals:
+            signal = rule_signals[clean]
+            style_kind = "rule"
+            tooltip_parts.append(
+                "Rule indicator: "
+                f"{signal.get('category', 'Warning')} - "
+                f"{signal.get('specific_tactic', signal.get('reason', ''))}"
+            )
+
+        if clean in context_signals:
+            signal = context_signals[clean]
+            if not style_kind:
+                style_kind = "context"
+            tooltip_parts.append(
+                "Lower-risk context: "
+                f"{signal.get('category', 'Context')} - {signal.get('reason', '')}"
+            )
+
+        if clean in vocabulary_signals:
+            signal = vocabulary_signals[clean]
+            direction = str(signal.get("direction", "Vocabulary signal"))
+            if not style_kind:
+                style_kind = "vocabulary_suspicious" if direction.casefold().startswith("suspicious") else "vocabulary_legitimate"
+            tooltip_parts.append(
+                f"{signal.get('model')}: {direction}, "
+                f"strength {float(signal.get('strength', 0.0)):.4f}"
+            )
+
+        if not tooltip_parts:
             html_tokens.append(escaped)
             continue
 
-        direction = str(signal.get("direction", "Vocabulary signal"))
-        is_suspicious = direction.casefold().startswith("suspicious")
+        if style_kind == "rule":
+            background = "rgba(239,68,68,0.24)"
+            border = "#EF4444"
+        elif style_kind in {"context", "vocabulary_legitimate"}:
+            background = "rgba(34,197,94,0.18)"
+            border = "#22C55E"
+        else:
+            background = "rgba(245,158,11,0.24)"
+            border = "#F59E0B"
+
         style = ";".join(
             [
-                "background:rgba(245,158,11,0.24)" if is_suspicious else "background:rgba(34,197,94,0.18)",
-                "border-bottom:2px solid #F59E0B" if is_suspicious else "border-bottom:2px solid #22C55E",
+                f"background:{background}",
+                f"border-bottom:2px solid {border}",
                 "padding:1px 4px",
                 "border-radius:4px",
                 "line-height:1.75",
             ]
         )
-        title = html.escape(
-            f"{signal.get('model')}: {direction}, strength {float(signal.get('strength', 0.0)):.4f}",
-            quote=True,
-        )
+        title = html.escape(" | ".join(tooltip_parts), quote=True)
         html_tokens.append(f'<span title="{title}" style="{style}">{escaped}</span>')
 
     return (
@@ -1273,6 +1327,131 @@ def _baseline_vocabulary_highlight_html(text: str, rows: list[dict[str, object]]
         'background:rgba(15,23,42,0.32);color:var(--text-secondary);">'
         f'{"".join(html_tokens)}</div>'
     )
+
+
+def _baseline_vocabulary_rows(root: Path, text: str, *, top_n: int = 6) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for model_key in ("svm", "nb"):
+        classifier = _load_transcript_classifier_safe(str(root), model_key)
+        if classifier is None:
+            continue
+        rows.extend(
+            _baseline_vocabulary_terms(
+                text,
+                classifier,
+                _transcript_model_label(root, model_key),
+                top_n=top_n,
+            )
+        )
+    return rows
+
+
+def _baseline_impact_levels(rows: list[dict[str, object]]) -> list[str]:
+    if not rows:
+        return []
+
+    scores = []
+    for row in rows:
+        try:
+            scores.append(abs(float(row.get("Strength", 0.0))))
+        except Exception:
+            scores.append(0.0)
+
+    if not any(scores):
+        return ["Low" for _row in rows]
+
+    ordered_indices = sorted(range(len(scores)), key=lambda index: scores[index], reverse=True)
+    high_count = max(1, (len(scores) + 4) // 5)
+    medium_end = max(high_count, (len(scores) + 1) // 2)
+    labels = ["Low" for _row in rows]
+
+    for rank, index in enumerate(ordered_indices):
+        if scores[index] == 0:
+            labels[index] = "Low"
+        elif rank < high_count:
+            labels[index] = "High"
+        elif rank < medium_end:
+            labels[index] = "Medium"
+
+    return labels
+
+
+def _dedupe_evidence_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    deduped = []
+    seen = set()
+    for row in rows:
+        indicator = str(row.get("Indicator", "")).strip().casefold()
+        row_type = str(row.get("Type", "")).strip().casefold()
+        if not indicator:
+            continue
+        key = (indicator, row_type)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
+
+
+def _transcript_evidence_rows(
+    findings: list[dict[str, object]],
+    legitimate_indicators: list[dict[str, object]],
+    vocabulary_rows: list[dict[str, object]],
+) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+
+    for item in findings:
+        indicator = str(item.get("phrase", "")).strip()
+        if not indicator:
+            continue
+        category = str(item.get("category", "Rule indicator"))
+        rows.append(
+            {
+                "Indicator": indicator,
+                "Type": category,
+                "Model Weight": "-",
+                "Impact": "High",
+                "Intention": item.get("intention", type_intention(category)),
+            }
+        )
+
+    for item in legitimate_indicators:
+        indicator = str(item.get("indicator", item.get("phrase", ""))).strip()
+        if not indicator:
+            continue
+        category = str(item.get("category", item.get("Type", "Legitimate context")))
+        rows.append(
+            {
+                "Indicator": indicator,
+                "Type": category,
+                "Model Weight": "-",
+                "Impact": "Context",
+                "Intention": item.get("intention", type_intention(category)),
+            }
+        )
+
+    impact_levels = _baseline_impact_levels(vocabulary_rows)
+    for index, item in enumerate(vocabulary_rows):
+        indicator = str(item.get("Term", "")).strip()
+        if not indicator:
+            continue
+        direction = str(item.get("Direction", "Vocabulary signal"))
+        model_name = str(item.get("Model", "Baseline model"))
+        try:
+            strength = float(item.get("Strength", 0.0))
+        except Exception:
+            strength = 0.0
+        signed_weight = strength if direction.casefold().startswith("suspicious") else -strength
+        rows.append(
+            {
+                "Indicator": indicator,
+                "Type": f"{model_name}: {direction}",
+                "Model Weight": round(signed_weight, 4),
+                "Impact": impact_levels[index] if index < len(impact_levels) else "Low",
+                "Intention": "Shows which words pushed a transparent baseline model up or down; supporting evidence only.",
+            }
+        )
+
+    return pd.DataFrame(_dedupe_evidence_rows(rows))
 
 
 def _transcript_metric_values(root: Path, model_key: str) -> dict[str, object]:
@@ -1752,70 +1931,42 @@ def _transcript_result_summary(
     return educational_summary(label, confidence, findings)
 
 
-def _render_rule_evidence(result: dict[str, object], text: str, findings: list[dict[str, object]]) -> None:
-    risk_score = _risk_score(result)
+def _render_transcript_evidence_breakdown(root: Path, text: str, findings: list[dict[str, object]]) -> None:
     legitimate_indicators = find_legitimate_indicators(text)
-    render_section_header("Rule evidence", eyebrow="Explainability")
-    if findings:
-        render_content_card_open("red")
-        st.markdown(highlighted_html(text, findings), unsafe_allow_html=True)
-        findings_df = pd.DataFrame(findings)
-        preferred_columns = [
-            column
-            for column in ["phrase", "category", "label", "specific_tactic", "reason", "intention"]
-            if column in findings_df.columns
-        ]
-        st.dataframe(
-            findings_df[preferred_columns] if preferred_columns else findings_df,
-            hide_index=True,
-            use_container_width=True,
-        )
-        render_content_card_close()
-        if legitimate_indicators:
-            render_content_card_open("green")
-            st.caption("Supporting lower-risk context found in the same transcript.")
-            legitimate_df = pd.DataFrame(legitimate_indicators)
-            preferred_legitimate_columns = [
-                column
-                for column in ["indicator", "category", "intention", "reason"]
-                if column in legitimate_df.columns
-            ]
-            st.dataframe(
-                legitimate_df[preferred_legitimate_columns]
-                if preferred_legitimate_columns
-                else legitimate_df,
-                hide_index=True,
-                use_container_width=True,
-            )
-            render_content_card_close()
-        return
-
-    rows = [
-        {
-            "Evidence Layer": "Direct scam phrase rules",
-            "Result": "No matched rule",
-            "Student Meaning": "No explicit OTP, payment, threat, secrecy, impersonation, or urgent-action phrase was found.",
-            "How To Read It": (
-                "Supports lower risk, but does not override model evidence."
-                if risk_score < 40
-                else "Treat as a model-only warning and verify with the comparison table."
-            ),
-        }
-    ]
-    for indicator in legitimate_indicators:
-        rows.append(
-            {
-                "Evidence Layer": "Lower-risk context indicator",
-                "Result": str(indicator.get("indicator", "")),
-                "Student Meaning": str(indicator.get("intention", "")),
-                "How To Read It": "Supports lower risk, but still verify unexpected requests.",
-            }
-        )
-    tone = st.success if risk_score < 40 else st.warning if _is_suspicious_prediction(result.get("label_name", "")) else st.info
-    tone(
-        "No explicit scam-rule pattern matched. This is useful evidence: the warning, if any, is coming from model similarity rather than a direct scam phrase."
+    vocabulary_rows = _baseline_vocabulary_rows(root, text)
+    evidence_df = _transcript_evidence_rows(
+        findings,
+        legitimate_indicators,
+        vocabulary_rows,
     )
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+    render_section_header(
+        "Transcript evidence breakdown",
+        "Review direct rule matches, lower-risk context, and baseline vocabulary signals in one table.",
+        "Explainability",
+    )
+    card_accent = "red" if findings else "violet" if vocabulary_rows else "green"
+    render_content_card_open(card_accent)
+    st.markdown(
+        _combined_transcript_evidence_html(
+            text,
+            findings,
+            legitimate_indicators,
+            vocabulary_rows,
+        ),
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Red highlights are direct rule matches, amber highlights are suspicious baseline vocabulary, and green highlights are lower-risk context."
+    )
+    if evidence_df.empty:
+        st.info("No direct rules, lower-risk context indicators, or baseline vocabulary signals were found.")
+    else:
+        st.dataframe(evidence_df, hide_index=True, use_container_width=True)
+    st.caption(
+        "Rule indicators are direct pattern evidence. Baseline vocabulary rows are supporting SVM/Naive Bayes signals and do not override the final verdict."
+    )
+    render_content_card_close()
 
 
 def _render_model_agreement_evidence(result: dict[str, object]) -> None:
@@ -1832,41 +1983,6 @@ def _render_model_agreement_evidence(result: dict[str, object]) -> None:
     st.dataframe(pd.DataFrame(model_evidence), hide_index=True, use_container_width=True)
     st.caption(
         "DistilBERT is the recommended model from current training metrics. SVM and Naive Bayes are kept as transparent baselines."
-    )
-    render_content_card_close()
-
-
-def _render_baseline_vocabulary_evidence(root: Path, text: str) -> None:
-    rows: list[dict[str, object]] = []
-    for model_key in ("svm", "nb"):
-        classifier = _load_transcript_classifier_safe(str(root), model_key)
-        if classifier is None:
-            continue
-        rows.extend(
-            _baseline_vocabulary_terms(
-                text,
-                classifier,
-                _transcript_model_label(root, model_key),
-                top_n=6,
-            )
-        )
-
-    if not rows:
-        return
-
-    render_section_header(
-        "Baseline vocabulary signals",
-        "Transparent SVM and Naive Bayes terms that pushed the baseline models up or down.",
-        "Vocabulary evidence",
-    )
-    render_content_card_open("green")
-    st.markdown(_baseline_vocabulary_highlight_html(text, rows), unsafe_allow_html=True)
-    st.caption(
-        "Highlighted words come from transparent baseline models: amber leans suspicious, green leans legitimate. Hover a highlight for model and strength."
-    )
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-    st.caption(
-        "These are not DistilBERT word weights. They are supporting vocabulary signals from the transparent baseline models."
     )
     render_content_card_close()
 
@@ -1893,9 +2009,8 @@ def _display_result(
     st.plotly_chart(_confidence_chart(result["probabilities"]), use_container_width=True)
     render_content_card_close()
 
-    _render_rule_evidence(result, text, findings)
+    _render_transcript_evidence_breakdown(root, text, findings)
     _render_model_agreement_evidence(result)
-    _render_baseline_vocabulary_evidence(root, text)
 
 
 
