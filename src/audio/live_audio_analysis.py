@@ -596,6 +596,286 @@ def combined_risk(
     return max(0.0, min(100.0, score))
 
 
+def _bounded_score(value: float) -> float:
+    return max(0.0, min(100.0, float(value)))
+
+
+def _clamp_ratio(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def _word_count(text: str) -> int:
+    return len([part for part in text.split() if part.strip()])
+
+
+def _content_reliability_score(
+    transcript: str,
+    transcript_risk: float,
+    findings: list[dict[str, object]],
+    text_engine: str,
+) -> float:
+    words = _word_count(transcript)
+    if words == 0:
+        return 0.0
+
+    word_factor = _clamp_ratio(words / 35.0)
+    rule_factor = _clamp_ratio(len(findings) / 3.0)
+    certainty_factor = _clamp_ratio(abs(float(transcript_risk) - 50.0) / 50.0)
+    engine_factor = 0.75 if "rule" in text_engine.casefold() else 1.0
+
+    score = (
+        (word_factor * 45.0)
+        + (rule_factor * 25.0)
+        + (certainty_factor * 15.0)
+        + (engine_factor * 15.0)
+    )
+    return _bounded_score(score)
+
+
+def _content_level(
+    transcript: str,
+    transcript_risk: float,
+    findings: list[dict[str, object]],
+    text_engine: str,
+) -> str:
+    if not transcript.strip():
+        return "Inconclusive"
+    reliability = _content_reliability_score(
+        transcript,
+        transcript_risk,
+        findings,
+        text_engine,
+    )
+    if (transcript_risk >= 70 and reliability >= 45) or len(findings) >= 3:
+        return "High scam-content concern"
+    if findings:
+        return "Needs scam-content review"
+    if transcript_risk >= 55 and reliability >= 35:
+        return "Needs scam-content review"
+    if reliability < 35:
+        return "Limited scam-content evidence"
+    return "Lower scam-content concern"
+
+
+def _authenticity_score(voice_risk: float, behavioral_risk: float | None) -> float:
+    if behavioral_risk is None:
+        return _bounded_score(voice_risk)
+    return _bounded_score((float(voice_risk) * 0.7) + (float(behavioral_risk) * 0.3))
+
+
+def _voice_reliability_score(
+    speech_quality: dict[str, object],
+    voice_risk: float,
+    behavioral_risk: float | None,
+    audio_engine: str,
+) -> float:
+    if not bool(speech_quality.get("usable_speech", True)):
+        return 0.0
+
+    duration = float(speech_quality.get("duration_seconds", 0.0))
+    speech_activity = float(speech_quality.get("speech_activity_ratio", 0.0))
+    silence_ratio = float(speech_quality.get("silence_ratio", 1.0))
+    speech_density = max(speech_activity, 1.0 - silence_ratio)
+    speech_rate = float(speech_quality.get("estimated_speech_rate", 0.0))
+
+    if duration >= 20.0:
+        duration_points = 35.0
+    elif duration >= 10.0:
+        duration_points = 28.0
+    elif duration >= 6.0:
+        duration_points = 22.0
+    elif duration >= 3.0:
+        duration_points = 16.0
+    elif duration >= 1.5:
+        duration_points = 8.0
+    else:
+        duration_points = 0.0
+
+    density_points = _clamp_ratio((speech_density - 0.08) / 0.42) * 25.0
+    if 1.0 <= speech_rate <= 8.0:
+        rate_points = 10.0
+    elif speech_rate > 0.0:
+        rate_points = 5.0
+    else:
+        rate_points = 0.0
+
+    if behavioral_risk is None:
+        agreement_points = 6.0
+    else:
+        agreement_points = _clamp_ratio(1.0 - abs(float(voice_risk) - float(behavioral_risk)) / 100.0) * 15.0
+
+    engine_points = 10.0 if "MFCC + SVM" in audio_engine else 6.0
+    warning_penalty = min(10.0, 5.0 * len(speech_quality.get("warnings", [])))
+
+    return _bounded_score(
+        duration_points
+        + density_points
+        + rate_points
+        + agreement_points
+        + engine_points
+        + 5.0
+        - warning_penalty
+    )
+
+
+def _authenticity_level(
+    voice_risk: float,
+    behavioral_risk: float | None,
+    speech_quality: dict[str, object],
+    audio_engine: str,
+) -> str:
+    if not bool(speech_quality.get("usable_speech", True)):
+        return "Inconclusive"
+
+    score = _authenticity_score(voice_risk, behavioral_risk)
+    reliability = _voice_reliability_score(
+        speech_quality,
+        voice_risk,
+        behavioral_risk,
+        audio_engine,
+    )
+
+    if reliability < 35:
+        return "Inconclusive voice-authenticity evidence"
+    if score >= 90 and reliability >= 75:
+        return "High voice-authenticity concern"
+    if score >= 70 and reliability >= 60:
+        return "Needs voice-authenticity review"
+    if score >= 85:
+        return "Weak voice-authenticity evidence"
+    return "Lower voice-authenticity concern"
+
+
+def decision_layer(
+    *,
+    transcript: str,
+    voice_risk: float,
+    transcript_risk: float,
+    behavioral_risk: float | None,
+    speech_quality: dict[str, object],
+    findings: list[dict[str, object]],
+    audio_engine: str,
+    text_engine: str,
+) -> dict[str, object]:
+    """Convert model scores into reliability-weighted evidence decisions."""
+
+    has_transcript = bool(transcript.strip())
+    content_reliability = _content_reliability_score(
+        transcript,
+        transcript_risk,
+        findings,
+        text_engine,
+    )
+    content_level = _content_level(
+        transcript,
+        transcript_risk,
+        findings,
+        text_engine,
+    )
+    authenticity_score = _authenticity_score(voice_risk, behavioral_risk)
+    voice_reliability = _voice_reliability_score(
+        speech_quality,
+        voice_risk,
+        behavioral_risk,
+        audio_engine,
+    )
+    authenticity_level = _authenticity_level(
+        voice_risk,
+        behavioral_risk,
+        speech_quality,
+        audio_engine,
+    )
+    usable_speech = bool(speech_quality.get("usable_speech", True))
+    effective_content_risk = _bounded_score(transcript_risk * (content_reliability / 100.0))
+    effective_authenticity_risk = _bounded_score(authenticity_score * (voice_reliability / 100.0))
+
+    if not usable_speech:
+        decision_score = 0.0
+        label = "Inconclusive audio"
+        summary = "Audio quality was not sufficient for a voice-authenticity or transcript-content verdict."
+        action = "Use a clearer recording or a written transcript before acting."
+    elif not has_transcript:
+        if authenticity_level == "High voice-authenticity concern":
+            decision_score = min(65.0, max(50.0, effective_authenticity_risk * 0.65))
+            label = "Authenticity concern - transcript unavailable"
+            summary = "Voice evidence is strong enough for authenticity review, but scam intent cannot be judged without transcript content."
+            action = "Verify through an official channel before trusting the caller."
+        elif authenticity_level == "Needs voice-authenticity review":
+            decision_score = min(52.0, max(38.0, effective_authenticity_risk * 0.62))
+            label = "Voice authenticity review - transcript unavailable"
+            summary = "Voice evidence needs review, but there is no transcript evidence of threat, payment, or credential pressure."
+            action = "Review the transcript or request written confirmation before acting."
+        elif authenticity_level in {"Weak voice-authenticity evidence", "Inconclusive voice-authenticity evidence"}:
+            decision_score = min(35.0, max(20.0, effective_authenticity_risk * 0.55))
+            label = "Audio evidence limited - transcript unavailable"
+            summary = "The raw voice score is not reliable enough by itself because the available speech evidence is limited."
+            action = "Use a longer recording or transcript before making a deepfake judgement."
+        else:
+            decision_score = 20.0
+            label = "Audio-only lower concern"
+            summary = "No transcript was available, and the voice-authenticity signal did not reach review level."
+            action = "Continue cautious review if the request was unexpected."
+    elif content_level == "High scam-content concern":
+        if authenticity_level == "High voice-authenticity concern":
+            decision_score = 90.0
+            label = "High scam and voice-authenticity concern"
+            summary = "Transcript content shows scam pressure, and the voice signal also raises synthetic-voice concern."
+        else:
+            decision_score = 82.0
+            label = "High scam-content concern"
+            summary = "Transcript content shows strong scam indicators; voice authenticity is supporting context, not the main reason."
+        action = "Pause, do not share secrets or money, and verify through an official channel."
+    elif content_level == "Needs scam-content review":
+        if authenticity_level == "High voice-authenticity concern":
+            decision_score = 68.0
+            label = "Scam-content and authenticity review"
+            summary = "Some transcript indicators need review and the voice also raises authenticity concern."
+        elif authenticity_level == "Needs voice-authenticity review":
+            decision_score = 58.0
+            label = "Scam-content and voice review"
+            summary = "Transcript content and voice authenticity both need review, but neither is strong enough alone for a high-risk verdict."
+        else:
+            decision_score = 52.0
+            label = "Scam-content review"
+            summary = "Transcript content has review-level indicators, but not enough for a high-risk verdict."
+        action = "Ask for confirmation outside the call before responding."
+    elif authenticity_level == "High voice-authenticity concern":
+        decision_score = min(58.0, max(45.0, effective_authenticity_risk * 0.55))
+        label = "Voice authenticity concern - content lower risk"
+        summary = "The voice signal raises synthetic-voice concern, but the transcript content does not show scam pressure."
+        action = "Verify identity, but do not treat the content as a proven scam from voice alone."
+    elif authenticity_level == "Needs voice-authenticity review":
+        decision_score = min(45.0, max(35.0, effective_authenticity_risk * 0.55))
+        label = "Voice authenticity review - content lower risk"
+        summary = "The wording appears lower risk, while the voice signal should be reviewed separately."
+        action = "Use normal verification if the request was unexpected."
+    elif authenticity_level in {"Weak voice-authenticity evidence", "Inconclusive voice-authenticity evidence"}:
+        decision_score = min(35.0, max(20.0, effective_authenticity_risk * 0.55))
+        label = "Lower threat - limited voice evidence"
+        summary = "Transcript content is not scam-like, and the high raw voice score is not reliable enough to drive the verdict."
+        action = "Use a longer recording if voice cloning is the concern."
+    else:
+        decision_score = 20.0
+        label = "Lower concern"
+        summary = "Transcript content and voice-authenticity evidence are both lower concern."
+        action = "Continue cautious review for unexpected requests."
+
+    return {
+        "decision_score": round(_bounded_score(decision_score), 2),
+        "decision_label": label,
+        "decision_summary": summary,
+        "action_recommendation": action,
+        "content_level": content_level,
+        "authenticity_level": authenticity_level,
+        "authenticity_score": round(authenticity_score, 2),
+        "content_reliability": round(content_reliability, 2),
+        "voice_reliability": round(voice_reliability, 2),
+        "effective_content_risk": round(effective_content_risk, 2),
+        "effective_authenticity_risk": round(effective_authenticity_risk, 2),
+        "evidence_policy": "Reliability-weighted content/authenticity evidence jury",
+    }
+
+
 def risk_level(score: float) -> str:
     if score >= 70:
         return "High risk"
@@ -642,14 +922,25 @@ def analyse_live_chunk(
         transcript,
         text_classifier,
     )
-    total_risk = combined_risk(
+    raw_combined_risk = combined_risk(
         voice_risk=voice_risk,
         transcript_risk=transcript_risk,
         has_transcript=bool(transcript.strip()),
         behavioral_risk=behavioral_risk,
     )
-    level = risk_level(total_risk)
     flags = [str(item.get("phrase", "")) for item in findings if item.get("phrase")]
+    decision = decision_layer(
+        transcript=transcript.strip(),
+        voice_risk=voice_risk,
+        transcript_risk=transcript_risk,
+        behavioral_risk=behavioral_risk,
+        speech_quality=speech_quality,
+        findings=findings,
+        audio_engine=audio_engine,
+        text_engine=text_engine,
+    )
+    total_risk = float(decision["decision_score"])
+    level = risk_level(total_risk)
     behavioral_text = f"{behavioral_risk:.1f}% using {behavioral_engine}" if behavioral_risk is not None else behavioral_engine
     quality_text = (
         str(speech_quality.get("reason", "Usable speech-like audio"))
@@ -667,6 +958,7 @@ def analyse_live_chunk(
         "transcript": transcript.strip(),
         "risk": round(total_risk, 2),
         "risk_level": level,
+        "raw_combined_risk": round(raw_combined_risk, 2),
         "voice_risk": round(voice_risk, 2),
         "voice_label": voice_label,
         "transcript_risk": round(transcript_risk, 2),
@@ -682,12 +974,17 @@ def analyse_live_chunk(
         "behavioral_features": behavioral_features,
         "audio_quality": speech_quality,
         "quality_warnings": list(speech_quality.get("warnings", [])),
+        **decision,
         "explanation": (
-            f"Combined educational risk {total_risk:.1f}%. "
+            f"{decision['decision_label']} ({total_risk:.1f}%). "
+            f"{decision['decision_summary']} "
             f"{audio_text}; "
             f"transcript signal {transcript_risk:.1f}% using {text_engine}. "
             f"Behavioral signal {behavioral_text}. "
-            f"Detected phrase indicators: {', '.join(flags) if flags else 'none'}."
+            f"Voice reliability {decision['voice_reliability']:.1f}%; "
+            f"content reliability {decision['content_reliability']:.1f}%. "
+            f"Detected phrase indicators: {', '.join(flags) if flags else 'none'}. "
+            f"Raw blended model score for evidence: {raw_combined_risk:.1f}%."
         ),
     }
 
@@ -865,6 +1162,7 @@ __all__ = [
     "TARGET_SAMPLE_RATE",
     "assess_speech_quality",
     "analyse_live_chunk",
+    "decision_layer",
     "extract_behavioral_features",
     "extract_live_features",
     "transcribe_with_whisper_details",

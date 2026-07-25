@@ -32,6 +32,7 @@ from app.ui_components import (
 )
 from src.text.explainability import (
     educational_summary,
+    find_legitimate_indicators,
     find_suspicious_phrases,
     highlighted_html,
 )
@@ -578,7 +579,7 @@ def _timeline_figure(results: list[dict[str, object]], threshold: int) -> go.Fig
         height=285,
         margin=dict(l=10, r=10, t=20, b=35),
         xaxis_title="Processed chunk",
-        yaxis_title="Combined risk (%)",
+        yaxis_title="Decision risk (%)",
         yaxis=dict(range=[0, 100]),
     )
     return apply_chart_theme(fig)
@@ -681,10 +682,16 @@ def _result_table(results: list[dict[str, object]]) -> pd.DataFrame:
                 "Clip": int(result.get("clip", 1)),
                 "Chunk": int(result.get("clip_chunk", 1)),
                 "Time": result.get("time", "-"),
-                "Risk": f"{float(result.get('risk', 0)):.1f}%",
+                "Decision": str(result.get("decision_label", result.get("risk_level", "-"))),
+                "Decision Risk": f"{float(result.get('risk', 0)):.1f}%",
+                "Raw Blend": f"{float(result.get('raw_combined_risk', result.get('risk', 0))):.1f}%",
                 "Voice": f"{float(result.get('voice_risk', 0)):.1f}%",
                 "Transcript": f"{float(result.get('transcript_risk', 0)):.1f}%",
                 "Behavioral": _risk_value_text(result.get("behavioral_risk")),
+                "Voice Reliability": _risk_value_text(result.get("voice_reliability")),
+                "Content Reliability": _risk_value_text(result.get("content_reliability")),
+                "Content Level": str(result.get("content_level", "-")),
+                "Voice Level": str(result.get("authenticity_level", "-")),
                 "Speech quality": quality.get("reason", "Usable speech-like audio"),
                 "Whisper": result.get("transcription_status", "Not transcribed"),
                 "Language check": detected_language,
@@ -702,6 +709,22 @@ def _risk_value_text(value: object) -> str:
         return f"{float(value):.1f}%"
     except (TypeError, ValueError):
         return "Unavailable"
+
+
+def _clip_decision_score(results: list[dict[str, object]], threshold: int) -> float:
+    scores = [float(item.get("risk", 0)) for item in results]
+    if not scores:
+        return 0.0
+
+    peak = max(scores)
+    if peak < threshold or len(scores) < 2:
+        return peak
+
+    high_count = sum(1 for value in scores if value >= threshold)
+    if high_count >= 2 or (high_count / len(scores)) >= 0.5:
+        return peak
+
+    return min(65.0, max(float(np.median(scores)), 55.0))
 
 
 def _behavioral_feature_rows(result: dict[str, object]) -> pd.DataFrame:
@@ -745,15 +768,18 @@ def _render_live_dashboard(
         else 0.0
     )
     alert_count = sum(1 for item in results if float(item.get("risk", 0)) >= threshold)
+    voice_peak = max((float(item.get("voice_risk", 0)) for item in results), default=0.0)
+    content_peak = max((float(item.get("transcript_risk", 0)) for item in results), default=0.0)
 
     with metrics_placeholder.container():
         render_metric_row(
             [
                 {"label": "Chunks Analysed", "value": len(results), "color": "#2563EB"},
-                {"label": "Current Risk", "value": f"{float(latest.get('risk', 0)):.0f}%" if latest else "0%", "color": "#D97706"},
-                {"label": "Behavioral Risk", "value": _risk_value_text(latest.get("behavioral_risk")) if latest else "Unavailable", "color": "#7C3AED"},
-                {"label": "Peak Risk", "value": f"{peak:.0f}%", "color": "#DC2626"},
-                {"label": "Average Risk", "value": f"{average:.0f}%", "color": "#0891B2"},
+                {"label": "Current Decision", "value": f"{float(latest.get('risk', 0)):.0f}%" if latest else "0%", "color": "#D97706"},
+                {"label": "Content Risk", "value": f"{content_peak:.0f}%", "color": "#DC2626"},
+                {"label": "Voice AI Risk", "value": f"{voice_peak:.0f}%", "color": "#7C3AED"},
+                {"label": "Peak Decision", "value": f"{peak:.0f}%", "color": "#DC2626"},
+                {"label": "Average Decision", "value": f"{average:.0f}%", "color": "#0891B2"},
                 {"label": "Alerts", "value": alert_count, "color": "#DC2626"},
             ]
         )
@@ -761,13 +787,13 @@ def _render_live_dashboard(
     with result_placeholder.container():
         if latest:
             render_result_card(
-                latest_title.format(chunk=latest.get("clip_chunk", 1)),
+                str(latest.get("decision_label") or latest_title.format(chunk=latest.get("clip_chunk", 1))),
                 float(latest.get("risk", 0)),
                 str(latest.get("explanation", "")),
             )
             if float(latest.get("risk", 0)) >= threshold:
                 st.error(
-                    f"Alert threshold reached. This chunk scored {float(latest.get('risk', 0)):.1f}% combined risk."
+                    f"Alert threshold reached. This chunk scored {float(latest.get('risk', 0)):.1f}% decision risk."
                 )
             quality_messages = [
                 str(message)
@@ -831,10 +857,18 @@ def _render_live_dashboard(
                 features = {}
             feature_rows = pd.DataFrame(
                 [
-                    {"Feature": "Combined risk", "Value": f"{float(latest.get('risk', 0)):.2f}%"},
+                    {"Feature": "Decision risk", "Value": f"{float(latest.get('risk', 0)):.2f}%"},
+                    {"Feature": "Raw blended model score", "Value": f"{float(latest.get('raw_combined_risk', latest.get('risk', 0))):.2f}%"},
+                    {"Feature": "Decision label", "Value": str(latest.get("decision_label", "-"))},
+                    {"Feature": "Content concern", "Value": str(latest.get("content_level", "-"))},
+                    {"Feature": "Voice authenticity concern", "Value": str(latest.get("authenticity_level", "-"))},
                     {"Feature": "Voice AI risk", "Value": f"{float(latest.get('voice_risk', 0)):.2f}%"},
                     {"Feature": "Transcript scam risk", "Value": f"{float(latest.get('transcript_risk', 0)):.2f}%"},
                     {"Feature": "Behavioral risk", "Value": _risk_value_text(latest.get("behavioral_risk"))},
+                    {"Feature": "Voice reliability", "Value": _risk_value_text(latest.get("voice_reliability"))},
+                    {"Feature": "Content reliability", "Value": _risk_value_text(latest.get("content_reliability"))},
+                    {"Feature": "Effective voice risk", "Value": _risk_value_text(latest.get("effective_authenticity_risk"))},
+                    {"Feature": "Effective content risk", "Value": _risk_value_text(latest.get("effective_content_risk"))},
                     {"Feature": "Speech quality", "Value": str(audio_quality.get("reason", "Usable speech-like audio")) if isinstance(audio_quality, dict) else "Unknown"},
                     {"Feature": "Pitch variance", "Value": f"{float(features.get('pitch_variance', 0)):.2f} Hz"},
                     {"Feature": "Spectral centroid", "Value": f"{float(features.get('spectral_centroid', 0)) / 1000:.2f} kHz"},
@@ -920,7 +954,10 @@ def _render_recording_carousel(
     current_index = max(0, min(current_index, len(groups) - 1))
     st.session_state[state_key] = current_index
     clip_number, clip_results = groups[current_index]
-    peak = max(float(item.get("risk", 0)) for item in clip_results)
+    peak = _clip_decision_score(clip_results, risk_threshold)
+    peak_chunk = max(float(item.get("risk", 0)) for item in clip_results)
+    voice_peak = max(float(item.get("voice_risk", 0)) for item in clip_results)
+    content_peak = max(float(item.get("transcript_risk", 0)) for item in clip_results)
     flags = sorted(
         {
             str(flag)
@@ -932,7 +969,11 @@ def _render_recording_carousel(
 
     render_section_header(
         title,
-        f"Recording {current_index + 1} of {len(groups)} | Clip {clip_number} | Peak risk {peak:.1f}%",
+        (
+            f"Recording {current_index + 1} of {len(groups)} | Clip {clip_number} | "
+            f"Decision score {peak:.1f}% | Peak chunk {peak_chunk:.1f}% | "
+            f"Voice AI {voice_peak:.1f}% | Content {content_peak:.1f}%"
+        ),
         "Recording carousel",
     )
     nav_left, nav_mid, nav_right = st.columns([0.2, 0.6, 0.2])
@@ -949,23 +990,6 @@ def _render_recording_carousel(
         if st.button("Next", use_container_width=True, disabled=current_index >= len(groups) - 1, key=f"{state_key}_next"):
             st.session_state[state_key] = current_index + 1
             st.rerun()
-
-    if peak >= risk_threshold:
-        st.warning(
-            "Recommendation: pause the conversation, do not share OTP/passwords/payment details, "
-            "and verify the request through an official channel."
-        )
-    elif peak >= 40:
-        st.info(
-            "Recommendation: treat this as needing review. Ask for written confirmation and "
-            "check the sender/caller through a trusted source."
-        )
-    else:
-        st.success(
-            "Recommendation: no strong scam indicators were found in this recording, but continue "
-            "to verify unexpected requests."
-        )
-    _render_student_ctas(peak, title="Audio response checklist")
 
     _render_dashboard_section(
         clip_results,
@@ -1113,78 +1137,6 @@ def _prediction_time_value(values: dict[str, object]) -> float | None:
     if values.get("prediction_time_seconds") is not None:
         return round(float(values["prediction_time_seconds"]) * 1000, 4)
     return None
-
-
-def _clean_text_for_training_similarity(text: str) -> str:
-    lines = []
-    for line in str(text).splitlines():
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            continue
-        lines.append(line)
-    return "\n".join(lines).strip()
-
-
-@st.cache_data(show_spinner=False, ttl=3600, max_entries=2)
-def _load_transcript_training_dataset(root: str) -> pd.DataFrame:
-    dataset_path = Path(root) / "data" / "processed" / "transcript" / "transcript_dataset.csv"
-    try:
-        dataset = pd.read_csv(dataset_path)
-    except Exception:
-        return pd.DataFrame()
-
-    required_columns = {"transcript", "label"}
-    if not required_columns.issubset(dataset.columns):
-        return pd.DataFrame()
-
-    dataset = dataset.dropna(subset=["transcript", "label"]).copy()
-    dataset["transcript"] = dataset["transcript"].astype(str)
-    dataset["label"] = dataset["label"].astype(int)
-    if "source" not in dataset.columns:
-        dataset["source"] = "Training dataset"
-    return dataset[dataset["transcript"].str.strip().str.len() > 0].reset_index(drop=True)
-
-
-def _nearest_training_examples(root: Path, text: str, *, top_n: int = 5) -> pd.DataFrame:
-    dataset = _load_transcript_training_dataset(str(root))
-    clean_text = _clean_text_for_training_similarity(text)
-    if dataset.empty or not clean_text:
-        return pd.DataFrame()
-
-    corpus = dataset["transcript"].astype(str).tolist()
-    try:
-        from sklearn.feature_extraction.text import TfidfVectorizer
-        from sklearn.metrics.pairwise import cosine_similarity
-
-        vectorizer = TfidfVectorizer(
-            max_features=10000,
-            ngram_range=(1, 2),
-            stop_words="english",
-            min_df=1,
-            sublinear_tf=True,
-        )
-        matrix = vectorizer.fit_transform([clean_text, *corpus])
-        similarities = cosine_similarity(matrix[0], matrix[1:]).ravel()
-    except Exception:
-        return pd.DataFrame()
-
-    if similarities.size == 0:
-        return pd.DataFrame()
-
-    order = np.argsort(similarities)[::-1][:top_n]
-    rows = []
-    for index in order:
-        training_row = dataset.iloc[int(index)]
-        snippet = " ".join(str(training_row["transcript"]).split())
-        rows.append(
-            {
-                "Similarity": f"{float(similarities[index]) * 100:.1f}%",
-                "Training Label": "Suspicious" if int(training_row["label"]) == 1 else "Legitimate",
-                "Closest Training Snippet": snippet[:220] + ("..." if len(snippet) > 220 else ""),
-                "Source": str(training_row.get("source", "Training dataset")),
-            }
-        )
-    return pd.DataFrame(rows)
 
 
 def _baseline_weight_vector(model: object) -> tuple[np.ndarray | None, str]:
@@ -1739,127 +1691,6 @@ def _render_transcript_model_comparison(
     return consensus_result, representative_row.get("classifier")
 
 
-def _source_labels_from_text(text: str) -> list[str]:
-    labels = []
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("[") and "]" in stripped:
-            labels.append(stripped[1 : stripped.index("]")])
-    return labels or ["Transcript text"]
-
-
-def _student_actions(risk_score: float) -> list[str]:
-    if risk_score >= 70:
-        return [
-            "Pause the conversation before replying.",
-            "Verify through the official app, website, campus office, or published phone number.",
-            "Do not share OTPs, passwords, bank details, recovery codes, or payment proof.",
-            "Save screenshots, audio, phone numbers, links, timestamps, and account names.",
-            "Ask a trusted person or campus support before paying or continuing.",
-        ]
-    if risk_score >= 40:
-        return [
-            "Slow down and ask for written confirmation through an official channel.",
-            "Check links, sender identity, payment destination, and unusual urgency.",
-            "Avoid sending sensitive information until the request is independently verified.",
-            "Keep the evidence in case the pattern escalates.",
-        ]
-    return [
-        "Continue normal caution for unexpected requests.",
-        "Use official channels for payments, credentials, and account changes.",
-        "Keep evidence if the conversation later becomes urgent, secretive, or payment-focused.",
-    ]
-
-
-def _render_student_ctas(risk_score: float, *, title: str = "Student action checklist") -> None:
-    actions = _student_actions(risk_score)
-    tone = st.error if risk_score >= 70 else st.warning if risk_score >= 40 else st.success
-    if title:
-        st.caption(title)
-    tone(
-        "Recommended response: "
-        + ("pause and verify before acting." if risk_score >= 40 else "keep normal verification habits.")
-    )
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {"Step": index, "Action": action}
-                for index, action in enumerate(actions, start=1)
-            ]
-        ),
-        hide_index=True,
-        use_container_width=True,
-    )
-
-
-def _render_score_flow(result: dict[str, object], text: str, findings: list[dict[str, object]]) -> None:
-    risk_score = _risk_score(result)
-    sources = _source_labels_from_text(text)
-    source_label = ", ".join(sources[:3])
-    if len(sources) > 3:
-        source_label += f", +{len(sources) - 3} more"
-    rule_signal = f"{len(findings)} warning pattern(s)"
-    if not findings:
-        rule_signal = "No rule warning patterns"
-
-    labels = [
-        f"Source: {source_label}",
-        f"Transcript: {len(text.split())} word(s)",
-        f"Model: {risk_score:.1f}% suspicious risk",
-        f"Rules: {rule_signal}",
-        "Action: verify before acting" if risk_score >= 40 else "Action: continue cautious review",
-    ]
-    fig = go.Figure(
-        go.Sankey(
-            arrangement="snap",
-            node=dict(
-                pad=18,
-                thickness=18,
-                line=dict(color="rgba(148,163,184,.35)", width=1),
-                label=labels,
-                color=["#7C3AED", "#2563EB", "#D97706", "#DC2626", "#059669"],
-            ),
-            link=dict(
-                source=[0, 1, 2, 3],
-                target=[1, 2, 3, 4],
-                value=[1, 1, 1, 1],
-                color=["rgba(124,58,237,.20)", "rgba(37,99,235,.20)", "rgba(217,119,6,.20)", "rgba(220,38,38,.20)"],
-            ),
-        )
-    )
-    fig.update_layout(height=255, margin=dict(l=10, r=10, t=10, b=10), font_size=11)
-    st.plotly_chart(apply_chart_theme(fig), use_container_width=True)
-
-    rows = [
-        {
-            "Stage": "Source",
-            "Evidence": source_label,
-            "Student meaning": "Where the text came from before analysis.",
-        },
-        {
-            "Stage": "Transcript",
-            "Evidence": f"{len(text.split())} word(s)",
-            "Student meaning": "The exact words the model and rules inspected.",
-        },
-        {
-            "Stage": "Model signal",
-            "Evidence": f"{result.get('model_name', 'Transcript model')} | {risk_score:.1f}% suspicious risk",
-            "Student meaning": "The ML probability that the wording resembles scam transcripts.",
-        },
-        {
-            "Stage": "Rule signal",
-            "Evidence": rule_signal,
-            "Student meaning": "Human-readable warning patterns such as urgency, OTP, payment, secrecy, or impersonation.",
-        },
-        {
-            "Stage": "Action",
-            "Evidence": _student_actions(risk_score)[0],
-            "Student meaning": "The first practical step to take before responding.",
-        },
-    ]
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-
-
 def _record(history: list[dict[str, object]], result: dict[str, object], text: str) -> None:
     risk_score = _risk_score(result)
     findings = list(result.get("findings", []))
@@ -1923,6 +1754,7 @@ def _transcript_result_summary(
 
 def _render_rule_evidence(result: dict[str, object], text: str, findings: list[dict[str, object]]) -> None:
     risk_score = _risk_score(result)
+    legitimate_indicators = find_legitimate_indicators(text)
     render_section_header("Rule evidence", eyebrow="Explainability")
     if findings:
         render_content_card_open("red")
@@ -1939,6 +1771,23 @@ def _render_rule_evidence(result: dict[str, object], text: str, findings: list[d
             use_container_width=True,
         )
         render_content_card_close()
+        if legitimate_indicators:
+            render_content_card_open("green")
+            st.caption("Supporting lower-risk context found in the same transcript.")
+            legitimate_df = pd.DataFrame(legitimate_indicators)
+            preferred_legitimate_columns = [
+                column
+                for column in ["indicator", "category", "intention", "reason"]
+                if column in legitimate_df.columns
+            ]
+            st.dataframe(
+                legitimate_df[preferred_legitimate_columns]
+                if preferred_legitimate_columns
+                else legitimate_df,
+                hide_index=True,
+                use_container_width=True,
+            )
+            render_content_card_close()
         return
 
     rows = [
@@ -1953,6 +1802,15 @@ def _render_rule_evidence(result: dict[str, object], text: str, findings: list[d
             ),
         }
     ]
+    for indicator in legitimate_indicators:
+        rows.append(
+            {
+                "Evidence Layer": "Lower-risk context indicator",
+                "Result": str(indicator.get("indicator", "")),
+                "Student Meaning": str(indicator.get("intention", "")),
+                "How To Read It": "Supports lower risk, but still verify unexpected requests.",
+            }
+        )
     tone = st.success if risk_score < 40 else st.warning if _is_suspicious_prediction(result.get("label_name", "")) else st.info
     tone(
         "No explicit scam-rule pattern matched. This is useful evidence: the warning, if any, is coming from model similarity rather than a direct scam phrase."
@@ -1974,24 +1832,6 @@ def _render_model_agreement_evidence(result: dict[str, object]) -> None:
     st.dataframe(pd.DataFrame(model_evidence), hide_index=True, use_container_width=True)
     st.caption(
         "DistilBERT is the recommended model from current training metrics. SVM and Naive Bayes are kept as transparent baselines."
-    )
-    render_content_card_close()
-
-
-def _render_training_similarity_evidence(root: Path, text: str) -> None:
-    examples = _nearest_training_examples(root, text)
-    if examples.empty:
-        return
-
-    render_section_header(
-        "Closest training examples",
-        "These examples explain what the current transcript statistically resembles in the corrected training data.",
-        "Training evidence",
-    )
-    render_content_card_open("green")
-    st.dataframe(examples, hide_index=True, use_container_width=True)
-    st.caption(
-        "Similarity is a TF-IDF lookup for explanation only. It does not replace DistilBERT's prediction, but it makes the training-data comparison visible."
     )
     render_content_card_close()
 
@@ -2041,7 +1881,6 @@ def _display_result(
     label = str(result["label_name"])
     findings = list(result.get("findings", []))
 
-    probabilities = dict(result["probabilities"])
     risk_score = _risk_score(result)
     render_analysis_ready("Transcript analysis complete - results ready below")
     render_result_card(
@@ -2050,21 +1889,12 @@ def _display_result(
         _transcript_result_summary(result, label, confidence, findings),
     )
 
-    render_section_header(
-        "Why This Score Happened",
-        "Follow the evidence from source text to model probability, rule indicators, and student action.",
-        "Student view",
-    )
-    _render_score_flow(result, text, findings)
-    _render_student_ctas(risk_score)
-
     render_content_card_open("violet")
     st.plotly_chart(_confidence_chart(result["probabilities"]), use_container_width=True)
     render_content_card_close()
 
     _render_rule_evidence(result, text, findings)
     _render_model_agreement_evidence(result)
-    _render_training_similarity_evidence(root, text)
     _render_baseline_vocabulary_evidence(root, text)
 
 
@@ -2089,20 +1919,22 @@ def _render_combined_input_summary(
 ) -> None:
     """Show a compact summary of which sources are available before analysis."""
 
-    upload_peak = max((float(item.get("risk", 0)) for item in uploaded_audio_results), default=0.0)
     upload_chunks = len(uploaded_audio_results)
     transcript_words = len(transcript_text.split())
     upload_words = len(uploaded_audio_text.split())
 
     rows = []
     if use_uploaded_audio:
+        upload_decision_peak = max((float(item.get("risk", 0)) for item in uploaded_audio_results), default=0.0)
+        upload_voice_peak = max((float(item.get("voice_risk", 0)) for item in uploaded_audio_results), default=0.0)
         rows.append(
             {
                 "Source": "Uploaded audio recording",
                 "Status": "Ready" if uploaded_audio_results else "Waiting for upload analysis",
                 "Usable text": f"{upload_words} word(s)" if uploaded_audio_text else "No transcript text yet",
                 "Audio chunks": upload_chunks,
-                "Peak voice risk": f"{upload_peak:.1f}%" if uploaded_audio_results else "-",
+                "Peak decision risk": f"{upload_decision_peak:.1f}%" if uploaded_audio_results else "-",
+                "Peak voice AI risk": f"{upload_voice_peak:.1f}%" if uploaded_audio_results else "-",
             }
         )
     if use_text:
@@ -2112,7 +1944,8 @@ def _render_combined_input_summary(
                 "Status": "Ready" if transcript_text.strip() else "Waiting for text",
                 "Usable text": f"{transcript_words} word(s)" if transcript_text.strip() else "No text yet",
                 "Audio chunks": "-",
-                "Peak voice risk": "-",
+                "Peak decision risk": "-",
+                "Peak voice AI risk": "-",
             }
         )
 
