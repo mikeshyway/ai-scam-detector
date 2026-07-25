@@ -1730,7 +1730,6 @@ def _render_transcript_evaluation_evidence(
         "Review saved transcript training metrics separately from this live prediction.",
         "Evaluation evidence",
     )
-    render_content_card_open("violet")
     metrics_tab, confusion_tab, roc_tab = st.tabs(
         ["Performance Metrics", "Confusion Matrix Heatmap", "ROC-AUC Curve"]
     )
@@ -1760,8 +1759,6 @@ def _render_transcript_evaluation_evidence(
                 "ROC-AUC shows how well each transcript model separates legitimate and suspicious transcripts. "
                 "A curve closer to the top-left corner indicates stronger classification performance."
             )
-
-    render_content_card_close()
 
 
 def _comparison_chart(rows: list[dict[str, object]]) -> go.Figure:
@@ -1832,7 +1829,6 @@ def _render_transcript_model_comparison(
         "Compare each selected transcript model before trusting a single score.",
         "Multi-model result",
     )
-    render_content_card_open("violet")
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Final Verdict", final_verdict)
     col2.metric("Average Risk", f"{average_risk:.2f}%")
@@ -1843,21 +1839,18 @@ def _render_transcript_model_comparison(
         "The verdict uses selected model agreement and average suspicious-risk probability. "
         "Recommended Model is chosen from saved training metrics and does not override the live consensus."
     )
-    render_content_card_close()
 
     render_section_header(
         "AI model comparison",
         "Risk score is suspicious probability; confidence is the selected model's predicted-class confidence.",
         "Model evidence",
     )
-    render_content_card_open("violet")
     st.plotly_chart(_comparison_chart(comparison_rows), use_container_width=True)
     st.dataframe(display_df, hide_index=True, use_container_width=True)
     st.caption(
         "Higher agreement between independent models generally increases confidence. "
         "If models disagree, use the transcript, rule evidence, and source context before acting."
     )
-    render_content_card_close()
 
     _render_transcript_evaluation_evidence(
         root,
@@ -1945,8 +1938,6 @@ def _render_transcript_evidence_breakdown(root: Path, text: str, findings: list[
         "Review direct rule matches, lower-risk context, and baseline vocabulary signals in one table.",
         "Explainability",
     )
-    card_accent = "red" if findings else "violet" if vocabulary_rows else "green"
-    render_content_card_open(card_accent)
     st.markdown(
         _combined_transcript_evidence_html(
             text,
@@ -1966,25 +1957,6 @@ def _render_transcript_evidence_breakdown(root: Path, text: str, findings: list[
     st.caption(
         "Rule indicators are direct pattern evidence. Baseline vocabulary rows are supporting SVM/Naive Bayes signals and do not override the final verdict."
     )
-    render_content_card_close()
-
-
-def _render_model_agreement_evidence(result: dict[str, object]) -> None:
-    model_evidence = result.get("model_evidence", [])
-    if not isinstance(model_evidence, list) or not model_evidence:
-        return
-
-    render_section_header(
-        "Model agreement explained",
-        "Shows which models agreed and how strongly they leaned suspicious.",
-        "Classifier signal",
-    )
-    render_content_card_open("violet")
-    st.dataframe(pd.DataFrame(model_evidence), hide_index=True, use_container_width=True)
-    st.caption(
-        "DistilBERT is the recommended model from current training metrics. SVM and Naive Bayes are kept as transparent baselines."
-    )
-    render_content_card_close()
 
 
 def _display_result(
@@ -2005,13 +1977,9 @@ def _display_result(
         _transcript_result_summary(result, label, confidence, findings),
     )
 
-    render_content_card_open("violet")
     st.plotly_chart(_confidence_chart(result["probabilities"]), use_container_width=True)
-    render_content_card_close()
 
     _render_transcript_evidence_breakdown(root, text, findings)
-    _render_model_agreement_evidence(result)
-
 
 
 def _similarity_percent(left: str, right: str) -> float:
