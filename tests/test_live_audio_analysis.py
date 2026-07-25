@@ -52,6 +52,25 @@ class LiveAudioAnalysisTests(unittest.TestCase):
 
         return FixedAudioClassifier()
 
+    @staticmethod
+    def _fixed_voice_evidence_calibrator(evidence_risk: float):
+        class FixedVoiceEvidenceCalibrator:
+            def predict_one(self, _features):
+                class Prediction:
+                    label_name = (
+                        "Trained AI-voice evidence"
+                        if evidence_risk >= 60
+                        else "Lower trained voice evidence"
+                    )
+                    confidence = max(evidence_risk, 100.0 - evidence_risk) / 100.0
+
+                    def __init__(self) -> None:
+                        self.evidence_risk = evidence_risk
+
+                return Prediction()
+
+        return FixedVoiceEvidenceCalibrator()
+
     def test_streamlit_wav_is_decoded_and_resampled(self) -> None:
         sample_rate = 8_000
         time_axis = np.arange(sample_rate, dtype=np.float32) / sample_rate
@@ -213,6 +232,21 @@ class LiveAudioAnalysisTests(unittest.TestCase):
         self.assertLess(float(result["effective_authenticity_risk"]), 15.0)
         self.assertEqual(result["authenticity_level"], "Weak voice-authenticity evidence")
         self.assertIn("clip is under 3 seconds", result["audio_evidence_notes"])
+
+    def test_trained_voice_evidence_calibrator_replaces_rule_weighted_voice_evidence(self) -> None:
+        result = analyse_live_chunk(
+            self._speech_like_audio(),
+            audio_classifier=self._fixed_audio_classifier(0.99),
+            behavioral_classifier=self._fixed_audio_classifier(0.90),
+            voice_evidence_calibrator=self._fixed_voice_evidence_calibrator(12.0),
+            sample_rate=16_000,
+        )
+
+        self.assertEqual(float(result["trained_voice_evidence_risk"]), 12.0)
+        self.assertEqual(float(result["voice_evidence_risk"]), 12.0)
+        self.assertGreater(float(result["rule_voice_evidence_risk"]), 12.0)
+        self.assertEqual(result["voice_evidence_engine"], "Trained voice evidence calibrator")
+        self.assertLess(float(result["risk"]), 40.0)
 
     def test_high_scam_transcript_still_drives_high_risk(self) -> None:
         result = analyse_live_chunk(

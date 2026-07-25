@@ -122,6 +122,16 @@ def _load_behavioral_classifier(root: str):
 
 
 @st.cache_resource(show_spinner=False)
+def _load_voice_evidence_calibrator(root: str):
+    try:
+        from src.audio.voice_evidence_calibrator import load_voice_evidence_calibrator
+
+        return load_voice_evidence_calibrator(Path(root) / "models" / "audio_voice_evidence_calibrator.pkl")
+    except Exception:
+        return None
+
+
+@st.cache_resource(show_spinner=False)
 def _load_transcript_classifier(root: str, model_key: str = "nb"):
     model_path, model_name = _transcript_model_artifact(Path(root), model_key)
     if model_key in TRANSCRIPT_TRANSFORMER_MODEL_KEYS:
@@ -342,6 +352,7 @@ def _process_audio_array(
     audio_classifier: Any | None,
     text_classifier: Any | None,
     behavioral_classifier: Any | None,
+    voice_evidence_calibrator: Any | None,
 ) -> list[dict[str, object]]:
     audio = np.asarray(audio, dtype=np.float32)
     if audio.ndim > 1:
@@ -394,6 +405,7 @@ def _process_audio_array(
             audio_classifier=audio_classifier,
             text_classifier=text_classifier,
             behavioral_classifier=behavioral_classifier,
+            voice_evidence_calibrator=voice_evidence_calibrator,
             sample_rate=sample_rate,
         )
         result["pre_transcription_quality"] = audio_quality
@@ -428,6 +440,7 @@ def _process_uploaded_audio(
     audio_classifier: Any | None,
     text_classifier: Any | None,
     behavioral_classifier: Any | None,
+    voice_evidence_calibrator: Any | None,
 ) -> list[dict[str, object]]:
     try:
         import librosa
@@ -454,6 +467,7 @@ def _process_uploaded_audio(
             audio_classifier=audio_classifier,
             text_classifier=text_classifier,
             behavioral_classifier=behavioral_classifier,
+            voice_evidence_calibrator=voice_evidence_calibrator,
         )
     except Exception as exc:
         if suffix == ".mp3":
@@ -516,6 +530,7 @@ def _analyse_selected_uploaded_audio(
         audio_classifier=_load_audio_classifier(str(root)),
         text_classifier=_load_transcript_classifier_safe(str(root), transcript_model_key),
         behavioral_classifier=_load_behavioral_classifier(str(root)),
+        voice_evidence_calibrator=_load_voice_evidence_calibrator(str(root)),
     )
 
     filename = str(
@@ -856,7 +871,12 @@ def _voice_evidence_metric_figure(result: dict[str, object]) -> go.Figure | None
         (
             "Voice evidence risk",
             _risk_number(result.get("voice_evidence_risk")),
-            "MFCC voice score after audio reliability weighting.",
+            f"Primary evidence score from {result.get('voice_evidence_engine', 'the available evidence path')}.",
+        ),
+        (
+            "Rule fallback voice evidence",
+            _risk_number(result.get("rule_voice_evidence_risk")),
+            "Previous rule-weighted score kept for comparison and fallback.",
         ),
         (
             "Raw voice AI model score",
@@ -899,6 +919,7 @@ def _voice_evidence_explanation(result: dict[str, object]) -> str:
     behavioral_raw = result.get("behavioral_risk")
     behavioral_evidence = result.get("behavioral_evidence_risk")
     label = str(result.get("decision_label", "No decision"))
+    engine = str(result.get("voice_evidence_engine", "the available evidence path"))
     if raw_voice >= 85.0 and voice_evidence < 40.0:
         voice_reading = "the raw voice model is high, but it is not strong evidence after reliability checks"
     elif voice_evidence >= 70.0 and voice_reliability >= 70.0:
@@ -915,7 +936,7 @@ def _voice_evidence_explanation(result: dict[str, object]) -> str:
 
     return (
         "This chart separates raw model probabilities from reliability-weighted evidence. "
-        f"Conclusion: {label}; {voice_reading}; {behavioral_reading}."
+        f"Primary voice evidence source: {engine}. Conclusion: {label}; {voice_reading}; {behavioral_reading}."
     )
 
 

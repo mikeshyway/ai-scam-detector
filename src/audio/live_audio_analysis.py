@@ -10,6 +10,10 @@ from typing import Any
 
 import numpy as np
 
+from src.audio.voice_evidence_calibrator import (
+    build_voice_evidence_feature_values,
+    voice_evidence_feature_vector,
+)
 from src.text.explainability import find_suspicious_phrases
 from src.text.rule_demo import rule_based_text_prediction
 from src.utils.time_utils import now_for_app
@@ -556,6 +560,41 @@ def score_behavioral_chunk(
     return risk, prediction.label_name, "Behavioral RF"
 
 
+def score_voice_evidence_chunk(
+    *,
+    raw_voice_risk: float,
+    raw_behavioral_risk: float | None,
+    features: dict[str, object],
+    behavioral_features: dict[str, object],
+    speech_quality: dict[str, object],
+    voice_evidence_calibrator: Any | None,
+) -> tuple[float | None, str, str, dict[str, float]]:
+    """Return trained voice-evidence risk when the second-stage calibrator exists."""
+
+    feature_values = build_voice_evidence_feature_values(
+        raw_voice_risk=raw_voice_risk,
+        raw_behavioral_risk=raw_behavioral_risk,
+        features=features,
+        behavioral_features=behavioral_features,
+        speech_quality=speech_quality,
+    )
+    if voice_evidence_calibrator is None:
+        return None, "Rule reliability weighting", "Rule reliability weighting", feature_values
+
+    try:
+        vector = voice_evidence_feature_vector(feature_values)
+        prediction = voice_evidence_calibrator.predict_one(vector)
+    except Exception:
+        return None, "Rule reliability weighting", "Rule reliability weighting", feature_values
+
+    return (
+        float(prediction.evidence_risk),
+        str(prediction.label_name),
+        "Trained voice evidence calibrator",
+        feature_values,
+    )
+
+
 def score_transcript(
     transcript: str,
     text_classifier: Any | None,
@@ -870,6 +909,7 @@ def _authenticity_level(
     audio_engine: str,
     behavioral_features: dict[str, object] | None = None,
     behavioral_engine: str = "",
+    trained_voice_evidence_risk: float | None = None,
 ) -> str:
     if not bool(speech_quality.get("usable_speech", True)):
         return "Inconclusive"
@@ -893,20 +933,27 @@ def _authenticity_level(
         if behavioral_risk is not None
         else None
     )
+    if trained_voice_evidence_risk is not None:
+        voice_evidence_risk = _bounded_score(float(trained_voice_evidence_risk))
     effective_score = _weighted_authenticity_evidence(
         voice_evidence_risk,
         behavioral_evidence_risk,
     )
+    has_trained_voice_evidence = trained_voice_evidence_risk is not None
 
-    if voice_reliability < 35 and behavioral_reliability < 35:
+    if voice_reliability < 35 and behavioral_reliability < 35 and voice_evidence_risk < 35:
         if raw_score >= 85:
             return "Weak voice-authenticity evidence"
         return "Inconclusive voice-authenticity evidence"
-    if raw_score >= 90 and effective_score >= 70 and voice_reliability >= 70 and (
+    if raw_score >= 90 and effective_score >= 70 and (
+        has_trained_voice_evidence or voice_reliability >= 70
+    ) and (
         behavioral_risk is None or behavioral_reliability >= 55
     ):
         return "High voice-authenticity concern"
-    if raw_score >= 70 and effective_score >= 40 and max(voice_reliability, behavioral_reliability) >= 45:
+    if raw_score >= 70 and effective_score >= 40 and (
+        has_trained_voice_evidence or max(voice_reliability, behavioral_reliability) >= 45
+    ):
         return "Needs voice-authenticity review"
     if raw_score >= 85:
         return "Weak voice-authenticity evidence"
@@ -925,6 +972,8 @@ def decision_layer(
     text_engine: str,
     behavioral_features: dict[str, object] | None = None,
     behavioral_engine: str = "",
+    trained_voice_evidence_risk: float | None = None,
+    voice_evidence_engine: str = "Rule reliability weighting",
 ) -> dict[str, object]:
     """Convert model scores into reliability-weighted evidence decisions."""
 
@@ -961,10 +1010,16 @@ def decision_layer(
         audio_engine,
         behavioral_features,
         behavioral_engine,
+        trained_voice_evidence_risk,
     )
     usable_speech = bool(speech_quality.get("usable_speech", True))
     effective_content_risk = _bounded_score(transcript_risk * (content_reliability / 100.0))
-    voice_evidence_risk = _bounded_score(voice_risk * (voice_reliability / 100.0))
+    rule_voice_evidence_risk = _bounded_score(voice_risk * (voice_reliability / 100.0))
+    voice_evidence_risk = (
+        _bounded_score(float(trained_voice_evidence_risk))
+        if trained_voice_evidence_risk is not None
+        else rule_voice_evidence_risk
+    )
     behavioral_evidence_risk = (
         _bounded_score(float(behavioral_risk) * (behavioral_reliability / 100.0))
         if behavioral_risk is not None
@@ -1058,6 +1113,11 @@ def decision_layer(
         "voice_reliability": round(voice_reliability, 2),
         "behavioral_reliability": round(behavioral_reliability, 2),
         "voice_evidence_risk": round(voice_evidence_risk, 2),
+        "rule_voice_evidence_risk": round(rule_voice_evidence_risk, 2),
+        "trained_voice_evidence_risk": round(_bounded_score(float(trained_voice_evidence_risk)), 2)
+        if trained_voice_evidence_risk is not None
+        else None,
+        "voice_evidence_engine": voice_evidence_engine,
         "behavioral_evidence_risk": round(behavioral_evidence_risk, 2) if behavioral_evidence_risk is not None else None,
         "effective_content_risk": round(effective_content_risk, 2),
         "effective_authenticity_risk": round(effective_authenticity_risk, 2),
@@ -1081,6 +1141,7 @@ def analyse_live_chunk(
     audio_classifier: Any | None = None,
     text_classifier: Any | None = None,
     behavioral_classifier: Any | None = None,
+    voice_evidence_calibrator: Any | None = None,
     sample_rate: int = TARGET_SAMPLE_RATE,
     audio_quality: dict[str, object] | None = None,
 ) -> dict[str, object]:
@@ -1112,6 +1173,19 @@ def analyse_live_chunk(
         transcript,
         text_classifier,
     )
+    (
+        trained_voice_evidence_risk,
+        trained_voice_evidence_label,
+        voice_evidence_engine,
+        voice_evidence_features,
+    ) = score_voice_evidence_chunk(
+        raw_voice_risk=voice_risk,
+        raw_behavioral_risk=behavioral_risk,
+        features=features,
+        behavioral_features=behavioral_features,
+        speech_quality=speech_quality,
+        voice_evidence_calibrator=voice_evidence_calibrator,
+    )
     raw_combined_risk = combined_risk(
         voice_risk=voice_risk,
         transcript_risk=transcript_risk,
@@ -1130,6 +1204,8 @@ def analyse_live_chunk(
         text_engine=text_engine,
         behavioral_features=behavioral_features,
         behavioral_engine=behavioral_engine,
+        trained_voice_evidence_risk=trained_voice_evidence_risk,
+        voice_evidence_engine=voice_evidence_engine,
     )
     total_risk = float(decision["decision_score"])
     level = risk_level(total_risk)
@@ -1147,9 +1223,16 @@ def analyse_live_chunk(
         else "usable speech-like audio"
     )
     voice_evidence = float(decision.get("voice_evidence_risk", voice_risk))
+    rule_voice_evidence = float(decision.get("rule_voice_evidence_risk", voice_evidence))
+    trained_evidence_text = (
+        f"{voice_evidence:.1f}% trained evidence using {voice_evidence_engine}; "
+        f"rule-weighted fallback would be {rule_voice_evidence:.1f}%"
+        if trained_voice_evidence_risk is not None
+        else f"{voice_evidence:.1f}% evidence after {decision['voice_reliability']:.1f}% reliability"
+    )
     audio_text = (
         f"Voice signal {voice_risk:.1f}% raw using {audio_engine}; "
-        f"{voice_evidence:.1f}% evidence after {decision['voice_reliability']:.1f}% reliability"
+        f"{trained_evidence_text}"
         if usable_speech
         else f"Voice signal skipped by {audio_engine}: {quality_text}"
     )
@@ -1172,9 +1255,11 @@ def analyse_live_chunk(
         "transcript_label": transcript_label,
         "behavioral_risk": round(behavioral_risk, 2) if behavioral_risk is not None else None,
         "behavioral_label": behavioral_label,
+        "trained_voice_evidence_label": trained_voice_evidence_label,
         "audio_engine": audio_engine,
         "text_engine": text_engine,
         "behavioral_engine": behavioral_engine,
+        "voice_evidence_features": voice_evidence_features,
         "flags": flags,
         "findings": findings,
         "features": features,

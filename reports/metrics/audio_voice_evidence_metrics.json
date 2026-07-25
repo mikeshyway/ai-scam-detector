@@ -1,0 +1,233 @@
+{
+  "dataset_path": "C:\\Users\\user\\Documents\\Codex\\ai-scam-detector\\data\\processed\\audio",
+  "labels_path": "C:\\Users\\user\\Documents\\Codex\\ai-scam-detector\\data\\processed\\audio\\labels.csv",
+  "raw_audio_model_path": "C:\\Users\\user\\Documents\\Codex\\ai-scam-detector\\models\\audio_svm.pkl",
+  "behavioral_model_path": "C:\\Users\\user\\Documents\\Codex\\ai-scam-detector\\models\\audio_behavior_rf.pkl",
+  "model_path": "C:\\Users\\user\\Documents\\Codex\\ai-scam-detector\\models\\audio_voice_evidence_calibrator.pkl",
+  "task": "Second-stage trained voice evidence calibration",
+  "feature_names": [
+    "raw_voice_risk",
+    "raw_behavioral_risk",
+    "behavioral_available",
+    "raw_model_gap",
+    "raw_model_mean",
+    "duration_seconds",
+    "speech_activity_ratio",
+    "silence_ratio",
+    "estimated_speech_rate",
+    "rms_energy",
+    "peak_amplitude",
+    "rms_energy_std",
+    "zero_crossing_rate",
+    "zero_crossing_rate_std",
+    "spectral_centroid",
+    "spectral_centroid_std",
+    "spectral_bandwidth",
+    "spectral_bandwidth_std",
+    "spectral_rolloff",
+    "spectral_rolloff_std",
+    "pitch_variance",
+    "mfcc_dynamics",
+    "mfcc_available",
+    "usable_speech",
+    "quality_warning_count",
+    "short_under_3s",
+    "short_under_6s",
+    "high_silence",
+    "sparse_speech",
+    "low_energy"
+  ],
+  "feature_dimension": 30,
+  "train_rows": 110,
+  "dev_rows": 50,
+  "training_limits": {
+    "train_full_per_label": 25,
+    "train_augment_per_label": 15,
+    "dev_full_per_label": 25
+  },
+  "train_distribution": {
+    "bonafide": 55,
+    "spoof": 55
+  },
+  "dev_distribution": {
+    "bonafide": 25,
+    "spoof": 25
+  },
+  "train_variants": {
+    "full": 50,
+    "quiet_short_3s": 30,
+    "short_3s": 30
+  },
+  "dev_variants": {
+    "full": 50
+  },
+  "feature_extraction_seconds": 69.17787313461304,
+  "training_seconds": 0.25879621505737305,
+  "model": "RandomForestClassifier trained as voice evidence calibrator",
+  "metrics": {
+    "all_dev_variants": {
+      "mae": 30.065002194085015,
+      "rmse": 43.06271004153074,
+      "mean_prediction": 27.38365460391002,
+      "mean_target": 50.0,
+      "threshold_accuracy": 0.76,
+      "threshold_precision": 1.0,
+      "threshold_recall": 0.52,
+      "threshold_f1": 0.6842105263157895,
+      "threshold_confusion_matrix": [
+        [
+          25,
+          0
+        ],
+        [
+          12,
+          13
+        ]
+      ],
+      "truth_roc_auc": 0.9471999999999999
+    },
+    "full": {
+      "mae": 30.065002194085015,
+      "rmse": 43.06271004153074,
+      "mean_prediction": 27.38365460391002,
+      "mean_target": 50.0,
+      "threshold_accuracy": 0.76,
+      "threshold_precision": 1.0,
+      "threshold_recall": 0.52,
+      "threshold_f1": 0.6842105263157895,
+      "threshold_confusion_matrix": [
+        [
+          25,
+          0
+        ],
+        [
+          12,
+          13
+        ]
+      ],
+      "truth_roc_auc": 0.9471999999999999
+    }
+  },
+  "feature_importances": [
+    {
+      "feature": "raw_model_mean",
+      "importance": 0.21736365035056077
+    },
+    {
+      "feature": "raw_behavioral_risk",
+      "importance": 0.1866142522662547
+    },
+    {
+      "feature": "raw_voice_risk",
+      "importance": 0.1629897063394324
+    },
+    {
+      "feature": "spectral_bandwidth",
+      "importance": 0.056512553494379315
+    },
+    {
+      "feature": "rms_energy_std",
+      "importance": 0.04629176021178223
+    },
+    {
+      "feature": "peak_amplitude",
+      "importance": 0.04038861533862941
+    },
+    {
+      "feature": "speech_activity_ratio",
+      "importance": 0.035643387224475784
+    },
+    {
+      "feature": "rms_energy",
+      "importance": 0.03337099580727665
+    },
+    {
+      "feature": "raw_model_gap",
+      "importance": 0.02966593703478481
+    },
+    {
+      "feature": "low_energy",
+      "importance": 0.026882916639171233
+    },
+    {
+      "feature": "spectral_rolloff",
+      "importance": 0.02050603944655304
+    },
+    {
+      "feature": "silence_ratio",
+      "importance": 0.018463823588211404
+    },
+    {
+      "feature": "mfcc_dynamics",
+      "importance": 0.017887334017239794
+    },
+    {
+      "feature": "spectral_bandwidth_std",
+      "importance": 0.017031422155105228
+    },
+    {
+      "feature": "duration_seconds",
+      "importance": 0.016657324349338257
+    },
+    {
+      "feature": "spectral_rolloff_std",
+      "importance": 0.015830272505230527
+    },
+    {
+      "feature": "estimated_speech_rate",
+      "importance": 0.014946644444576905
+    },
+    {
+      "feature": "pitch_variance",
+      "importance": 0.010078547899815174
+    },
+    {
+      "feature": "spectral_centroid_std",
+      "importance": 0.009548660399430607
+    },
+    {
+      "feature": "spectral_centroid",
+      "importance": 0.009472555246446341
+    },
+    {
+      "feature": "zero_crossing_rate",
+      "importance": 0.008156734825770031
+    },
+    {
+      "feature": "zero_crossing_rate_std",
+      "importance": 0.004915538608972182
+    },
+    {
+      "feature": "short_under_3s",
+      "importance": 0.0007813278065632914
+    },
+    {
+      "feature": "behavioral_available",
+      "importance": 0.0
+    },
+    {
+      "feature": "mfcc_available",
+      "importance": 0.0
+    },
+    {
+      "feature": "usable_speech",
+      "importance": 0.0
+    },
+    {
+      "feature": "quality_warning_count",
+      "importance": 0.0
+    },
+    {
+      "feature": "short_under_6s",
+      "importance": 0.0
+    },
+    {
+      "feature": "high_silence",
+      "importance": 0.0
+    },
+    {
+      "feature": "sparse_speech",
+      "importance": 0.0
+    }
+  ]
+}
