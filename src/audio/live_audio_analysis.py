@@ -20,6 +20,12 @@ N_MFCC = 40
 ROOT = Path(__file__).resolve().parents[1]
 os.environ.setdefault("NUMBA_CACHE_DIR", str(ROOT / ".numba_cache"))
 
+MIN_USABLE_SECONDS = 0.75
+MIN_USABLE_PEAK = 0.002
+MIN_USABLE_RMS = 0.0008
+MIN_SPEECH_RMS = 0.003
+MIN_SPEECH_ACTIVITY_RATIO = 0.08
+
 BEHAVIORAL_FEATURE_NAMES = [
     "duration_seconds",
     "rms_energy_mean",
@@ -372,6 +378,104 @@ def extract_live_features(audio: np.ndarray, sample_rate: int = TARGET_SAMPLE_RA
     }
 
 
+def assess_speech_quality(
+    audio: np.ndarray,
+    sample_rate: int = TARGET_SAMPLE_RATE,
+    *,
+    features: dict[str, object] | None = None,
+    behavioral_features: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Return a lightweight gate for chunks that should not be audio-SVM scored."""
+
+    samples = np.asarray(audio, dtype=np.float32).reshape(-1)
+    sample_rate = max(1, int(sample_rate))
+    duration_seconds = float(samples.size / sample_rate)
+    finite = samples[np.isfinite(samples)]
+    if finite.size == 0:
+        finite = np.zeros(0, dtype=np.float32)
+
+    rms = (
+        float(features.get("rms_energy", 0.0))
+        if isinstance(features, dict) and "rms_energy" in features
+        else float(np.sqrt(np.mean(np.square(finite)))) if finite.size else 0.0
+    )
+    peak = float(np.max(np.abs(finite))) if finite.size else 0.0
+    speech_activity = (
+        float(behavioral_features.get("speech_activity_ratio", 0.0))
+        if isinstance(behavioral_features, dict)
+        else 0.0
+    )
+    silence_ratio = (
+        float(behavioral_features.get("silence_ratio", 1.0))
+        if isinstance(behavioral_features, dict)
+        else 1.0
+    )
+    estimated_speech_rate = (
+        float(behavioral_features.get("estimated_speech_rate", 0.0))
+        if isinstance(behavioral_features, dict)
+        else 0.0
+    )
+    zcr = (
+        float(features.get("zero_crossing_rate", 0.0))
+        if isinstance(features, dict)
+        else 0.0
+    )
+    centroid = (
+        float(features.get("spectral_centroid", 0.0))
+        if isinstance(features, dict)
+        else 0.0
+    )
+    bandwidth = (
+        float(features.get("spectral_bandwidth", 0.0))
+        if isinstance(features, dict)
+        else 0.0
+    )
+    mfcc_available = bool(features.get("mfcc_available", False)) if isinstance(features, dict) else False
+    has_behavioral_features = isinstance(behavioral_features, dict)
+
+    usable = True
+    reason = "Usable speech-like audio"
+    warnings: list[str] = []
+
+    if duration_seconds < MIN_USABLE_SECONDS:
+        usable = False
+        reason = "Audio chunk is too short for reliable speech analysis"
+    elif peak < MIN_USABLE_PEAK or rms < MIN_USABLE_RMS:
+        usable = False
+        reason = "Audio is too quiet to score reliably"
+    elif has_behavioral_features and rms < MIN_SPEECH_RMS and (
+        silence_ratio >= 0.85 or speech_activity <= MIN_SPEECH_ACTIVITY_RATIO
+    ):
+        usable = False
+        reason = "No usable speech detected"
+    elif has_behavioral_features and speech_activity < 0.05 and silence_ratio > 0.90:
+        usable = False
+        reason = "Mostly silence or background room tone"
+    elif mfcc_available and zcr > 0.32 and centroid > 3_000:
+        usable = False
+        reason = "Broadband noise detected instead of speech"
+    elif mfcc_available and bandwidth < 80 and estimated_speech_rate < 0.2:
+        usable = False
+        reason = "Tonal or non-speech audio detected"
+
+    if usable and rms < MIN_SPEECH_RMS:
+        warnings.append("Low speech energy; audio model confidence may be weak.")
+    if usable and speech_activity < 0.20:
+        warnings.append("Limited speech activity; verify the transcript before acting.")
+
+    return {
+        "usable_speech": usable,
+        "reason": reason,
+        "warnings": warnings,
+        "duration_seconds": round(duration_seconds, 3),
+        "rms": rms,
+        "peak": peak,
+        "speech_activity_ratio": speech_activity,
+        "silence_ratio": silence_ratio,
+        "estimated_speech_rate": estimated_speech_rate,
+    }
+
+
 def _heuristic_audio_risk(features: dict[str, object]) -> tuple[float, str]:
     """Educational fallback when the trained audio SVM is unavailable."""
 
@@ -407,6 +511,12 @@ def score_audio_chunk(
     audio_classifier: Any | None,
 ) -> tuple[float, str, str]:
     """Return AI-voice risk percentage, prediction label, and engine name."""
+
+    speech_quality = features.get("speech_quality")
+    if isinstance(speech_quality, dict) and not bool(
+        speech_quality.get("usable_speech", True)
+    ):
+        return 0.0, str(speech_quality.get("reason", "No usable speech detected")), "Audio quality gate"
 
     if audio_classifier is None or not bool(features.get("mfcc_available", False)):
         risk, engine = _heuristic_audio_risk(features)
@@ -502,16 +612,32 @@ def analyse_live_chunk(
     text_classifier: Any | None = None,
     behavioral_classifier: Any | None = None,
     sample_rate: int = TARGET_SAMPLE_RATE,
+    audio_quality: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Analyse one microphone chunk and return a UI/report-ready result."""
 
     features = extract_live_features(audio, sample_rate=sample_rate)
     behavioral_features = extract_behavioral_features(audio, sample_rate=sample_rate)
-    voice_risk, voice_label, audio_engine = score_audio_chunk(features, audio_classifier)
-    behavioral_risk, behavioral_label, behavioral_engine = score_behavioral_chunk(
-        behavioral_features,
-        behavioral_classifier,
+    speech_quality = audio_quality or assess_speech_quality(
+        audio,
+        sample_rate=sample_rate,
+        features=features,
+        behavioral_features=behavioral_features,
     )
+    features["speech_quality"] = speech_quality
+    usable_speech = bool(speech_quality.get("usable_speech", True))
+
+    voice_risk, voice_label, audio_engine = score_audio_chunk(features, audio_classifier)
+    if usable_speech:
+        behavioral_risk, behavioral_label, behavioral_engine = score_behavioral_chunk(
+            behavioral_features,
+            behavioral_classifier,
+        )
+    else:
+        behavioral_risk = None
+        behavioral_label = str(speech_quality.get("reason", "No usable speech detected"))
+        behavioral_engine = "Skipped by audio quality gate"
+
     transcript_risk, transcript_label, text_engine, findings = score_transcript(
         transcript,
         text_classifier,
@@ -524,10 +650,16 @@ def analyse_live_chunk(
     )
     level = risk_level(total_risk)
     flags = [str(item.get("phrase", "")) for item in findings if item.get("phrase")]
-    behavioral_text = (
-        f"{behavioral_risk:.1f}% using {behavioral_engine}"
-        if behavioral_risk is not None
-        else behavioral_engine
+    behavioral_text = f"{behavioral_risk:.1f}% using {behavioral_engine}" if behavioral_risk is not None else behavioral_engine
+    quality_text = (
+        str(speech_quality.get("reason", "Usable speech-like audio"))
+        if not usable_speech
+        else "usable speech-like audio"
+    )
+    audio_text = (
+        f"Voice signal {voice_risk:.1f}% using {audio_engine}"
+        if usable_speech
+        else f"Voice signal skipped by {audio_engine}: {quality_text}"
     )
 
     return {
@@ -548,9 +680,11 @@ def analyse_live_chunk(
         "findings": findings,
         "features": features,
         "behavioral_features": behavioral_features,
+        "audio_quality": speech_quality,
+        "quality_warnings": list(speech_quality.get("warnings", [])),
         "explanation": (
             f"Combined educational risk {total_risk:.1f}%. "
-            f"Voice signal {voice_risk:.1f}% using {audio_engine}; "
+            f"{audio_text}; "
             f"transcript signal {transcript_risk:.1f}% using {text_engine}. "
             f"Behavioral signal {behavioral_text}. "
             f"Detected phrase indicators: {', '.join(flags) if flags else 'none'}."
@@ -558,16 +692,170 @@ def analyse_live_chunk(
     }
 
 
-def transcribe_with_whisper(audio: np.ndarray, whisper_model: Any | None) -> str:
-    """Transcribe one chunk with an optional local Whisper model."""
+def _detect_whisper_language(
+    audio: np.ndarray,
+    whisper_model: Any,
+) -> tuple[str, float] | None:
+    """Run Whisper's language detector for diagnostics without trusting it blindly."""
+
+    try:
+        import whisper
+        import torch
+    except Exception:
+        return None
+
+    try:
+        samples = np.asarray(audio, dtype=np.float32)
+        mel = whisper.log_mel_spectrogram(whisper.pad_or_trim(samples))
+        device = getattr(whisper_model, "device", None)
+        if device is not None:
+            mel = mel.to(device)
+        with torch.no_grad():
+            _, probabilities = whisper_model.detect_language(mel)
+        if not probabilities:
+            return None
+        language = max(probabilities, key=probabilities.get)
+        return str(language), float(probabilities[language])
+    except Exception:
+        return None
+
+
+def _latin_ratio(text: str) -> float:
+    letters = [character for character in text if character.isalpha()]
+    if not letters:
+        return 1.0
+    latin = [character for character in letters if character.isascii()]
+    return len(latin) / max(1, len(letters))
+
+
+def transcribe_with_whisper_details(
+    audio: np.ndarray,
+    whisper_model: Any | None,
+    *,
+    language: str | None = "en",
+    task: str = "transcribe",
+    initial_prompt: str | None = None,
+    detect_language: bool = True,
+) -> dict[str, object]:
+    """Transcribe one chunk and return text plus quality diagnostics."""
 
     if whisper_model is None:
-        return ""
-    result = whisper_model.transcribe(
-        np.asarray(audio, dtype=np.float32),
-        fp16=False,
-        verbose=False,
-        condition_on_previous_text=False,
+        return {
+            "text": "",
+            "usable": False,
+            "quality_label": "Whisper unavailable",
+            "warnings": ["Local Whisper is unavailable."],
+            "language": language or "",
+            "language_confidence": None,
+            "forced_language": language or "",
+            "no_speech_probability": None,
+            "avg_logprob": None,
+            "compression_ratio": None,
+        }
+
+    detected = _detect_whisper_language(audio, whisper_model) if detect_language else None
+    detected_language = detected[0] if detected else ""
+    language_confidence = detected[1] if detected else None
+
+    decode_options: dict[str, object] = {
+        "fp16": False,
+        "verbose": None,
+        "condition_on_previous_text": False,
+        "task": task,
+        "temperature": 0.0,
+        "no_speech_threshold": 0.6,
+        "logprob_threshold": -1.0,
+    }
+    if language:
+        decode_options["language"] = language
+    if initial_prompt:
+        decode_options["initial_prompt"] = initial_prompt
+
+    result = whisper_model.transcribe(np.asarray(audio, dtype=np.float32), **decode_options)
+    text = str(result.get("text", "")).strip()
+    segments = result.get("segments", [])
+    segment_values = segments if isinstance(segments, list) else []
+
+    no_speech_values = [
+        float(segment.get("no_speech_prob"))
+        for segment in segment_values
+        if isinstance(segment, dict) and segment.get("no_speech_prob") is not None
+    ]
+    logprob_values = [
+        float(segment.get("avg_logprob"))
+        for segment in segment_values
+        if isinstance(segment, dict) and segment.get("avg_logprob") is not None
+    ]
+    compression_values = [
+        float(segment.get("compression_ratio"))
+        for segment in segment_values
+        if isinstance(segment, dict) and segment.get("compression_ratio") is not None
+    ]
+    no_speech_probability = max(no_speech_values) if no_speech_values else None
+    avg_logprob = sum(logprob_values) / len(logprob_values) if logprob_values else None
+    compression_ratio = max(compression_values) if compression_values else None
+
+    warnings: list[str] = []
+    usable = bool(text)
+    quality_label = "Transcript accepted" if usable else "No speech text produced"
+    expected_language = str(language or "").strip().casefold()
+
+    if not text:
+        warnings.append("Whisper did not produce usable speech text for this chunk.")
+    if (
+        expected_language
+        and detected_language
+        and detected_language.casefold() != expected_language
+        and language_confidence is not None
+        and language_confidence >= 0.55
+    ):
+        warnings.append(
+            f"Language check leaned {detected_language} ({language_confidence:.0%}) while English transcription is forced."
+        )
+    if no_speech_probability is not None and no_speech_probability >= 0.75:
+        warnings.append("Whisper marked this chunk as likely no-speech.")
+        if not text:
+            usable = False
+            quality_label = "Likely no speech"
+    if avg_logprob is not None and avg_logprob < -1.2:
+        warnings.append("Whisper confidence was low; verify the transcript before using it.")
+    if compression_ratio is not None and compression_ratio > 2.6:
+        warnings.append("Whisper output may be repetitive or hallucinated.")
+    if expected_language == "en" and text and _latin_ratio(text) < 0.80:
+        usable = False
+        quality_label = "Non-English characters detected"
+        warnings.append("Transcript contains many non-Latin characters while English mode is selected.")
+
+    return {
+        "text": text if usable else "",
+        "raw_text": text,
+        "usable": usable,
+        "quality_label": quality_label,
+        "warnings": warnings,
+        "language": str(result.get("language", detected_language or language or "")),
+        "detected_language": detected_language,
+        "language_confidence": language_confidence,
+        "forced_language": language or "",
+        "no_speech_probability": no_speech_probability,
+        "avg_logprob": avg_logprob,
+        "compression_ratio": compression_ratio,
+    }
+
+
+def transcribe_with_whisper(
+    audio: np.ndarray,
+    whisper_model: Any | None,
+    *,
+    language: str | None = "en",
+    task: str = "transcribe",
+) -> str:
+    """Transcribe one chunk with an optional local Whisper model."""
+
+    result = transcribe_with_whisper_details(
+        audio,
+        whisper_model,
+        language=language,
+        task=task,
     )
     return str(result.get("text", "")).strip()
 
@@ -575,9 +863,11 @@ def transcribe_with_whisper(audio: np.ndarray, whisper_model: Any | None) -> str
 __all__ = [
     "BEHAVIORAL_FEATURE_NAMES",
     "TARGET_SAMPLE_RATE",
+    "assess_speech_quality",
     "analyse_live_chunk",
     "extract_behavioral_features",
     "extract_live_features",
+    "transcribe_with_whisper_details",
     "transcribe_with_whisper",
     "wav_bytes_to_audio",
 ]

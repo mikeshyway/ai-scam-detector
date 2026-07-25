@@ -35,7 +35,13 @@ from src.phone.providers import (
     test_penipumy_connection,
 )
 from src.phone.providers.models import diagnostic_rows
-from src.reporting.history_db import record_history_item
+try:
+    from src.reporting.history_db import record_history_item
+except ImportError:
+    import importlib
+    import src.reporting.history_db as history_db
+
+    record_history_item = importlib.reload(history_db).record_history_item
 
 
 def _secret_value(*keys: str) -> str:
@@ -1074,13 +1080,20 @@ def _inject_phone_input_css() -> None:
     st.markdown(
         """
         <style>
-        .phone-workflow-shell {
-            border: 1px solid rgba(148, 163, 184, 0.20);
-            border-radius: 18px;
+        .st-key-phone_investigation_shell,
+        .st-key-phone_investigation_shell > div[data-testid="stVerticalBlockBorderWrapper"] {
+            border-radius: 18px !important;
+        }
+
+        .st-key-phone_investigation_shell > div[data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid rgba(249, 115, 22, 0.24) !important;
+            border-radius: 18px !important;
             padding: 1.05rem;
             background:
                 radial-gradient(circle at 78% 0%, rgba(249,115,22,.10), transparent 22rem),
-                rgba(15, 23, 42, 0.40);
+                linear-gradient(145deg, rgba(17, 24, 39, .98), rgba(10, 18, 33, .98)) !important;
+            box-shadow: 0 16px 38px rgba(0,0,0,.22), 0 0 22px rgba(249,115,22,.10) !important;
+            overflow: hidden !important;
         }
 
         .phone-provider-heading {
@@ -1178,6 +1191,24 @@ def _phone_widget_key(session_key: str, suffix: str) -> str:
     return f"_{session_key}_{suffix}"
 
 
+def _phone_provider_status_key_from_session(session_key: str) -> str:
+    return "phone_penipumy_provider_status" if "penipumy" in session_key else "phone_omkar_provider_status"
+
+
+def _record_phone_provider_status(session_key: str, result: dict[str, Any], *, source: str) -> None:
+    st.session_state[_phone_provider_status_key_from_session(session_key)] = {
+        "provider_id": result.get("provider_id") or result.get("provider"),
+        "provider_name": result.get("provider_name") or result.get("provider"),
+        "status": result.get("status"),
+        "success": result.get("success") if "success" in result else result.get("provider_success"),
+        "error_code": result.get("error_code"),
+        "error_message": result.get("error_message"),
+        "retry_attempted": result.get("retry_attempted", False),
+        "checked_at": result.get("checked_at") or datetime.now().isoformat(timespec="seconds"),
+        "source": source,
+    }
+
+
 def _hydrate_phone_widget_from_session(widget_key: str, session_key: str) -> None:
     session_value = str(st.session_state.get(session_key, "") or "")
     if session_value and not st.session_state.get(widget_key):
@@ -1197,6 +1228,7 @@ def _sync_phone_provider_enabled(
         st.session_state[session_key] = ""
         st.session_state[api_widget_key] = ""
         st.session_state.pop(diagnostic_key, None)
+        st.session_state.pop(_phone_provider_status_key_from_session(session_key), None)
 
 
 def _sync_phone_session_api_key(widget_key: str, session_key: str, diagnostic_key: str) -> None:
@@ -1205,6 +1237,7 @@ def _sync_phone_session_api_key(widget_key: str, session_key: str, diagnostic_ke
     st.session_state[session_key] = value
     if value != previous:
         st.session_state.pop(diagnostic_key, None)
+        st.session_state.pop(_phone_provider_status_key_from_session(session_key), None)
 
 
 def _phone_provider_key_config(provider_id: str) -> dict[str, object]:
@@ -1252,6 +1285,14 @@ def _status_chip(label: str) -> None:
     )
 
 
+def _provider_api_portal_url(provider_id: str) -> str:
+    if provider_id == "penipumy":
+        return "https://penipu.my"
+    if provider_id == "omkar_carrier_lookup":
+        return "https://www.omkar.cloud"
+    return ""
+
+
 def _provider_status_label(
     enabled: bool,
     key_meta: dict[str, object],
@@ -1269,6 +1310,10 @@ def _provider_status_label(
             return "Authentication rejected"
         if error_code == "rate_limited":
             return "Rate limited"
+        if error_code == "timeout":
+            return "Timed out"
+        if error_code == "connection_failed":
+            return "Network failed"
         return "Connection failed"
     return "Ready" if key_meta.get("configured") else "Not configured"
 
@@ -1288,6 +1333,27 @@ def _render_diagnostics_expander(title: str, diagnostic_key: str) -> None:
         fields = diagnostic.get("raw_field_names") or []
         if fields:
             st.caption(f"Fields returned: {', '.join(str(item) for item in fields)}")
+
+        error_code = str(diagnostic.get("error_code") or "none")
+        provider_id = str(diagnostic.get("provider_id") or "")
+        provider_name = str(diagnostic.get("provider_name") or "provider")
+        portal_url = _provider_api_portal_url(provider_id)
+        if error_code == "timeout":
+            st.warning(
+                f"{provider_name} did not return a response before the timeout. The app retries once with a longer "
+                "timeout; if this keeps happening, wait a moment and test again. If it still fails, retrieve or "
+                "regenerate the API key from the provider website and paste the fresh key here."
+            )
+        elif error_code == "authentication_failed":
+            st.warning(
+                f"{provider_name} rejected the API key. Retrieve or regenerate the API key from the provider website, "
+                "paste the fresh key here, then press Enter before testing again."
+            )
+        elif error_code == "missing_key":
+            st.info(f"Paste a {provider_name} API key, then press Enter before testing the connection.")
+
+        if portal_url and error_code in {"timeout", "authentication_failed", "missing_key"}:
+            st.link_button(f"Open {provider_name} Website", portal_url, use_container_width=True)
 
 
 def _render_live_provider_card(
@@ -1332,6 +1398,7 @@ def _render_live_provider_card(
             st.session_state[session_key] = ""
             st.session_state[api_widget_key] = ""
             st.session_state.pop(diagnostic_key, None)
+            st.session_state.pop(_phone_provider_status_key_from_session(session_key), None)
         else:
             _hydrate_phone_widget_from_session(api_widget_key, session_key)
 
@@ -1380,6 +1447,8 @@ def _render_live_provider_card(
                         key_variable=str(key_meta.get("variable", "-")),
                     )
                 st.session_state[diagnostic_key] = diagnostic.as_dict()
+                _record_phone_provider_status(session_key, diagnostic.as_dict(), source="connection_test")
+                st.rerun()
 
         diagnostic = st.session_state.get(diagnostic_key)
         _status_chip(_provider_status_label(enabled, key_meta, diagnostic if isinstance(diagnostic, dict) else None))
@@ -1453,18 +1522,24 @@ def _build_phone_investigation(
         if omkar_key:
             omkar_result = lookup_omkar_metadata(normalized_number, omkar_key).as_dict()
             metadata = _provider_result_block(omkar_result, default_provider="omkar", enabled=True)
+            _record_phone_provider_status("phone_omkar_api_key", omkar_result, source="investigation")
             completed += 1 if omkar_result.get("success") else 0
             failed += 0 if omkar_result.get("success") else 1
+        else:
+            _record_phone_provider_status("phone_omkar_api_key", metadata, source="investigation")
 
     if penipumy_enabled:
         requested += 1
         if penipumy_key:
             penipu_result = lookup_penipumy_reputation(normalized_number, penipumy_key).as_dict()
             reputation = _provider_result_block(penipu_result, default_provider="penipumy", enabled=True)
+            _record_phone_provider_status("phone_penipumy_api_key", penipu_result, source="investigation")
             if penipu_result.get("success"):
                 completed += 1
             else:
                 failed += 1
+        else:
+            _record_phone_provider_status("phone_penipumy_api_key", reputation, source="investigation")
 
     return {
         "input": {
@@ -1481,6 +1556,19 @@ def _build_phone_investigation(
         },
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
+
+
+def _phone_result_matches_current_number(
+    investigation: dict[str, Any],
+    *,
+    current_number_ok: bool,
+    current_normalized_number: str,
+) -> bool:
+    if not current_number_ok:
+        return False
+    saved_input = dict(investigation.get("input") or {})
+    saved_normalized_number = str(saved_input.get("normalized_number") or "").strip()
+    return bool(saved_normalized_number) and saved_normalized_number == str(current_normalized_number or "").strip()
 
 
 CONCERN_WEIGHTS = {
@@ -2542,143 +2630,156 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
         accent="orange",
     )
 
-    st.markdown('<div class="phone-workflow-shell">', unsafe_allow_html=True)
-
-    _render_phone_step(
-        "01",
-        "Enter Phone Number",
-        "Provide the caller number and any identity claimed during the call.",
-    )
-
-    number_col, identity_col, preview_col = st.columns([0.36, 0.38, 0.26], gap="small")
-    with number_col:
-        number = st.text_input(
-            "Phone number",
-            placeholder="012-345 6789 or +60 12-345 6789",
-            help="Accepted examples: 012-345 6789, +60 12-345 6789, or (03) 1234 5678.",
-            key="phone_investigation_number",
+    with st.container(key="phone_investigation_shell", border=True):
+        _render_phone_step(
+            "01",
+            "Enter Phone Number",
+            "Provide the caller number and any identity claimed during the call.",
         )
-        st.caption("Examples: 012-345 6789, +60 12-345 6789, (03) 1234 5678")
 
-    with identity_col:
-        claimed_identity = st.text_input(
-            "Claimed caller identity (optional)",
-            placeholder="e.g., bank officer, courier, university support",
-            key="phone_claimed_identity",
-        )
-        st.caption("Helps interpret the context of the call.")
-
-    ok, validation_message = validate_phone_query(number)
-    normalized = normalise_phone_query(number)
-    with preview_col:
-        if ok and normalized:
-            st.markdown(
-                f"""
-                <div class="phone-normalized-preview">
-                    <span>Normalized number</span>
-                    <strong>{html.escape(normalized)}</strong>
-                    <span style="margin-top:.55rem">Malaysia - E.164-style</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
+        number_col, identity_col, preview_col = st.columns([0.36, 0.38, 0.26], gap="small")
+        with number_col:
+            number = st.text_input(
+                "Phone number",
+                placeholder="012-345 6789 or +60 12-345 6789",
+                help="Accepted examples: 012-345 6789, +60 12-345 6789, or (03) 1234 5678.",
+                key="phone_investigation_number",
             )
-        elif number.strip():
-            st.warning(validation_message)
-        else:
-            st.info("Enter a number to preview normalization.")
-
-    st.divider()
-
-    _render_phone_step(
-        "02",
-        "Provider Configuration & Status",
-        "Configure providers, test connections, and view their current status.",
-    )
-
-    provider_cols = st.columns(2, gap="small")
-    with provider_cols[0]:
-        omkar_info = _render_live_provider_card(
-            provider_id="omkar_carrier_lookup",
-            title="Omkar Carrier Lookup",
-            purpose="Carrier and number metadata",
-            icon="solar:radio-bold-duotone",
-            enabled_key="phone_omkar_enabled",
-            session_key="phone_omkar_api_key",
-            test_number_key="phone_omkar_test_number",
-            diagnostic_key="phone_omkar_diagnostic",
-        )
-
-    with provider_cols[1]:
-        penipu_info = _render_live_provider_card(
-            provider_id="penipumy",
-            title="PenipuMY",
-            purpose="Malaysian scam reports and community reputation",
-            icon="solar:users-group-rounded-bold-duotone",
-            enabled_key="phone_penipumy_enabled",
-            session_key="phone_penipumy_api_key",
-            test_number_key="phone_penipumy_test_number",
-            diagnostic_key="phone_penipumy_diagnostic",
-        )
-
-    _render_status_row(
-        bool(omkar_info["enabled"]),
-        dict(omkar_info["key_meta"]),
-        bool(penipu_info["enabled"]),
-        dict(penipu_info["key_meta"]),
-    )
-
-    st.divider()
-
-    _render_phone_step(
-        "03",
-        "Start Investigation",
-        "Run enabled provider checks and prepare combined caller evidence.",
-    )
-
-    has_usable_provider = any(
-        [
-            bool(omkar_info["enabled"]) and bool(omkar_info["key_meta"].get("configured")),
-            bool(penipu_info["enabled"]) and bool(penipu_info["key_meta"].get("configured")),
-        ]
-    )
-    disabled_reason = ""
-    if not ok:
-        disabled_reason = validation_message or "Enter a valid phone number first."
-    elif not has_usable_provider:
-        disabled_reason = "Enable at least one live provider with a configured API key."
-
-    with st.container(key="phone_investigate_button"):
-        investigate = st.button(
-            "Investigate Phone Number",
-            use_container_width=True,
-            disabled=bool(disabled_reason),
-        )
-
-    if disabled_reason:
-        st.caption(disabled_reason)
-
-    if investigate:
-        with st.spinner("Collecting phone evidence..."):
-            investigation = _build_phone_investigation(
-                root=root,
-                raw_number=number,
-                normalized_number=normalized,
-                claimed_identity=claimed_identity,
-                omkar_enabled=bool(omkar_info["enabled"]),
-                omkar_key=str(omkar_info["key_meta"].get("key", "")),
-                penipumy_enabled=bool(penipu_info["enabled"]),
-                penipumy_key=str(penipu_info["key_meta"].get("key", "")),
+            st.caption("Examples: 012-345 6789, +60 12-345 6789, (03) 1234 5678")
+            st.caption(
+                "Need a test case? Open [PenipuMY Hall of Shame](https://penipu.my/hall-of-shame) "
+                "and paste a reported phone number here if one is available."
             )
-            investigation["assessment"] = _build_phone_assessment(investigation)
-            st.session_state["phone_investigation_result"] = investigation
-            _record_phone_investigation(history, investigation)
-        render_analysis_ready("Phone investigation evidence collected")
-        st.caption("The unified investigation object is saved in session state for the next output phase.")
+
+        with identity_col:
+            claimed_identity = st.text_input(
+                "Claimed caller identity (optional)",
+                placeholder="e.g., bank officer, courier, university support",
+                key="phone_claimed_identity",
+            )
+            st.caption("Helps interpret the context of the call.")
+
+        ok, validation_message = validate_phone_query(number)
+        normalized = normalise_phone_query(number)
+        with preview_col:
+            if ok and normalized:
+                st.markdown(
+                    f"""
+                    <div class="phone-normalized-preview">
+                        <span>Normalized number</span>
+                        <strong>{html.escape(normalized)}</strong>
+                        <span style="margin-top:.55rem">Malaysia - E.164-style</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            elif number.strip():
+                st.warning(validation_message)
+            else:
+                st.info("Enter a number to preview normalization.")
+
+        st.divider()
+
+        _render_phone_step(
+            "02",
+            "Provider Configuration & Status",
+            "Configure providers, test connections, and view their current status.",
+        )
+
+        provider_cols = st.columns(2, gap="small")
+        with provider_cols[0]:
+            omkar_info = _render_live_provider_card(
+                provider_id="omkar_carrier_lookup",
+                title="Omkar Carrier Lookup",
+                purpose="Carrier and number metadata",
+                icon="solar:radio-bold-duotone",
+                enabled_key="phone_omkar_enabled",
+                session_key="phone_omkar_api_key",
+                test_number_key="phone_omkar_test_number",
+                diagnostic_key="phone_omkar_diagnostic",
+            )
+
+        with provider_cols[1]:
+            penipu_info = _render_live_provider_card(
+                provider_id="penipumy",
+                title="PenipuMY",
+                purpose="Malaysian scam reports and community reputation",
+                icon="solar:users-group-rounded-bold-duotone",
+                enabled_key="phone_penipumy_enabled",
+                session_key="phone_penipumy_api_key",
+                test_number_key="phone_penipumy_test_number",
+                diagnostic_key="phone_penipumy_diagnostic",
+            )
+
+        _render_status_row(
+            bool(omkar_info["enabled"]),
+            dict(omkar_info["key_meta"]),
+            bool(penipu_info["enabled"]),
+            dict(penipu_info["key_meta"]),
+        )
+
+        st.divider()
+
+        _render_phone_step(
+            "03",
+            "Start Investigation",
+            "Run enabled provider checks and prepare combined caller evidence.",
+        )
+
+        has_usable_provider = any(
+            [
+                bool(omkar_info["enabled"]) and bool(omkar_info["key_meta"].get("configured")),
+                bool(penipu_info["enabled"]) and bool(penipu_info["key_meta"].get("configured")),
+            ]
+        )
+        disabled_reason = ""
+        if not ok:
+            disabled_reason = validation_message or "Enter a valid phone number first."
+        elif not has_usable_provider:
+            disabled_reason = "Enable at least one live provider with a configured API key."
+
+        with st.form("phone_investigation_form", clear_on_submit=False):
+            investigate = st.form_submit_button(
+                "Investigate Phone Number",
+                use_container_width=True,
+                disabled=bool(disabled_reason),
+            )
+
+        if disabled_reason:
+            st.caption(disabled_reason)
+
+        if investigate:
+            with st.spinner("Collecting phone evidence..."):
+                investigation = _build_phone_investigation(
+                    root=root,
+                    raw_number=number,
+                    normalized_number=normalized,
+                    claimed_identity=claimed_identity,
+                    omkar_enabled=bool(omkar_info["enabled"]),
+                    omkar_key=str(omkar_info["key_meta"].get("key", "")),
+                    penipumy_enabled=bool(penipu_info["enabled"]),
+                    penipumy_key=str(penipu_info["key_meta"].get("key", "")),
+                )
+                investigation["assessment"] = _build_phone_assessment(investigation)
+                st.session_state["phone_investigation_result"] = investigation
+                _record_phone_investigation(history, investigation)
+            st.session_state["phone_investigation_just_completed"] = True
+            st.rerun()
 
     investigation_result = st.session_state.get("phone_investigation_result")
     if isinstance(investigation_result, dict):
-        st.divider()
-        _render_caller_investigation_summary(investigation_result)
+        if _phone_result_matches_current_number(
+            investigation_result,
+            current_number_ok=ok,
+            current_normalized_number=normalized,
+        ):
+            st.divider()
+            if st.session_state.pop("phone_investigation_just_completed", False):
+                render_analysis_ready("Phone investigation evidence collected")
+                st.caption("The unified investigation object is saved in session state for the next output phase.")
+            _render_caller_investigation_summary(investigation_result)
+        else:
+            st.session_state.pop("phone_investigation_result", None)
+            st.session_state.pop("phone_investigation_just_completed", None)
 
-    st.markdown("</div>", unsafe_allow_html=True)
     return

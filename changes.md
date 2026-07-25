@@ -1,5 +1,17 @@
 # Changes
 
+## 2026-07-25 - Final prototype evidence documentation sync
+
+- Established `notebooks/00_final_prototype_evidence_notebook.ipynb` as the
+  main evidence reference for the final proposal.
+- Added a text companion at `docs/FINAL_PROTOTYPE_EVIDENCE_SUMMARY.md`.
+- Synced README, architecture, data pipeline, model training, phone module, and
+  dataset setup documentation to the final scope: Detection Center with three
+  tabs plus the AI Report Generator.
+- Clarified that phone checks use provider-pulled evidence and transparent
+  rules rather than a locally trained phone ML model.
+- Retained historical notes below instead of replacing them.
+
 ## 2026-07-09 - Option A source and script naming
 
 - Renamed reusable preprocessing modules to `*_preprocessor.py`.
@@ -24,16 +36,18 @@
   documentation to match the current project.
 
 This document records project changes made after the original proposal so the implementation
-stays aligned with the current capstone demo scope.
+stays aligned with the capstone demo scope. Sections below this point are
+historical change notes from earlier implementation stages; the final proposal
+scope is summarized at the top of this file and in the final evidence notebook.
 
-## Current Direction
+## Historical Direction At That Stage
 
 The project now combines uploaded-evidence detection with short local audio workflows. The Live
 Audio Detection page supports browser voice recording and a separate internal system-audio
 capture mode that sends each completed WAV clip to Python for transcription, audio features,
 and scam-risk analysis.
 
-## Current Page Structure
+## Historical Page Structure At That Stage
 
 1. Scam Simulation Lab
 2. Live Audio Detection
@@ -99,7 +113,7 @@ Replacement:
 
 ### Phone Number Integration
 
-Not implemented.
+True telecom caller-ID integration was not implemented.
 
 Reason:
 
@@ -108,8 +122,8 @@ Reason:
 
 Replacement:
 
-- Manual Phone Number Risk Checker using educational heuristics and synthetic demo reputation
-  data.
+- Manual Phone Number tab using configured provider evidence, transparent rules,
+  and local/demo fallback evidence where allowed.
 
 ### Internal Device Audio Capture
 

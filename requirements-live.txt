@@ -1,5 +1,4 @@
--r requirements.txt
+-r requirements-local.txt
 
 # Kept for compatibility with older setup notes.
-# Live audio dependencies are now included in requirements.txt.
-openai-whisper
+# Local live audio dependencies are now kept out of hosted requirements.txt.

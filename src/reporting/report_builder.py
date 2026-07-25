@@ -466,7 +466,7 @@ def _scope_lines() -> list[str]:
     return [
         "Scope and Limitations",
         "- Email: TF-IDF with trained email classifiers.",
-        "- Transcript: TF-IDF text classification after manual input or Whisper transcription.",
+        "- Transcript: multi-model text classification after manual input or Whisper transcription.",
         "- Audio: MFCC voice-authenticity analysis, behavioral audio features, and transcript analysis.",
         "- Phone: Omkar carrier metadata, local reputation fallback, and transparent rules.",
         "- This report is an educational capstone prototype output, not legal or forensic proof.",
@@ -726,7 +726,7 @@ def build_pdf(rows: list[dict[str, object]], report_note: str, sections: dict[st
         appendix = [
             ["System", "AI-FDS Capstone Prototype"],
             ["Email", "TF-IDF with trained email classifiers"],
-            ["Transcript", "TF-IDF text classification after manual input or Whisper transcription"],
+            ["Transcript", "Multi-model text classification after manual input or Whisper transcription"],
             ["Audio", "MFCC voice-authenticity analysis, behavioral audio features, and transcript analysis"],
             ["Phone", "Omkar carrier metadata, local reputation fallback, and transparent rules"],
             ["Scope", "Educational scam awareness support. Not enterprise security, telecom verification, or legal evidence."],
@@ -901,7 +901,7 @@ def build_docx(rows: list[dict[str, object]], report_note: str, sections: dict[s
             [
                 ("System", "AI-FDS Capstone Prototype"),
                 ("Email", "TF-IDF with trained email classifiers"),
-                ("Transcript", "TF-IDF text classification after manual input or Whisper transcription"),
+                ("Transcript", "Multi-model text classification after manual input or Whisper transcription"),
                 ("Audio", "MFCC voice-authenticity analysis, behavioral audio features, and transcript analysis"),
                 ("Phone", "Omkar carrier metadata, local reputation fallback, and transparent rules"),
                 ("Scope", "Educational scam awareness support. Not enterprise security, telecom verification, or legal evidence."),

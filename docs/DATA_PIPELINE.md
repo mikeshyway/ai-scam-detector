@@ -1,5 +1,10 @@
 # Data Pipeline
 
+The final evidence notebook,
+`notebooks/00_final_prototype_evidence_notebook.ipynb`, is the main
+reviewer-facing proof for dataset readiness and charts. This document keeps the
+channel-by-channel data flow and dataset-purpose notes.
+
 ## Lifecycle
 
 ```text
@@ -14,6 +19,15 @@ Raw dataset
 
 Raw files are treated as source material and are not modified. Processed files
 can be regenerated.
+
+## Dataset Purpose
+
+| Channel | Dataset Purpose | Important Boundary |
+| --- | --- | --- |
+| Email/message | Train phishing/legitimate text classifiers from email/message examples. | Metrics describe the available dataset mix, not universal accuracy. |
+| Transcript | Train scam-intent classifiers from labeled call or conversation text. | Scam-only transcript sources are useful for demos, not as the only binary training source. |
+| Audio | Train bonafide/spoof voice classifiers using ASVspoof-style audio evidence. | Audio uses train/dev style validation rather than the text 80/20 split. |
+| Phone | Provide traceable fallback/provider-style evidence fields for lookup demonstration. | Phone evidence is not local ML training data. |
 
 ## Email
 
@@ -68,6 +82,10 @@ Fictional presentation records belong in `data/demo/phone_demo_dataset.csv` and
 are queried only when the Phone Number tab's Demo Mode is explicitly enabled.
 Demo records must be labelled with `record_type=demo`, `is_demo=true`,
 `source_reference`, and `last_verified`.
+
+The final notebook may also read `data/demo/demo_phone_numbers.csv` as a small
+repeatable demonstration file. These demo rows are for presentation support
+only and should not be described as trained phone-risk values.
 
 ## Data Safety
 

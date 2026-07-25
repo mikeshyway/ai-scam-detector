@@ -441,6 +441,75 @@ def educational_summary(
     )
 
 
+def _model_identity(model: Any) -> tuple[str, str, bool]:
+    model_name = type(model).__name__.casefold()
+    model_module = type(model).__module__.casefold()
+    is_xgboost = "xgb" in model_name or "xgboost" in model_module
+    model_family = "xgboost" if is_xgboost else "standard"
+    return model_name, model_family, is_xgboost
+
+
+def _direct_model_weights(model: Any) -> tuple[np.ndarray | None, bool, str, str]:
+    _model_name, model_family, is_xgboost = _model_identity(model)
+    if hasattr(model, "feature_log_prob_") and model.feature_log_prob_.shape[0] >= 2:
+        return (
+            np.asarray(model.feature_log_prob_[1] - model.feature_log_prob_[0]),
+            True,
+            "naive_bayes_log_probability_delta",
+            model_family,
+        )
+    if hasattr(model, "coef_"):
+        return np.ravel(model.coef_), True, "linear_coefficient", model_family
+    if hasattr(model, "feature_importances_"):
+        method = "xgboost_feature_importance" if is_xgboost else "tree_feature_importance"
+        return np.asarray(model.feature_importances_), not is_xgboost, method, model_family
+
+    return None, True, "model_weight", model_family
+
+
+def _calibrated_estimators(model: Any) -> list[Any]:
+    estimators = []
+    for calibrated in getattr(model, "calibrated_classifiers_", []) or []:
+        estimator = getattr(calibrated, "estimator", None) or getattr(calibrated, "base_estimator", None)
+        if estimator is not None:
+            estimators.append(estimator)
+    return estimators
+
+
+def _model_weights(model: Any) -> tuple[np.ndarray | None, bool, str, str]:
+    weights, directional, method, model_family = _direct_model_weights(model)
+    if weights is not None:
+        return weights, directional, method, model_family
+
+    calibrated_weights = []
+    calibrated_directional = True
+    calibrated_method = "calibrated_model_weight"
+    calibrated_family = model_family
+    for estimator in _calibrated_estimators(model):
+        estimator_weights, estimator_directional, estimator_method, estimator_family = _direct_model_weights(estimator)
+        if estimator_weights is None:
+            continue
+        calibrated_weights.append(estimator_weights)
+        calibrated_directional = estimator_directional
+        calibrated_method = f"calibrated_{estimator_method}"
+        calibrated_family = estimator_family
+
+    if not calibrated_weights:
+        return None, directional, method, model_family
+
+    first_shape = calibrated_weights[0].shape
+    aligned = [weights for weights in calibrated_weights if weights.shape == first_shape]
+    if not aligned:
+        return None, directional, method, model_family
+
+    return (
+        np.mean(np.vstack(aligned), axis=0),
+        calibrated_directional,
+        calibrated_method,
+        calibrated_family,
+    )
+
+
 def top_model_terms(
     text: str,
     vectorizer: Any,
@@ -456,22 +525,7 @@ def top_model_terms(
         if len(active_indices) == 0:
             return []
 
-        model_name = type(model).__name__.casefold()
-        model_module = type(model).__module__.casefold()
-        is_xgboost = "xgb" in model_name or "xgboost" in model_module
-        weights = None
-        directional = True
-        method = "model_weight"
-        if hasattr(model, "feature_log_prob_") and model.feature_log_prob_.shape[0] >= 2:
-            weights = model.feature_log_prob_[1] - model.feature_log_prob_[0]
-            method = "naive_bayes_log_probability_delta"
-        elif hasattr(model, "coef_"):
-            weights = np.ravel(model.coef_)
-            method = "linear_coefficient"
-        elif hasattr(model, "feature_importances_"):
-            weights = model.feature_importances_
-            directional = not is_xgboost
-            method = "xgboost_feature_importance" if is_xgboost else "tree_feature_importance"
+        weights, directional, method, model_family = _model_weights(model)
 
         if weights is None:
             return []
@@ -484,7 +538,7 @@ def top_model_terms(
                 "score": float(scores[index]),
                 "directional": directional,
                 "method": method,
-                "model_family": "xgboost" if is_xgboost else "standard",
+                "model_family": model_family,
             }
             for index in order
         ]

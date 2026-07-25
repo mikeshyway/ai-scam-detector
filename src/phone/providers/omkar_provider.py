@@ -21,10 +21,42 @@ from src.phone.providers.models import (
 
 PROVIDER_ID = "omkar_carrier_lookup"
 PROVIDER_NAME = "Omkar Carrier Lookup"
+PRIMARY_TIMEOUT_SECONDS = 10.0
+RETRY_TIMEOUT_SECONDS = 20.0
 
 
 def _request_id(payload: dict[str, Any]) -> str:
     return str(payload.get("request_id") or payload.get("id") or "")
+
+
+def _lookup_with_timeout_retry(
+    number: str,
+    api_key: str,
+    *,
+    timeout: float = PRIMARY_TIMEOUT_SECONDS,
+    retry_timeout: float = RETRY_TIMEOUT_SECONDS,
+) -> tuple[dict[str, object], bool]:
+    result = lookup_omkar_phone(number, api_key, timeout=timeout)
+    status_code = result.get("status_code")
+    error_code = normalize_error_code(
+        status_code if isinstance(status_code, int) else None,
+        result.get("error"),
+    )
+    if error_code != "timeout":
+        return result, False
+
+    retry_result = lookup_omkar_phone(number, api_key, timeout=retry_timeout)
+    retry_status_code = retry_result.get("status_code")
+    retry_error_code = normalize_error_code(
+        retry_status_code if isinstance(retry_status_code, int) else None,
+        retry_result.get("error"),
+    )
+    if retry_error_code == "timeout":
+        retry_result = dict(retry_result)
+        retry_result["error"] = (
+            f"Omkar Carrier Lookup timed out after retry ({int(timeout)}s then {int(retry_timeout)}s)."
+        )
+    return retry_result, True
 
 
 def test_omkar_connection(
@@ -33,7 +65,7 @@ def test_omkar_connection(
     *,
     key_source: str,
     key_variable: str,
-    timeout: float = 10.0,
+    timeout: float = PRIMARY_TIMEOUT_SECONDS,
 ) -> ProviderDiagnosticResult:
     api_key = str(api_key or "").strip()
     configured = bool(api_key)
@@ -86,7 +118,11 @@ def test_omkar_connection(
             error_message=message,
         )
 
-    live = lookup_omkar_phone(format_phone_for_omkar(test_number), api_key, timeout=timeout)
+    live, retry_attempted = _lookup_with_timeout_retry(
+        format_phone_for_omkar(test_number),
+        api_key,
+        timeout=timeout,
+    )
     elapsed_ms = (time.perf_counter() - started) * 1000
     payload = dict(live.get("record", {})) if isinstance(live.get("record"), dict) else {}
     fields_returned, fields_populated = top_level_field_counts(payload)
@@ -117,10 +153,11 @@ def test_omkar_connection(
         error_code=error_code,
         error_message=error_message,
         raw_field_names=list(payload.keys()),
+        retry_attempted=retry_attempted,
     )
 
 
-def lookup_omkar_metadata(number: str, api_key: str, *, timeout: float = 10.0) -> PhoneProviderResult:
+def lookup_omkar_metadata(number: str, api_key: str, *, timeout: float = PRIMARY_TIMEOUT_SECONDS) -> PhoneProviderResult:
     normalized = normalise_phone_query(number)
     api_key = str(api_key or "").strip()
 
@@ -137,7 +174,11 @@ def lookup_omkar_metadata(number: str, api_key: str, *, timeout: float = 10.0) -
         )
 
     started = time.perf_counter()
-    live = lookup_omkar_phone(format_phone_for_omkar(normalized), api_key, timeout=timeout)
+    live, retry_attempted = _lookup_with_timeout_retry(
+        format_phone_for_omkar(normalized),
+        api_key,
+        timeout=timeout,
+    )
     elapsed_ms = (time.perf_counter() - started) * 1000
     payload = dict(live.get("record", {})) if isinstance(live.get("record"), dict) else {}
     status_code = live.get("status_code")
@@ -155,6 +196,7 @@ def lookup_omkar_metadata(number: str, api_key: str, *, timeout: float = 10.0) -
             response_time_ms=elapsed_ms,
             rate_limit=dict(live.get("rate_limit", {})),
             request_id=_request_id(payload) or None,
+            retry_attempted=retry_attempted,
         )
 
     return PhoneProviderResult(
@@ -170,4 +212,5 @@ def lookup_omkar_metadata(number: str, api_key: str, *, timeout: float = 10.0) -
         response_time_ms=elapsed_ms,
         rate_limit=dict(live.get("rate_limit", {})),
         request_id=_request_id(payload) or None,
+        retry_attempted=retry_attempted,
     )

@@ -21,8 +21,6 @@ import streamlit as st
 from app.ui_components import (
     apply_chart_theme,
     render_analysis_ready,
-    render_content_card_close,
-    render_content_card_open,
     render_detection_tool_intro,
     render_section_header,
     render_soft_panel,
@@ -33,7 +31,13 @@ from src.text.explainability import (
     type_intention,
     top_model_terms,
 )
-from src.reporting.history_db import record_history_item
+try:
+    from src.reporting.history_db import record_history_item
+except ImportError:
+    import importlib
+    import src.reporting.history_db as history_db
+
+    record_history_item = importlib.reload(history_db).record_history_item
 from src.text.text_classifier import load_text_artifacts
 
 
@@ -920,107 +924,107 @@ def _render_email_input_container(
 
         st.markdown('<div class="email-step-divider"></div>', unsafe_allow_html=True)
 
-        _step_header(
-            "02",
-            "Review Extracted Content",
-            "Preview, edit or paste the extracted content before running analysis.",
-        )
+        with st.form("email_analysis_form", clear_on_submit=False):
+            _step_header(
+                "02",
+                "Review Extracted Content",
+                "Preview, edit or paste the extracted content before running analysis.",
+            )
 
-        text = st.text_area(
-            "Evidence preview",
-            key="email_evidence_text",
-            height=205,
-            placeholder="Extracted content will appear here...",
-            help="The text shown here is the exact content sent to the selected AI models.",
-            label_visibility="collapsed",
-        )
+            text = st.text_area(
+                "Evidence preview",
+                key="email_evidence_text",
+                height=205,
+                placeholder="Extracted content will appear here...",
+                help="The text shown here is the exact content sent to the selected AI models.",
+                label_visibility="collapsed",
+            )
 
-        metadata_upload = uploaded_file
-        if metadata_upload is None and st.session_state.get("email_uploaded_file_name"):
-            metadata_upload = SimpleNamespace(name=st.session_state.email_uploaded_file_name)
+            metadata_upload = uploaded_file
+            if metadata_upload is None and st.session_state.get("email_uploaded_file_name"):
+                metadata_upload = SimpleNamespace(name=st.session_state.email_uploaded_file_name)
 
-        metadata = _email_evidence_metadata(text, metadata_upload, uploaded)
-        source_value = html.escape(str(metadata["source"]))
-        filename_value = html.escape(str(metadata["filename"]))
-        status_value = html.escape(str(metadata["status"]))
+            metadata = _email_evidence_metadata(text, metadata_upload, uploaded)
+            source_value = html.escape(str(metadata["source"]))
+            filename_value = html.escape(str(metadata["filename"]))
+            status_value = html.escape(str(metadata["status"]))
 
-        st.markdown(
-            '<div class="email-preview-meta">'
-            f'<div class="email-meta-item"><span class="email-meta-label">Source</span>'
-            f'<span class="email-meta-value">{source_value}<br>{filename_value}</span></div>'
-            f'<div class="email-meta-item"><span class="email-meta-label">Characters</span>'
-            f'<span class="email-meta-value">{metadata["characters"]:,}</span></div>'
-            f'<div class="email-meta-item"><span class="email-meta-label">Words</span>'
-            f'<span class="email-meta-value">{metadata["words"]:,}</span></div>'
-            f'<div class="email-meta-item"><span class="email-meta-label">Status</span>'
-            f'<span class="email-meta-value">{status_value}</span></div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+            st.markdown(
+                '<div class="email-preview-meta">'
+                f'<div class="email-meta-item"><span class="email-meta-label">Source</span>'
+                f'<span class="email-meta-value">{source_value}<br>{filename_value}</span></div>'
+                f'<div class="email-meta-item"><span class="email-meta-label">Characters</span>'
+                f'<span class="email-meta-value">{metadata["characters"]:,}</span></div>'
+                f'<div class="email-meta-item"><span class="email-meta-label">Words</span>'
+                f'<span class="email-meta-value">{metadata["words"]:,}</span></div>'
+                f'<div class="email-meta-item"><span class="email-meta-label">Status</span>'
+                f'<span class="email-meta-value">{status_value}</span></div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
 
-        st.markdown('<div class="email-step-divider"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="email-step-divider"></div>', unsafe_allow_html=True)
 
-        _step_header(
-            "03",
-            "Configure Investigation",
-            "Choose the AI models to compare for this evidence.",
-        )
+            _step_header(
+                "03",
+                "Configure Investigation",
+                "Choose the AI models to compare for this evidence.",
+            )
 
-        model_choices: list[str] = []
+            model_choices: list[str] = []
 
-        with st.container(key="email_config_section"):
-            with st.container(key="email_model_panel", border=True):
-                st.markdown(
-                    '<div class="email-model-title">AI Models</div>',
-                    unsafe_allow_html=True,
-                )
-
-                for model_name in model_options:
-                    model_key = f"email_model_{model_name.lower().replace(' ', '_')}"
-                    row_label, row_toggle = st.columns(
-                        [0.90, 0.10],
-                        gap="small",
-                        vertical_alignment="center",
+            with st.container(key="email_config_section"):
+                with st.container(key="email_model_panel", border=True):
+                    st.markdown(
+                        '<div class="email-model-title">AI Models</div>',
+                        unsafe_allow_html=True,
                     )
 
-                    with row_label:
-                        icon_name = model_icons.get(
-                            model_name,
-                            "solar:settings-bold-duotone",
+                    for model_name in model_options:
+                        model_key = f"email_model_{model_name.lower().replace(' ', '_')}"
+                        row_label, row_toggle = st.columns(
+                            [0.90, 0.10],
+                            gap="small",
+                            vertical_alignment="center",
                         )
 
-                        icon_url = (
-                            "https://api.iconify.design/"
-                            + icon_name.replace(":", "/")
-                            + ".svg"
-                        )
+                        with row_label:
+                            icon_name = model_icons.get(
+                                model_name,
+                                "solar:settings-bold-duotone",
+                            )
 
-                        st.markdown(
-                            '<div class="email-model-row-label">'
-                            f'<span class="email-model-icon" '
-                            f'style="--model-icon:url(\'{icon_url}\')"></span>'
-                            f'<span>{html.escape(model_name)}</span>'
-                            '</div>',
-                            unsafe_allow_html=True,
-                        )
+                            icon_url = (
+                                "https://api.iconify.design/"
+                                + icon_name.replace(":", "/")
+                                + ".svg"
+                            )
 
-                    with row_toggle:
-                        selected = st.toggle(
-                            f"Use {model_name}",
-                            key=model_key,
-                            label_visibility="collapsed",
-                        )
+                            st.markdown(
+                                '<div class="email-model-row-label">'
+                                f'<span class="email-model-icon" '
+                                f'style="--model-icon:url(\'{icon_url}\')"></span>'
+                                f'<span>{html.escape(model_name)}</span>'
+                                '</div>',
+                                unsafe_allow_html=True,
+                            )
 
-                    if selected:
-                        model_choices.append(model_name)
+                        with row_toggle:
+                            selected = st.toggle(
+                                f"Use {model_name}",
+                                key=model_key,
+                                label_visibility="collapsed",
+                            )
 
-        analyze_button = st.button(
-            "\u2726  Analyze Evidence",
-            type="primary",
-            use_container_width=True,
-            disabled=not text.strip() or not model_choices,
-            key="email_analyze_evidence",
-        )
+                        if selected:
+                            model_choices.append(model_name)
+
+            analyze_button = st.form_submit_button(
+                "\u2726  Analyze Evidence",
+                type="primary",
+                use_container_width=True,
+                disabled=not text.strip() or not model_choices,
+            )
 
     return uploaded_file, uploaded, text, model_choices, analyze_button
 
@@ -1248,6 +1252,32 @@ def _comparison_with_metrics(
     return pd.DataFrame(rows)
 
 
+def _decision_trace_dataframe(
+    df_compare: pd.DataFrame,
+    recommended_model: str,
+    metrics: dict[str, object],
+    final_verdict: str,
+) -> pd.DataFrame:
+    rows = []
+    for row in df_compare.to_dict("records"):
+        model_name = str(row.get("Model", ""))
+        metrics_name = _metrics_model_name(model_name, metrics)
+        is_recommended = metrics_name == recommended_model or model_name == recommended_model
+        supports_verdict = _is_suspicious_prediction(row.get("Prediction")) == _is_suspicious_prediction(
+            final_verdict
+        )
+        role = "Recommended" if is_recommended else "Supporting" if supports_verdict else "Rejected"
+        rows.append(
+            {
+                "Model": model_name,
+                "Role": role,
+                "Prediction": row.get("Prediction"),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 def _recommended_model(df_compare: pd.DataFrame, metrics: dict[str, object]) -> str:
     model_metrics = metrics.get("models", {}) if isinstance(metrics, dict) else {}
     if not df_compare.empty and isinstance(model_metrics, dict) and model_metrics:
@@ -1271,6 +1301,19 @@ def _recommended_model(df_compare: pd.DataFrame, metrics: dict[str, object]) -> 
         return str(df_compare.sort_values("Confidence", ascending=False).iloc[0]["Model"])
 
     return "Not available"
+
+
+def _diagnostic_model_choice(
+    model_choices: list[str],
+    recommended_model: str,
+    metrics: dict[str, object],
+) -> str | None:
+    for model_name in model_choices:
+        metrics_name = _metrics_model_name(model_name, metrics)
+        if metrics_name == recommended_model or model_name == recommended_model:
+            return model_name
+
+    return model_choices[0] if model_choices else None
 
 
 def _confusion_matrix_figure(metrics: dict[str, object], model_name: str) -> go.Figure | None:
@@ -1429,7 +1472,6 @@ def _render_evaluation_evidence(
         "Review saved training metrics separately from the live email prediction.",
         "Evaluation evidence",
     )
-    render_content_card_open("violet")
     metrics_tab, confusion_tab, roc_tab = st.tabs(
         ["Performance Metrics", "Confusion Matrix Heatmap", "ROC-AUC Curve"]
     )
@@ -1462,8 +1504,6 @@ def _render_evaluation_evidence(
                 "ROC-AUC shows how well each model separates safe and suspicious emails. "
                 "A curve closer to the top-left corner indicates stronger classification performance."
             )
-
-    render_content_card_close()
 
 
 def _clean_token(value: str) -> str:
@@ -1717,7 +1757,14 @@ def _risk_score(result: dict[str, object]) -> float:
     return confidence * 100 if label == 1 else (1 - confidence) * 100
 
 
-def _display_result(result: dict[str, object], text: str, classifier: Any | None) -> None:
+def _display_result(
+    result: dict[str, object],
+    text: str,
+    classifier: Any | None,
+    decision_trace_df: pd.DataFrame,
+    diagnostic_model_name: str,
+    metrics: dict[str, object],
+) -> None:
     confidence = float(result["confidence"])
     label = str(result["label_name"])
     findings = list(result.get("findings", []))
@@ -1758,28 +1805,26 @@ def _display_result(result: dict[str, object], text: str, classifier: Any | None
 
     render_section_header(
         "Technical details",
-        "Inspect the selected model's probability distribution and raw confidence values.",
+        "Inspect the recommended model's probability chart, then compare every enabled model's decision trace.",
         "Model internals",
     )
-    render_content_card_open("violet")
+    metrics_name = _metrics_model_name(diagnostic_model_name, metrics)
+    model_label = (
+        f"{diagnostic_model_name} ({metrics_name})"
+        if metrics_name and metrics_name != diagnostic_model_name
+        else diagnostic_model_name
+    )
+    st.caption(
+        f"Probability chart shown for recommended diagnostic model: {model_label}. "
+        "The final verdict above still comes from multi-model consensus."
+    )
     st.plotly_chart(_confidence_chart(dict(result["probabilities"])), use_container_width=True)
+    st.markdown("**Model decision trace**")
     st.dataframe(
-        pd.DataFrame(
-            [
-                {
-                    "Selected model engine": result.get("model_name", "Unknown"),
-                    "Selected prediction": label,
-                    "Selected confidence": round(confidence * 100, 2),
-                    "Selected risk score": round(risk_score, 2),
-                    "Rule indicator count": len(findings),
-                    "Legitimate context count": len(legitimate_indicators),
-                }
-            ]
-        ),
+        decision_trace_df,
         hide_index=True,
         use_container_width=True,
     )
-    render_content_card_close()
 
 
 def _load_training_metrics(root: Path) -> dict[str, object]:
@@ -1821,7 +1866,6 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
 
     if isinstance(uploaded, pd.DataFrame):
         render_section_header("Batch CSV analysis", eyebrow="Multiple rows")
-        render_content_card_open("violet")
 
         text_column = st.selectbox("Text column", uploaded.columns)
 
@@ -1849,8 +1893,6 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
 
             st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
-        render_content_card_close()
-
     if analyze_button:
         if not text.strip():
             st.warning("Paste message text or upload a supported file first.")
@@ -1861,8 +1903,7 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
             return
 
         comparison_rows = []
-        first_result = None
-        first_classifier = None
+        model_results: dict[str, tuple[dict[str, object], Any | None]] = {}
 
         for selected_model in model_choices:
             try:
@@ -1871,9 +1912,7 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
                 st.error(str(exc))
                 return
 
-            if first_result is None:
-                first_result = result
-                first_classifier = classifier
+            model_results[selected_model] = (result, classifier)
 
             comparison_rows.append(
                 {
@@ -1894,12 +1933,26 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
         metrics_df = _metrics_dataframe(root)
         recommended_model = _recommended_model(df_compare, metrics)
         df_compare_metrics = _comparison_with_metrics(df_compare, metrics)
+        diagnostic_choice = _diagnostic_model_choice(model_choices, recommended_model, metrics)
+        diagnostic_result = None
+        diagnostic_classifier = None
+        if diagnostic_choice is not None:
+            diagnostic_result, diagnostic_classifier = model_results.get(
+                diagnostic_choice,
+                (None, None),
+            )
         if suspicious_count > (total_models / 2):
             final_verdict = "Suspicious"
         elif suspicious_count == (total_models / 2):
             final_verdict = "Suspicious" if average_risk >= 50 else "Safe"
         else:
             final_verdict = "Safe"
+        decision_trace_df = _decision_trace_dataframe(
+            df_compare,
+            recommended_model,
+            metrics,
+            final_verdict,
+        )
 
         render_analysis_ready("Email analysis complete - results ready below")
 
@@ -1908,7 +1961,6 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
             "Overall AI verdict and agreement across the selected email models.",
             "Executive result",
         )
-        render_content_card_open("violet")
         col1, col2, col3, col4, col5 = st.columns(5)
 
         col1.metric(
@@ -1935,14 +1987,12 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
             "This summary is based only on trained ML model predictions. Explainability evidence below does not "
             "adjust the verdict, average risk, or confidence."
         )
-        render_content_card_close()
 
         render_section_header(
             "AI model comparison",
             "Compare each selected model's live prediction beside its saved training performance.",
             "Model evidence",
         )
-        render_content_card_open("violet")
 
         st.plotly_chart(
             _model_comparison_chart(comparison_rows),
@@ -1960,10 +2010,15 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
             "If models disagree significantly, the message should be reviewed manually."
         )
 
-        render_content_card_close()
-
         _render_evaluation_evidence(root, metrics_df, metrics, recommended_model, model_choices)
 
-        if first_result is not None:
-            _record(history, first_result, text)
-            _display_result(first_result, text, first_classifier)
+        if diagnostic_result is not None and diagnostic_choice is not None:
+            _record(history, diagnostic_result, text)
+            _display_result(
+                diagnostic_result,
+                text,
+                diagnostic_classifier,
+                decision_trace_df,
+                diagnostic_choice,
+                metrics,
+            )

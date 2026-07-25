@@ -97,6 +97,18 @@ temp/
 #   models/*.onnx
 # ----------------------------------------------------------
 
+# Large transformer checkpoints are local/training-only by default.
+# Keep lightweight .pkl runtime models deployable for Streamlit Cloud.
+models/**/model.safetensors
+models/**/pytorch_model.bin
+models/transcript_bert/
+!models/transcript_distilbert/
+!models/transcript_distilbert/**
+!models/transcript_distilbert/model.safetensors
+
+# Local archive for heavy artifacts we keep on disk but never deploy.
+archive/local_models/
+
 # ----------------------------------------------------------
 # Generated reports and training outputs
 # ----------------------------------------------------------
@@ -153,6 +165,13 @@ reports/cache/
 !data/processed/**/*.mp3
 !data/processed/**/*.ogg
 !data/processed/**/*.m4a
+
+# Demo/runtime fallback data is deployable; raw datasets remain ignored above.
+!data/demo/
+!data/demo/**/*.csv
+!data/demo/**/*.tsv
+!data/demo/**/*.parquet
+!data/demo/**/*.feather
 
 # ----------------------------------------------------------
 # NumPy training artifacts / feature dumps

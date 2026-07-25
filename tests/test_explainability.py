@@ -4,11 +4,47 @@ from __future__ import annotations
 
 import unittest
 
+import numpy as np
+
 from src.text.explainability import (
     analyse_domain_indicators,
     find_legitimate_indicators,
     find_suspicious_phrases,
+    top_model_terms,
 )
+
+
+class _FakeMatrix:
+    def __init__(self, values: np.ndarray) -> None:
+        self._values = values
+
+    def toarray(self) -> np.ndarray:
+        return self._values
+
+
+class _FakeVectorizer:
+    def transform(self, _texts: list[str]) -> _FakeMatrix:
+        return _FakeMatrix(np.array([[1.0, 0.5, 0.0]]))
+
+    def get_feature_names_out(self) -> np.ndarray:
+        return np.array(["alpha", "beta", "gamma"])
+
+
+class _FakeEstimator:
+    def __init__(self, coefficients: list[float]) -> None:
+        self.coef_ = np.array([coefficients])
+
+
+class _FakeCalibratedClassifier:
+    def __init__(self, estimator: _FakeEstimator) -> None:
+        self.estimator = estimator
+
+
+class _FakeCalibratedModel:
+    calibrated_classifiers_ = [
+        _FakeCalibratedClassifier(_FakeEstimator([0.2, -0.4, 0.0])),
+        _FakeCalibratedClassifier(_FakeEstimator([0.4, -0.2, 0.0])),
+    ]
 
 
 class ExplainabilityTests(unittest.TestCase):
@@ -51,6 +87,17 @@ class ExplainabilityTests(unittest.TestCase):
         self.assertIn("Official Work Platform", types)
         self.assertIn("Department Workflow", types)
         self.assertIn("Safe Credential Warning", types)
+
+    def test_top_model_terms_unwraps_calibrated_linear_models(self) -> None:
+        terms = top_model_terms(
+            "alpha beta",
+            _FakeVectorizer(),
+            _FakeCalibratedModel(),
+            top_n=2,
+        )
+
+        self.assertEqual([term["term"] for term in terms], ["alpha", "beta"])
+        self.assertEqual(terms[0]["method"], "calibrated_linear_coefficient")
 
 
 if __name__ == "__main__":

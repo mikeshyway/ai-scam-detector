@@ -1,7 +1,8 @@
 # Dataset Setup
 
 This file is a quick placement reference. The maintained pipeline explanation
-is in `docs/DATA_PIPELINE.md`.
+is in `docs/DATA_PIPELINE.md`. The final reviewer evidence is in
+`notebooks/00_final_prototype_evidence_notebook.ipynb`.
 
 ## Email
 
@@ -21,6 +22,9 @@ py scripts\01_prepare_email_dataset.py
 py scripts\04_train_email_model.py
 ```
 
+Purpose: train phishing/legitimate message classifiers. The final notebook
+uses saved metrics and charts instead of retraining these models.
+
 ## Voice Transcripts
 
 ```text
@@ -37,6 +41,10 @@ model training.
 py scripts\02_prepare_transcript_dataset.py
 py scripts\05_train_transcript_model.py
 ```
+
+Purpose: train scam-intent classifiers for call or meeting transcript text.
+Scam-only transcript sources are useful for examples but should not be the only
+binary training source.
 
 ## ASVspoof Audio
 
@@ -65,6 +73,9 @@ data/processed/audio/train/
 data/processed/audio/dev/
 ```
 
+Purpose: train and validate bonafide/spoof voice models. Audio uses an
+ASVspoof train/dev style workflow rather than the text 80/20 split.
+
 ## Phone Fallback
 
 Real, traceable fallback records belong at:
@@ -78,10 +89,14 @@ presentation rows belong at:
 
 ```text
 data/demo/phone_demo_dataset.csv
+data/demo/demo_phone_numbers.csv
 ```
 
 Demo records are used only when the Phone Number tab's Demo Mode is explicitly
 enabled. See `docs/PHONE_MODULE.md` for the required schemas.
+
+Purpose: phone records support provider-style evidence and repeatable
+demonstrations. They are not local ML training data.
 
 ## Repository Policy
 

@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# Local-only audio capture for microphone/internal-device workflows.
+sounddevice
+torch
+transformers

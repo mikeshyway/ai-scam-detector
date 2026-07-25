@@ -181,7 +181,7 @@ def _sections_json(sections: dict[str, bool]) -> str:
     return json.dumps(sections, sort_keys=True, ensure_ascii=True)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=900, max_entries=16)
 def _build_live_report(
     report_format: str,
     rows_json: str,
