@@ -34,7 +34,7 @@ the AI Report Generator to build TXT, PDF, or DOCX reports.
 | Email/message | Pasted text or uploaded email/document content | Saved trained text classifiers plus suspicious-content indicators | Label, confidence, highlighted evidence, history row |
 | Transcript | Pasted/uploaded transcript or transcribed speech | Saved transcript classifiers or optional transformer artifact | Scam-risk result, confidence, explanation, history row |
 | Audio | Uploaded or recorded voice evidence | MFCC/statistical audio features, calibrated SVM, optional behavior model, and transcript-risk signals where available | Voice/audio concern signals and explanation |
-| Phone number | Caller number and optional claimed identity | Omkar metadata, PenipuMY reputation/report fields where configured, local/demo fallback where allowed, and transparent evidence rules | Concern priority, provider status, evidence score, recommended verification action |
+| Phone number | Caller number and optional claimed identity | Veriphone metadata, PenipuMY reputation/report fields where configured, local/demo fallback where allowed, and transparent evidence rules | Concern priority, provider status, evidence score, recommended verification action |
 
 Phone evidence is not a locally trained phone-risk model. It is provider-pulled
 metadata/reputation evidence interpreted with transparent rules.

@@ -83,7 +83,7 @@ def evaluate_phone_risk(record: dict[str, Any]) -> dict[str, object]:
 
     basis: list[str] = []
 
-    if provider == "omkar_carrier_lookup":
+    if provider in {"omkar_carrier_lookup", "veriphone"}:
         valid = record.get("valid")
         valid_false = valid is False or str(valid).strip().lower() == "false"
         line_type = str(record.get("line_type") or "").strip()

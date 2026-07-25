@@ -6,7 +6,7 @@
 User phone number
   -> normalize to canonical international format
   -> configured live provider checks
-  -> Omkar metadata evidence
+  -> Veriphone metadata evidence
   -> PenipuMY reputation/report evidence where configured
   -> local/demo fallback where allowed
   -> unknown result when evidence is unavailable
@@ -16,7 +16,7 @@ User phone number
 ```
 
 The final prototype evidence notebook treats phone checks as provider evidence,
-not local ML training. Omkar supplies carrier/line metadata. PenipuMY supplies
+not local ML training. Veriphone supplies carrier/line metadata. PenipuMY supplies
 reputation or report-oriented fields where a valid key is configured. Older
 IPQualityScore client files may remain in `src/phone/` for compatibility or
 history, but they are not the primary documented final flow.
@@ -43,20 +43,21 @@ Canonical internal examples:
 +60312345678
 ```
 
-Omkar receives the canonical E.164-style value, such as `+60123456789`. The app
+Veriphone receives the canonical E.164-style value, such as `+60123456789`. The app
 rejects clearly invalid text, repeated plus signs, and alphabetic input.
 
 ## Live Provider
 
-### Omkar Carrier Lookup
+### Veriphone
 
-Omkar is used as a carrier and number metadata provider. It can return
-validity, carrier, line type, E.164 phone number, national formatting, country
-code, calling country code, mobile country code, and mobile network code.
+Veriphone is used as the active carrier and number metadata provider. It can
+return validity, carrier, line type, E.164 phone number, national/local
+formatting, country, country code, calling country code, region, timezone, and
+current-carrier metadata when the selected lookup mode supports it.
 
-Documentation: <https://github.com/omkarcloud/phone-lookup-api>
+Documentation: <https://veriphone.io/docs/v3>
 
-Account verification: <https://www.omkar.cloud/account/verify-phone>
+API keys: <https://veriphone.io/app>
 
 Carrier metadata is not scam reputation. A valid phone number does not prove a
 caller is safe, and a VoIP/mobile/landline classification does not prove fraud
@@ -80,17 +81,17 @@ should be available automatically after a local restart or in a hosted
 deployment.
 
 ```powershell
-$env:OMKAR_API_KEY="your-omkar-key"
+$env:VERIPHONE_API_KEY="your-veriphone-key"
 $env:PENIPUMY_API_KEY="your-penipumy-key"
 ```
 
 Streamlit secrets are also supported:
 
 ```toml
-OMKAR_API_KEY = "..."
+VERIPHONE_API_KEY = "..."
 PENIPUMY_API_KEY = "..."
 
-[omkar]
+[veriphone]
 api_key = "..."
 
 [penipumy]
@@ -100,37 +101,24 @@ api_key = "..."
 Never commit `.env`, `.streamlit/secrets.toml`, or real API keys. The repository
 includes `.env.example` with blank provider placeholders only.
 
-## Setup Guide
+## Archived Omkar Provider
 
-A standalone Omkar setup guide is available at:
-
-```text
-docs/omkar_api_setup_guide.html
-```
-
-The Phone Number tab offers this file as a download so the main page stays
-concise. The guide is for provider onboarding and persistent configuration;
-manual session-key entry in the dashboard is still enough for a normal demo.
-
-## Account Verification Handling
-
-If Omkar returns a message asking you to verify your phone number, the provider
-is reachable and the key may be accepted, but the Omkar account has not enabled
-free-plan carrier lookups yet. Complete verification at:
+The previous Omkar Carrier Lookup integration is archived at:
 
 ```text
-https://www.omkar.cloud/account/verify-phone
+archive/deprecated/phone_providers/omkar/
 ```
 
-The app labels this as `account_phone_verification_required`, not invalid phone
-format.
+Omkar is no longer active in the dashboard because its current free/demo
+response requires a paid Carrier Lookup plan. Restore it only if Omkar access
+becomes available again.
 
 ## Local Fallback And Demo Evidence
 
 Path: `data/processed/phone/phone_dataset.csv`
 
 This file is for real, traceable fallback records only. Do not place synthetic
-demo records in this file. If Omkar does not succeed and no real local row
+demo records in this file. If Veriphone does not succeed and no real local row
 matches, the correct result is Unknown.
 
 Required columns:
@@ -184,7 +172,7 @@ Configured live providers
 The UI shows provenance for each result:
 
 ```text
-Live provider: Omkar Carrier Lookup / PenipuMY where configured
+Live provider: Veriphone / PenipuMY where configured
 Fallback used: Yes/No
 Provider returned: Carrier or validation metadata / No usable carrier metadata
 Scam reputation available: Yes/No
@@ -207,7 +195,7 @@ not change the final lookup result.
 The phone module intentionally remains:
 
 ```text
-Omkar API
+Veriphone API
 + PenipuMY API where configured
 + normalization
 + local fallback
@@ -221,7 +209,7 @@ without that dataset would create weak or misleading evidence.
 
 ## Unknown Result
 
-If neither Omkar nor the local dataset contains the number, the module returns an
+If neither Veriphone nor the local dataset contains the number, the module returns an
 Unknown result. Unknown does not mean safe. The UI should continue to advise
 verification and never sharing OTPs, passwords, banking details, or personal
 information.
@@ -239,7 +227,7 @@ or network availability change.
 
 ## Module Responsibilities
 
-- `omkar_client.py`: Omkar Carrier Lookup HTTP communication and response parsing
+- `veriphone_client.py`: Veriphone HTTP communication and response parsing
 - `penipumy_client.py`: PenipuMY HTTP communication and response parsing
 - `phone_lookup.py`: provider -> local -> demo/unknown orchestration
 - `phone_rules.py`: transparent evidence-based reputation/context level

@@ -86,7 +86,7 @@ def _evidence_family(row: dict[str, object]) -> str:
             _text(row.get("prediction"), ""),
         ]
     ).lower()
-    if any(term in text for term in ("phone", "caller", "omkar", "carrier", "fallback dataset")):
+    if any(term in text for term in ("phone", "caller", "veriphone", "omkar", "carrier", "fallback dataset")):
         return "Phone"
     if any(term in text for term in ("audio", "voice", "deepfake", "mfcc", "speaker", "recording")):
         return "Audio"
@@ -157,7 +157,7 @@ def _short_source(row: dict[str, object]) -> str:
         return source[:70]
     family = _evidence_family(row)
     if family == "Phone":
-        return "Omkar lookup / local fallback"
+        return "Veriphone lookup / local fallback"
     if family == "Audio":
         return "Recorded or uploaded audio"
     if family == "Transcript":
@@ -172,7 +172,7 @@ def _engine_text(row: dict[str, object]) -> str:
     if engine:
         return engine
     if _evidence_family(row) == "Phone":
-        return "Omkar + local fallback"
+        return "Veriphone + local fallback"
     return "-"
 
 
@@ -468,7 +468,7 @@ def _scope_lines() -> list[str]:
         "- Email: TF-IDF with trained email classifiers.",
         "- Transcript: multi-model text classification after manual input or Whisper transcription.",
         "- Audio: MFCC voice-authenticity analysis, behavioral audio features, and transcript analysis.",
-        "- Phone: Omkar carrier metadata, local reputation fallback, and transparent rules.",
+        "- Phone: Veriphone carrier metadata, PenipuMY reputation evidence, and transparent rules.",
         "- This report is an educational capstone prototype output, not legal or forensic proof.",
     ]
 
@@ -728,7 +728,7 @@ def build_pdf(rows: list[dict[str, object]], report_note: str, sections: dict[st
             ["Email", "TF-IDF with trained email classifiers"],
             ["Transcript", "Multi-model text classification after manual input or Whisper transcription"],
             ["Audio", "MFCC voice-authenticity analysis, behavioral audio features, and transcript analysis"],
-            ["Phone", "Omkar carrier metadata, local reputation fallback, and transparent rules"],
+            ["Phone", "Veriphone carrier metadata, PenipuMY reputation evidence, and transparent rules"],
             ["Scope", "Educational scam awareness support. Not enterprise security, telecom verification, or legal evidence."],
         ]
         table = Table(appendix, colWidths=[4 * cm, 11 * cm])
@@ -903,7 +903,7 @@ def build_docx(rows: list[dict[str, object]], report_note: str, sections: dict[s
                 ("Email", "TF-IDF with trained email classifiers"),
                 ("Transcript", "Multi-model text classification after manual input or Whisper transcription"),
                 ("Audio", "MFCC voice-authenticity analysis, behavioral audio features, and transcript analysis"),
-                ("Phone", "Omkar carrier metadata, local reputation fallback, and transparent rules"),
+                ("Phone", "Veriphone carrier metadata, PenipuMY reputation evidence, and transparent rules"),
                 ("Scope", "Educational scam awareness support. Not enterprise security, telecom verification, or legal evidence."),
             ]
         )

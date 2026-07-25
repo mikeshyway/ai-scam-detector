@@ -16,19 +16,21 @@ from src.phone.phone_number import (
     format_phone_for_ipqs,
     format_phone_for_omkar,
     format_phone_for_penipumy,
+    format_phone_for_veriphone,
     normalise_phone_query,
     phone_digits,
     validate_phone_query,
 )
 from src.phone.ipqs_client import lookup_ipqs_phone
 from src.phone.omkar_client import lookup_omkar_phone
+from src.phone.veriphone_client import lookup_veriphone_phone
 from src.phone.phone_explainability import explain_phone_result
 from src.phone.phone_rules import evaluate_phone_risk
 
 
 LOCAL_PHONE_DATASET = Path("data") / "processed" / "phone" / "phone_dataset.csv"
 DEMO_PHONE_DATASET = Path("data") / "demo" / "phone_demo_dataset.csv"
-SUPPORTED_PROVIDERS = {"penipumy", "ipqualityscore", "omkar_carrier_lookup"}
+SUPPORTED_PROVIDERS = {"penipumy", "ipqualityscore", "omkar_carrier_lookup", "veriphone"}
 
 
 def _match_keys(value: str) -> set[str]:
@@ -203,6 +205,38 @@ def _normalize_omkar_record(record: dict[str, Any], phone_number: str) -> dict[s
     return normalized
 
 
+def _normalize_veriphone_record(record: dict[str, Any], phone_number: str) -> dict[str, Any]:
+    line_type = str(record.get("current_line_type") or record.get("phone_type") or "").strip().replace("_", " ")
+    current_mccmnc = "".join(char for char in str(record.get("current_mccmnc") or "") if char.isdigit())
+    mobile_country_code = current_mccmnc[:3] if len(current_mccmnc) >= 5 else None
+    mobile_network_code = current_mccmnc[3:] if len(current_mccmnc) >= 5 else None
+
+    normalized = _normalized_base(phone_number, "veriphone", "veriphone_api")
+    normalized.update(
+        {
+            "phone": str(record.get("e164") or record.get("phone") or normalise_phone_query(phone_number)),
+            "provider": "veriphone",
+            "source": "veriphone_api",
+            "valid": _bool_or_none(record.get("phone_valid")),
+            "active": None,
+            "line_type": line_type,
+            "carrier": record.get("current_carrier") or record.get("carrier"),
+            "country": record.get("country_code") or record.get("country"),
+            "voip": line_type.lower() == "voip",
+            "formatted": record.get("e164") or record.get("phone"),
+            "national_format": record.get("local_number"),
+            "international_number": record.get("international_number"),
+            "calling_country_code": record.get("country_prefix"),
+            "mobile_country_code": mobile_country_code,
+            "mobile_network_code": mobile_network_code,
+            "phone_region": record.get("phone_region"),
+            "timezone": record.get("timezone"),
+            "mode": record.get("mode"),
+        }
+    )
+    return normalized
+
+
 def _load_phone_dataset(root: Path, path: Path) -> pd.DataFrame:
     path = root / path
     if not path.exists():
@@ -280,7 +314,7 @@ def _build_result(
     found: bool,
     record: dict[str, Any],
     rate_limit: dict[str, str] | None = None,
-    requested_provider: str = "omkar_carrier_lookup",
+    requested_provider: str = "veriphone",
     live_provider_status: str = "",
     raw_provider_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -303,15 +337,18 @@ def _build_result(
 
 
 def _normalize_provider_key(provider: str) -> str:
-    key = str(provider or "omkar_carrier_lookup").strip().lower().replace(" ", "")
+    key = str(provider or "veriphone").strip().lower().replace(" ", "")
     aliases = {
         "penipu": "penipumy",
         "penipumy": "penipumy",
         "ipqs": "ipqualityscore",
         "ipqualityscore": "ipqualityscore",
-        "carrier": "omkar_carrier_lookup",
-        "carrierlookup": "omkar_carrier_lookup",
-        "carrier_lookup": "omkar_carrier_lookup",
+        "veriphone": "veriphone",
+        "veriphoneapi": "veriphone",
+        "veriphonecarrierlookup": "veriphone",
+        "carrier": "veriphone",
+        "carrierlookup": "veriphone",
+        "carrier_lookup": "veriphone",
         "omkar": "omkar_carrier_lookup",
         "omkarcarrierlookup": "omkar_carrier_lookup",
         "omkar_carrier_lookup": "omkar_carrier_lookup",
@@ -323,7 +360,7 @@ def lookup_phone(
     phone_number: str,
     root: Path,
     *,
-    provider: str = "omkar_carrier_lookup",
+    provider: str = "veriphone",
     api_key: str = "",
     demo_mode: bool = False,
 ) -> dict[str, Any]:
@@ -382,6 +419,23 @@ def lookup_phone(
                     raw_provider_record=raw_record,
                 )
             fallback_reason = str(live_result.get("error") or "IPQualityScore lookup unavailable.")
+        elif provider_key == "veriphone":
+            live_result = lookup_veriphone_phone(format_phone_for_veriphone(normalized), api_key)
+            rate_limit = dict(live_result.get("rate_limit", {}))
+            if bool(live_result.get("ok")):
+                raw_record = dict(live_result.get("record", {}))
+                record = _normalize_veriphone_record(raw_record, phone_number)
+                return _build_result(
+                    source="veriphone_api",
+                    fallback_reason="",
+                    found=True,
+                    record=record,
+                    rate_limit=rate_limit,
+                    requested_provider=provider_key,
+                    live_provider_status="success",
+                    raw_provider_record=raw_record,
+                )
+            fallback_reason = str(live_result.get("error") or "Veriphone lookup unavailable.")
         else:
             live_result = lookup_omkar_phone(format_phone_for_omkar(normalized), api_key)
             rate_limit = dict(live_result.get("rate_limit", {}))
@@ -404,6 +458,8 @@ def lookup_phone(
             fallback_reason = "PenipuMY API key unavailable."
         elif provider_key == "ipqualityscore":
             fallback_reason = "IPQualityScore API key unavailable."
+        elif provider_key == "veriphone":
+            fallback_reason = "Veriphone API key unavailable."
         else:
             fallback_reason = "Omkar Carrier Lookup API key unavailable."
 

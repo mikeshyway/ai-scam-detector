@@ -69,7 +69,7 @@ def build_phone_evidence_rows(record: dict[str, Any], risk_result: dict[str, obj
             )
         ]
 
-    if provider == "omkar_carrier_lookup":
+    if provider in {"omkar_carrier_lookup", "veriphone"}:
         valid = record.get("valid")
         valid_false = valid is False or str(valid).strip().lower() == "false"
         valid_true = valid is True or str(valid).strip().lower() == "true"
@@ -437,18 +437,18 @@ def explain_phone_result(record: dict[str, Any], risk_result: dict[str, object])
             "This number was not found in the live API or local dataset. "
             "This does not guarantee the number is safe."
         )
-    elif provider == "omkar_carrier_lookup":
+    elif provider in {"omkar_carrier_lookup", "veriphone"}:
         valid = record.get("valid")
         valid_false = valid is False or str(valid).strip().lower() == "false"
         carrier = str(record.get("carrier") or "").strip()
         line_type = str(record.get("line_type") or "").strip()
         if valid_false:
-            summary = "Carrier Lookup returned metadata indicating the number may be invalid."
+            summary = "Carrier lookup returned metadata indicating the number may be invalid."
         elif carrier or line_type:
             details = ", ".join(value for value in [carrier, line_type] if value)
-            summary = f"Carrier Lookup returned number metadata: {details}."
+            summary = f"Carrier lookup returned number metadata: {details}."
         else:
-            summary = "Carrier Lookup returned limited metadata. This does not prove the caller is safe."
+            summary = "Carrier lookup returned limited metadata. This does not prove the caller is safe."
     elif provider == "ipqualityscore":
         fraud_score = to_float(record.get("fraud_score"))
         if risk_level == "High Risk":

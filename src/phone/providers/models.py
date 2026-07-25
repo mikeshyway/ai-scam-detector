@@ -38,6 +38,8 @@ def normalize_error_code(status_code: int | None, error_message: object) -> str:
 
     if "missing" in text or "not configured" in text:
         return "missing_key"
+    if status_code == 402 or "insufficient credit" in text or "insufficient credits" in text or "payment required" in text:
+        return "insufficient_credits"
     if status_code in {401, 403} or "rejected" in text or "invalid key" in text:
         return "authentication_failed"
     if status_code == 429 or "rate limit" in text:

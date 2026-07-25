@@ -13,4 +13,5 @@ __all__ = [
     "phone_rules",
     "phone_explainability",
     "validate_phone_query",
+    "veriphone_client",
 ]

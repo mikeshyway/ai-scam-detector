@@ -1826,7 +1826,7 @@ def _sidebar_model_status_items(
     transcript_details = [_artifact_status_item(*item) for item in transcript_models]
     audio_details = [_artifact_status_item(*item) for item in audio_models]
     api_details = [
-        _phone_api_status_item("Omkar Carrier Lookup API", "omkar"),
+        _phone_api_status_item("Veriphone Carrier Lookup API", "veriphone"),
         _phone_api_status_item("PenipuMY", "penipumy"),
     ]
 
@@ -1927,6 +1927,9 @@ def _phone_api_status_item(name: str, provider_id: str) -> dict[str, str]:
     elif error_code == "rate_limited":
         status = "pending"
         state_label = "Rate limited"
+    elif error_code == "insufficient_credits":
+        status = "pending"
+        state_label = "Insufficient credits"
     elif error_code in {"connection_failed", "provider_error", "invalid_response"}:
         status = "pending"
         state_label = "Connection issue"
@@ -1971,6 +1974,10 @@ def _configured_phone_provider_key(provider_id: str) -> str:
         session_key = "phone_penipumy_api_key"
         env_keys = ("PENIPUMY_API_KEY", "PENIPU_API_KEY")
         secret_sections = ("penipumy", "penipu")
+    elif provider_id == "veriphone":
+        session_key = "phone_veriphone_api_key"
+        env_keys = ("VERIPHONE_API_KEY",)
+        secret_sections = ("veriphone", "phone_metadata")
     else:
         session_key = "phone_omkar_api_key"
         env_keys = ("OMKAR_API_KEY", "OMKAR_CARRIER_API_KEY")

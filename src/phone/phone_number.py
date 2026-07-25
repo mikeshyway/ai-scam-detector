@@ -86,3 +86,9 @@ def format_phone_for_omkar(value: str) -> str:
     """Return E.164-style input for Omkar Carrier Lookup."""
 
     return normalise_phone_query(value)
+
+
+def format_phone_for_veriphone(value: str) -> str:
+    """Return E.164-style input for Veriphone."""
+
+    return normalise_phone_query(value)
