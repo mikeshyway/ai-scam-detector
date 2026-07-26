@@ -37,6 +37,17 @@ from src.text.explainability import (
     highlighted_html,
     type_intention,
 )
+from src.reporting.evidence_snapshot import (
+    IMMEDIATE_ACTION,
+    build_evidence_bundle,
+    chart_artifact,
+    derive_action_status,
+    provenance_record,
+    remediation_plan,
+    table_artifact,
+    text_artifact,
+    xai_record,
+)
 try:
     from src.reporting.history_db import record_history_item
 except ImportError:
@@ -283,6 +294,7 @@ def _init_transcript_voice_state() -> None:
         "transcript_uploaded_audio_file_bytes": None,
         "transcript_uploaded_audio_file_suffix": "",
         "transcript_uploaded_audio_file_signature": None,
+        "transcript_uploaded_audio_file_sha256": None,
         "transcript_uploaded_audio_last_processed_signature": None,
         "transcript_uploaded_audio_results": [],
         "transcript_uploaded_audio_error": "",
@@ -323,6 +335,7 @@ def _clear_uploaded_audio_state(
         st.session_state["transcript_uploaded_audio_file_bytes"] = None
         st.session_state["transcript_uploaded_audio_file_suffix"] = ""
         st.session_state["transcript_uploaded_audio_file_signature"] = None
+        st.session_state["transcript_uploaded_audio_file_sha256"] = None
 
 
 def _recording_chunks(
@@ -499,6 +512,7 @@ def _analyse_selected_uploaded_audio(
     audio_bytes = st.session_state.get("transcript_uploaded_audio_file_bytes")
     suffix = str(st.session_state.get("transcript_uploaded_audio_file_suffix", ""))
     signature = st.session_state.get("transcript_uploaded_audio_file_signature")
+    audio_sha256 = st.session_state.get("transcript_uploaded_audio_file_sha256")
 
     if not isinstance(audio_bytes, bytes) or not audio_bytes:
         raise RuntimeError("Upload an audio recording before running the analysis.")
@@ -546,6 +560,7 @@ def _analyse_selected_uploaded_audio(
         result["capture_mode"] = "Uploaded Audio Recording"
         result["source_filename"] = filename
         result["source_signature"] = signature
+        result["source_sha256"] = audio_sha256
 
     st.session_state["transcript_uploaded_audio_results"] = processed
     st.session_state["transcript_uploaded_audio_last_processed_signature"] = (
@@ -2146,7 +2161,7 @@ def _render_transcript_model_comparison(
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Final Verdict", final_verdict)
     col2.metric("Average Risk", f"{average_risk:.2f}%")
-    col3.metric("Model Agreement", f"{suspicious_count}/{total_models}")
+    col3.metric("Suspicious Votes", f"{suspicious_count}/{total_models}")
     col4.metric("Recommended Model", recommended_model)
     col5.metric("Highest Confidence", f"{highest_confidence:.2f}%")
     st.caption(
@@ -2177,25 +2192,352 @@ def _render_transcript_model_comparison(
     return consensus_result, representative_row.get("classifier")
 
 
-def _record(history: list[dict[str, object]], result: dict[str, object], text: str) -> None:
+def _transcript_evidence_snapshot(
+    *,
+    root: Path,
+    result: dict[str, object],
+    text: str,
+    comparison_rows: list[dict[str, object]],
+    audio_results: list[dict[str, object]],
+    risk_threshold: int,
+) -> tuple[dict[str, object], dict[str, object], str, float, str]:
+    risk_score = _risk_score(result)
+    findings = list(result.get("findings", []))
+    finding_labels = [
+        str(item.get("phrase", ""))
+        for item in findings
+        if str(item.get("phrase", "")).strip()
+    ]
+    agreement = str(result.get("model_agreement", "")).strip()
+    if not agreement and comparison_rows:
+        suspicious_count = sum(
+            1 for row in comparison_rows if _is_suspicious_prediction(row.get("Prediction", ""))
+        )
+        total = len(comparison_rows)
+        agreement = f"{max(suspicious_count, total - suspicious_count)}/{total}"
+    audio_peak = max((float(item.get("risk", 0.0)) for item in audio_results), default=0.0)
+    concern_score = max(risk_score, audio_peak)
+    action_status = derive_action_status(
+        native_prediction=result.get("label_name", "Unknown"),
+        evidence_type="Transcript and Audio" if audio_results else "Transcript",
+        concern_score=concern_score,
+        score_available=True,
+        model_agreement=agreement,
+        evidence_complete=bool(text.strip() or audio_results),
+    )
+    if audio_results and audio_peak >= max(70, risk_threshold):
+        action_status = IMMEDIATE_ACTION
+
+    artifacts: list[dict[str, object]] = []
+    if audio_results:
+        for clip_number, clip_results in _recording_groups(audio_results):
+            latest = clip_results[-1]
+            artifacts.extend(
+                [
+                    chart_artifact(
+                        f"Recording {clip_number} - Decision Risk Timeline",
+                        _timeline_figure(clip_results, risk_threshold),
+                        description="Decision risk for every processed chunk in this recording.",
+                        data=[
+                            {
+                                "clip": item.get("clip"),
+                                "chunk": item.get("clip_chunk"),
+                                "decision": item.get("decision_label"),
+                                "risk": item.get("risk"),
+                            }
+                            for item in clip_results
+                        ],
+                    ),
+                    table_artifact(
+                        f"Recording {clip_number} - Chunk Investigation Table",
+                        _result_table(clip_results),
+                    ),
+                    chart_artifact(
+                        f"Recording {clip_number} - MFCC Feature Heatmap",
+                        _mfcc_figure(clip_results),
+                        description=_mfcc_explanation(clip_results, latest),
+                    ),
+                    chart_artifact(
+                        f"Recording {clip_number} - Frequency Spectrum",
+                        _frequency_figure(latest),
+                        description="Relative frequency levels from the latest processed chunk.",
+                    ),
+                    chart_artifact(
+                        f"Recording {clip_number} - Voice Evidence Metrics",
+                        _voice_evidence_metric_figure(latest),
+                        description=_voice_evidence_explanation(latest),
+                    ),
+                    chart_artifact(
+                        f"Recording {clip_number} - Behavioral RF Signal Metrics",
+                        _behavioral_signal_metric_figure(latest),
+                        description=_behavioral_signal_explanation(latest),
+                    ),
+                    table_artifact(
+                        f"Recording {clip_number} - Behavioral Feature Values",
+                        _behavioral_feature_rows(latest),
+                    ),
+                ]
+            )
+
+    clean_comparison = [
+        {
+            key: value
+            for key, value in row.items()
+            if key not in {"result", "classifier"}
+        }
+        for row in comparison_rows
+    ]
+    if comparison_rows:
+        comparison_df = pd.DataFrame(clean_comparison)
+        metrics = _load_transcript_metrics(str(root))
+        metrics_df = _transcript_metrics_dataframe(root)
+        recommended_model = _recommended_transcript_model(comparison_df, metrics)
+        model_keys = [str(row.get("Model Key", "")) for row in comparison_rows]
+        artifacts.extend(
+            [
+                chart_artifact(
+                    "Transcript Live Model Comparison",
+                    _comparison_chart(comparison_rows),
+                    description="Suspicious-risk probability for every selected transcript model.",
+                    data=clean_comparison,
+                ),
+                table_artifact("Transcript Live Model Comparison Table", comparison_df),
+            ]
+        )
+        if not metrics_df.empty:
+            artifacts.extend(
+                [
+                    chart_artifact(
+                        "Performance Metrics",
+                        _training_metrics_chart(metrics_df),
+                        description="Evaluation tab 1 of 3: saved transcript training metrics.",
+                        data=metrics_df,
+                    ),
+                    table_artifact("Performance Metrics data", metrics_df),
+                ]
+            )
+        confusion = _confusion_matrix_figure(metrics, recommended_model)
+        artifacts.append(
+            chart_artifact(
+                "Confusion Matrix Heatmap",
+                confusion,
+                description=(
+                    "Evaluation tab 2 of 3 for the recommended transcript model."
+                    if confusion is not None
+                    else "Evaluation tab 2 of 3 was unavailable."
+                ),
+            )
+        )
+        roc = _roc_auc_curve(root, model_keys)
+        artifacts.append(
+            chart_artifact(
+                "ROC-AUC Curve",
+                roc,
+                description=(
+                    "Evaluation tab 3 of 3 for selected transcript models."
+                    if roc is not None
+                    else "Evaluation tab 3 of 3 was unavailable."
+                ),
+            )
+        )
+
+    probabilities = dict(result.get("probabilities", {}))
+    if probabilities:
+        artifacts.append(
+            chart_artifact(
+                "Transcript Consensus Probability",
+                _confidence_chart(probabilities),
+                description="Legitimate and suspicious probabilities represented by the live dashboard.",
+                data=probabilities,
+            )
+        )
+
+    legitimate_indicators = find_legitimate_indicators(text) if text.strip() else []
+    vocabulary_rows = _baseline_vocabulary_rows(root, text) if text.strip() else []
+    evidence_df = _transcript_evidence_rows(findings, legitimate_indicators, vocabulary_rows)
+    if not evidence_df.empty:
+        artifacts.append(table_artifact("Transcript Explainability Evidence", evidence_df))
+    if text.strip():
+        artifacts.append(
+            text_artifact(
+                "Original Combined Transcript",
+                text,
+                description="Exact labelled transcript input submitted to the text models.",
+                source="Investigation input",
+            )
+        )
+
+    factors = [
+        {
+            "factor": item.get("phrase", ""),
+            "effect": "raises concern",
+            "method": "deterministic rule",
+            "reason": item.get("intention") or item.get("category", ""),
+        }
+        for item in findings
+        if item.get("phrase")
+    ]
+    factors.extend(
+        {
+            "factor": item.get("Term", ""),
+            "effect": item.get("Direction", "supporting signal"),
+            "strength": item.get("Strength", 0.0),
+            "method": f"{item.get('Model', 'baseline')} vocabulary contribution",
+        }
+        for item in vocabulary_rows
+        if item.get("Term")
+    )
+    audio_flags = sorted(
+        {
+            str(flag)
+            for item in audio_results
+            for flag in item.get("flags", [])
+            if str(flag).strip()
+        }
+    )
+    all_findings = list(dict.fromkeys(finding_labels + audio_flags))
+    remediation = remediation_plan(
+        evidence_type="Transcript and Audio" if audio_results else "Transcript",
+        action_status=action_status,
+        findings=all_findings,
+    )
+    source_name = (
+        str(audio_results[0].get("source_filename") or "Uploaded audio")
+        if audio_results
+        else "Uploaded or pasted transcript"
+    )
+    audio_sha256 = (
+        str(audio_results[0].get("source_sha256") or "")
+        if audio_results
+        else ""
+    )
+    bundle = build_evidence_bundle(
+        evidence_type="Transcript and Audio" if audio_results else "Transcript",
+        source_input={
+            "source_name": source_name,
+            "characters": len(text),
+            "words": len(text.split()),
+            "audio_chunks": len(audio_results),
+            "audio_source_signature": (
+                str(audio_results[0].get("source_signature", "")) if audio_results else ""
+            ),
+            "audio_sha256": audio_sha256,
+            "risk_threshold": risk_threshold,
+        },
+        dashboard_summary={
+            "final_verdict": result.get("label_name", "Unknown"),
+            "transcript_suspicious_risk": round(risk_score, 2),
+            "audio_peak_decision_risk": round(audio_peak, 2) if audio_results else None,
+            "maximum_concern_signal": round(concern_score, 2),
+            "model_agreement": agreement or "Not available",
+            "model_votes": result.get("model_votes", ""),
+            "action_status": action_status,
+        },
+        artifacts=artifacts,
+        findings=all_findings,
+        xai=xai_record(
+            method="Direct phrase rules plus transparent baseline vocabulary and audio reliability gates",
+            factors=factors,
+            explanation=(
+                "Rules and baseline vocabulary explain observable content signals. "
+                "Audio charts separate raw model outputs from reliability-weighted evidence."
+            ),
+            limitations=[
+                "Transformer attention is not presented as a causal explanation.",
+                "No local token attribution is available for the transformer model in this snapshot.",
+                "Audio detectors support review but cannot independently prove speaker identity or synthetic origin.",
+            ],
+        ),
+        limitations=[
+            "Automatic transcription can omit or mishear speech, especially in short, noisy, or multilingual clips.",
+            "Model probabilities and reliability-weighted audio scores have different meanings and are labelled separately.",
+        ],
+        remediation=remediation,
+    )
+    uploaded_audio_bytes = st.session_state.get("transcript_uploaded_audio_file_bytes")
+    provenance_payload: object = text if text.strip() else audio_results
+    if audio_results and isinstance(uploaded_audio_bytes, bytes) and uploaded_audio_bytes:
+        provenance_payload = uploaded_audio_bytes
+    provenance = provenance_record(
+        provenance_payload,
+        source_name=source_name,
+        source_kind="Transcript/audio investigation input",
+        extra={
+            "audio_chunks": len(audio_results),
+            "audio_source_signature": (
+                str(audio_results[0].get("source_signature", "")) if audio_results else ""
+            ),
+            "original_audio_sha256": audio_sha256,
+        },
+    )
+    return bundle, provenance, action_status, concern_score, agreement
+
+
+def _record(
+    history: list[dict[str, object]],
+    result: dict[str, object],
+    text: str,
+    *,
+    evidence_bundle: dict[str, object],
+    provenance: dict[str, object],
+    action_status: str,
+    concern_score: float,
+    model_agreement: str,
+    scan_type: str = "Transcript",
+) -> None:
     risk_score = _risk_score(result)
     findings = list(result.get("findings", []))
     record_history_item(
         history,
         {
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "type": "Transcript",
+            "type": scan_type,
             "prediction": result["label_name"],
+            "native_prediction": result["label_name"],
             "confidence": round(risk_score, 2),
-            "risk_score": round(risk_score, 2),
+            "risk_score": round(concern_score, 2),
+            "concern_score": round(concern_score, 2),
+            "score_label": "Maximum dashboard concern signal",
+            "score_available": True,
+            "action_status": action_status,
+            "model_agreement": model_agreement,
             "model": result["model_name"],
+            "source_name": str(
+                dict(evidence_bundle.get("source_input", {})).get(
+                    "source_name", "Uploaded or pasted transcript"
+                )
+            ),
             "preview": text.replace("\n", " ")[:160],
-            "raw_input": text,
-            "flags": [str(item.get("phrase", "")) for item in findings if item.get("phrase")],
+            "raw_input": (
+                text
+                if text
+                else json.dumps(
+                    {
+                        "source_name": dict(evidence_bundle.get("source_input", {})).get(
+                            "source_name", "Uploaded audio"
+                        ),
+                        "audio_sha256": dict(evidence_bundle.get("source_input", {})).get(
+                            "audio_sha256", ""
+                        ),
+                        "audio_chunks": dict(evidence_bundle.get("source_input", {})).get(
+                            "audio_chunks", 0
+                        ),
+                    },
+                    sort_keys=True,
+                    ensure_ascii=True,
+                )
+            ),
+            "flags": [
+                str(item)
+                for item in evidence_bundle.get("findings", [])
+                if str(item).strip()
+            ],
             "explanation": (
                 f"Transcript suspicious-risk probability: {risk_score:.1f}%. "
-                f"Stored as risk so dashboard/report history does not treat legitimate confidence as threat."
+                f"Maximum dashboard concern signal: {concern_score:.1f}%."
             ),
+            "evidence_bundle": evidence_bundle,
+            "provenance": provenance,
         },
     )
 
@@ -2420,6 +2762,54 @@ def _render_analysis_outputs(
                 "Audio was analysed for voice authenticity and behavioral signals, but no speech transcript was available. "
                 "Whisper may be unavailable, the sample may be too quiet, or no speech was detected."
             )
+            peak_item = max(
+                uploaded_audio_results,
+                key=lambda item: float(item.get("risk", 0.0)),
+            )
+            audio_risk = float(peak_item.get("risk", 0.0))
+            audio_label = str(
+                peak_item.get("decision_label")
+                or peak_item.get("risk_level")
+                or "Audio evidence requires review"
+            )
+            audio_result = {
+                "label": 1 if audio_risk >= risk_threshold else 0,
+                "label_name": audio_label,
+                "confidence": audio_risk / 100.0,
+                "probabilities": {
+                    "Lower concern": max(0.0, 1.0 - audio_risk / 100.0),
+                    "Suspicious": min(1.0, audio_risk / 100.0),
+                },
+                "model_name": "Audio authenticity and behavioral evidence pipeline",
+                "findings": [
+                    {"phrase": str(flag), "category": "Audio evidence"}
+                    for item in uploaded_audio_results
+                    for flag in item.get("flags", [])
+                    if str(flag).strip()
+                ],
+                "model_agreement": "Not applicable",
+            }
+            bundle, provenance, action_status, concern_score, agreement = (
+                _transcript_evidence_snapshot(
+                    root=root,
+                    result=audio_result,
+                    text="",
+                    comparison_rows=[],
+                    audio_results=uploaded_audio_results,
+                    risk_threshold=risk_threshold,
+                )
+            )
+            _record(
+                history,
+                audio_result,
+                "",
+                evidence_bundle=bundle,
+                provenance=provenance,
+                action_status=action_status,
+                concern_score=concern_score,
+                model_agreement=agreement,
+                scan_type="Audio",
+            )
             return
         st.warning("No usable transcript text was available for transcript scam analysis.")
         return
@@ -2474,7 +2864,26 @@ def _render_analysis_outputs(
             result = comparison_rows[0]["result"]
             classifier = comparison_rows[0]["classifier"]
 
-    _record(history, result, combined_text)
+    bundle, provenance, action_status, concern_score, agreement = (
+        _transcript_evidence_snapshot(
+            root=root,
+            result=result,
+            text=combined_text,
+            comparison_rows=comparison_rows,
+            audio_results=uploaded_audio_results if use_uploaded_audio else [],
+            risk_threshold=risk_threshold,
+        )
+    )
+    _record(
+        history,
+        result,
+        combined_text,
+        evidence_bundle=bundle,
+        provenance=provenance,
+        action_status=action_status,
+        concern_score=concern_score,
+        model_agreement=agreement,
+    )
     _display_result(root, result, combined_text, classifier)
 
 
@@ -3155,6 +3564,7 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
                                 uploaded_audio.name.encode("utf-8")
                                 + uploaded_audio_bytes
                             ).hexdigest()
+                            file_sha256 = hashlib.sha256(uploaded_audio_bytes).hexdigest()
                             previous_signature = st.session_state.get(
                                 "transcript_uploaded_audio_file_signature"
                             )
@@ -3173,6 +3583,9 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
                                 st.session_state[
                                     "transcript_uploaded_audio_file_signature"
                                 ] = file_signature
+                            st.session_state[
+                                "transcript_uploaded_audio_file_sha256"
+                            ] = file_sha256
 
                             mime_type = {
                                 ".wav": "audio/wav",

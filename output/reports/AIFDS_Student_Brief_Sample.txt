@@ -1,0 +1,169 @@
+AI-FDS Student Investigation Brief
+Generated: 2026-07-26 23:19:43 (Asia/Kuala_Lumpur, GMT+08:00)
+Case: AIFDS-EDU-SAMPLE-001
+Purpose: Educational review of email phishing, phone-based social engineering, and carrier lookup evidence.
+
+Investigation Summary
+- Evidence reviewed: 3
+- Immediate action: 1
+- Review needed: 1
+- No immediate action: 1
+
+What should I do next?
+1. [Immediate] Pause contact and do not send money, credentials, OTPs, files, or remote access.
+   Why: Stopping the interaction limits further exposure while the evidence is verified.
+2. [Immediate] Do not disclose the code or password; change exposed credentials and contact the account provider.
+   Why: OTPs and passwords can enable account takeover.
+3. [Immediate] Change the password from a trusted device, revoke sessions, and enable multi-factor authentication.
+   Why: Shared credentials should be treated as compromised.
+
+Evidence Review
+
+Evidence 1 - Email - 2026-07-26 20:45:00
+Result: Suspicious
+Attention: Immediate Action Required
+Evidence score: 92.0% (Average suspicious risk)
+Analysis method: Email model consensus
+Why: Multiple email models agree that the message resembles phishing. The strongest signals are an OTP request, a forced deadline, and a look-alike sender domain.
+Key indicators: OTP request, Urgency and account suspension threat, Sender-domain mismatch
+Relevant excerpt: Reply with the six-digit verification code.
+Next action: Pause contact and do not send money, credentials, OTPs, files, or remote access.
+
+Evidence 2 - Transcript - 2026-07-26 20:48:00
+Result: Likely social-engineering script
+Attention: Review Required
+Evidence score: 78.0% (Behavioral concern score)
+Analysis method: Transcript multi-model analysis
+Why: The transcript combines authority impersonation, an urgent transfer request, and secrecy. Those patterns warrant independent verification before any action.
+Key indicators: Authority impersonation, Payment pressure, Secrecy request
+Relevant excerpt: Do not tell branch staff.
+Next action: Stop payment and contact the bank or payment provider through its official fraud channel.
+
+Evidence 3 - Phone - 2026-07-26 20:52:00
+Result: No listed report; identity unconfirmed
+Attention: No Immediate Action
+Evidence score: 28.0% (Phone evidence concern score)
+Analysis method: Carrier metadata + reputation rules
+Why: The lookup found ordinary carrier metadata and no matching community report. This lowers immediate concern but cannot verify the caller or rule out spoofing.
+Key indicators: Carrier metadata available, No community scam report matched, Caller identity not verified
+Relevant excerpt: Malaysia mobile number; no matching community report; ownership not verified.
+Next action: Call the organization using a number from its official website or trusted statement.
+
+Combined Investigation Findings
+- Authority impersonation | Transcript #2 | Review
+- Caller identity not verified | Phone #3 | Informative
+- Carrier metadata available | Phone #3 | Informative
+- No community scam report matched | Phone #3 | Informative
+- OTP request | Email #1 | High
+
+Visual Evidence Summary
+Attention Overview
+- Immediate Action Required: 1
+- Review Required: 1
+- No Immediate Action: 1
+
+Evidence Type Distribution
+- Email: 1
+- Transcript: 1
+- Phone: 1
+
+Indicator Categories
+- OTP request: 1
+- Urgency and account suspension threat: 1
+- Sender-domain mismatch: 1
+- Authority impersonation: 1
+- Payment pressure: 1
+- Secrecy request: 1
+- Carrier metadata available: 1
+- No community scam report matched: 1
+
+Source-Native Concern Scores
+- Evidence 1 - Email: 92.0% (Average suspicious risk)
+- Evidence 2 - Transcript: 78.0% (Behavioral concern score)
+- Evidence 3 - Phone: 28.0% (Phone evidence concern score)
+- Interpretation note: scores from email, transcript/audio, and phone evidence use different methods and are not directly comparable.
+
+Reviewer Note
+Treat the output as decision support. Verify people and organizations through independently sourced official channels before taking action.
+
+Technical Appendix
+Evidence-Specific Supporting Visuals and Data
+
+Evidence 1 - Email
+Result: Suspicious
+Attention: Immediate Action Required
+Source: student-services-alert.eml
+Timestamp: 2026-07-26 20:45:00
+Supporting Visuals and Data
+1. [Table] Email Indicator Evidence
+   Scan-specific findings from the email investigation.
+   - Indicator: OTP request | Observed evidence: Reply with the six-digit verification code | Impact: High
+   - Indicator: Urgency | Observed evidence: Account closes in 15 minutes | Impact: High
+   - Indicator: Sender mismatch | Observed evidence: look-alike student-services domain | Impact: High
+
+Evidence 2 - Transcript
+Result: Likely social-engineering script
+Attention: Review Required
+Source: support-call.txt
+Timestamp: 2026-07-26 20:48:00
+Supporting Visuals and Data
+1. [Table] Transcript Scam Indicators
+   Timestamped scan-specific transcript findings.
+   - Time: 00:12 | Category: Authority impersonation | Excerpt: I am calling from your bank fraud department | Priority: High
+   - Time: 00:34 | Category: Payment pressure | Excerpt: Move the funds to the safe account now | Priority: High
+   - Time: 00:51 | Category: Secrecy | Excerpt: Do not tell branch staff | Priority: High
+
+Evidence 3 - Phone
+Result: No listed report; identity unconfirmed
+Attention: No Immediate Action
+Source: +60 12-345 6789
+Timestamp: 2026-07-26 20:52:00
+Supporting Visuals and Data
+1. [Table] Phone Carrier and Reputation Lookup
+   Scan-specific carrier and community-reputation output.
+   - Field: Carrier | Result: Example Mobile Berhad | Meaning: Network metadata only
+   - Field: Line type | Result: Mobile | Meaning: Does not establish ownership
+   - Field: PenipuMY match | Result: No matching report | Meaning: Absence of a report is not proof of safety
+   - Field: Country | Result: Malaysia | Meaning: Numbering-plan metadata
+
+Shared Model Reference Metrics
+1. [Chart] Performance Metrics
+   Used by: Evidence 1 - Email
+   Email Metrics tab 1 of 3: shared model precision, recall, and F1.
+   Figure SHA-256: 7be7250b1b4dbb4af8d4c45b145ab0d1854f32ab4900285a7908e42e813a6da5
+   - Model: Naive Bayes | Precision: 92 | Recall: 90 | F1: 91
+   - Model: Logistic Regression | Precision: 95 | Recall: 93 | F1: 94
+   - Model: SVM | Precision: 96 | Recall: 95 | F1: 95.5
+2. [Table] Performance Metrics data
+   Used by: Evidence 1 - Email
+   Exact values displayed beneath evaluation tab 1 of 3.
+   - Model: Naive Bayes | Precision: 92 | Recall: 90 | F1: 91
+   - Model: Logistic Regression | Precision: 95 | Recall: 93 | F1: 94
+   - Model: SVM | Precision: 96 | Recall: 95 | F1: 95.5
+3. [Chart] Confusion Matrix Heatmap
+   Used by: Evidence 1 - Email
+   Email Metrics tab 2 of 3: shared held-out classification counts.
+   Figure SHA-256: 60d87adb8cb80308bae231d7eb1412b0cb3bb6816a3826b85ca795f07bb07d3b
+   - Actual: Legitimate | Predicted legitimate: 1842 | Predicted suspicious: 43
+   - Actual: Suspicious | Predicted legitimate: 61 | Predicted suspicious: 1054
+4. [Chart] ROC-AUC Curve
+   Used by: Evidence 1 - Email
+   Email Metrics tab 3 of 3: shared decision-threshold performance.
+   Figure SHA-256: e7cd1bd9e3d497103a3fbd97152f2a72257155b0dcf04475fc6f572368ce9882
+   - Model: SVM | AUC: 0.97
+
+Technical Evidence Register
+- 1 | ID 301 | Email | 2026-07-26 20:45:00 | SHA-256: 0f8ae295a59ad3b23be54e4ad8b65e55cae15056efba2a2c41d95955cdbee269 | Email model consensus
+- 2 | ID 302 | Transcript | 2026-07-26 20:48:00 | SHA-256: fea8f1e538cb656efc4c8a2bf3ebb8802273f6b57e4c877b5e35f58beda05fd5 | Transcript multi-model analysis
+- 3 | ID 303 | Phone | 2026-07-26 20:52:00 | SHA-256: cfb757a43cea773c54bd5c586345fca0c4ca1b9b2b9e154de8b993cd4af9c917 | Carrier metadata + reputation rules
+
+Scope and References
+- Educational scam-awareness support only. Results support review and do not prove identity, intent, legal liability, or authenticity.
+- EC-Council CEH - Social Engineering, Phishing, AI Impersonation, and Countermeasures: https://www.eccouncil.org/train-certify/certified-ethical-hacker-ceh/
+- NIST SP 800-61 Rev. 3 - Incident Response Recommendations and Considerations: https://csrc.nist.gov/pubs/sp/800/61/r3/final
+- SWGDE Requirements for Report Writing in Digital and Multimedia Forensics: https://www.swgde.org/documents/published-complete-listing/18-q-002-swgde-requirements-for-report-writing-in-digital-and-multimedia-forensics/
+- SWGDE Best Practices for Digital Evidence Collection: https://www.swgde.org/documents/published-complete-listing/18-f-002-best-practices-for-digital-evidence-collection/
+- NISTIR 8312 - Four Principles of Explainable Artificial Intelligence: https://www.nist.gov/publications/four-principles-explainable-artificial-intelligence
+- CISA Secure Our World - Recognize and Report Phishing: https://www.cisa.gov/secure-our-world
+- FTC Consumer Advice - AI Voice Cloning and Family Emergency Scams: https://consumer.ftc.gov/articles/scammers-use-fake-emergencies-steal-your-money
+- FCC Consumer Complaints - Unwanted Calls, Texts, and Caller ID Spoofing: https://consumercomplaints.fcc.gov/hc/en-us/articles/115002234203-Unwanted-Calls-Texts-Phone

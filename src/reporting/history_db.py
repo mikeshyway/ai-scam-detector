@@ -15,6 +15,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
+from src.reporting.evidence_snapshot import (
+    decode_json_object,
+    derive_action_status,
+    provenance_record,
+)
 from src.utils.time_utils import now_for_app
 
 
@@ -40,7 +45,14 @@ CREATE TABLE IF NOT EXISTS scan_history (
     explanation TEXT,
     raw_input TEXT,
     report_note TEXT,
-    source_fingerprint TEXT UNIQUE NOT NULL
+    source_fingerprint TEXT UNIQUE NOT NULL,
+    native_prediction TEXT,
+    action_status TEXT,
+    concern_score REAL,
+    score_label TEXT,
+    score_available INTEGER,
+    evidence_bundle TEXT,
+    provenance TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_scan_history_session_time
@@ -52,12 +64,31 @@ CREATE TABLE IF NOT EXISTS report_exports (
     session_id TEXT NOT NULL,
     format TEXT NOT NULL,
     scan_ids TEXT NOT NULL,
-    filename TEXT NOT NULL
+    filename TEXT NOT NULL,
+    report_sha256 TEXT,
+    manifest TEXT
 );
 """
 
 
-def _connect(path: Path = DB_PATH) -> sqlite3.Connection:
+SCAN_HISTORY_ADDITIVE_COLUMNS = {
+    "native_prediction": "TEXT",
+    "action_status": "TEXT",
+    "concern_score": "REAL",
+    "score_label": "TEXT",
+    "score_available": "INTEGER",
+    "evidence_bundle": "TEXT",
+    "provenance": "TEXT",
+}
+
+REPORT_EXPORT_ADDITIVE_COLUMNS = {
+    "report_sha256": "TEXT",
+    "manifest": "TEXT",
+}
+
+
+def _connect(path: Path | None = None) -> sqlite3.Connection:
+    path = path or DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path, check_same_thread=False)
     connection.row_factory = sqlite3.Row
@@ -68,6 +99,24 @@ def _connect(path: Path = DB_PATH) -> sqlite3.Connection:
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(SCHEMA_SQL)
+    _ensure_columns(connection, "scan_history", SCAN_HISTORY_ADDITIVE_COLUMNS)
+    _ensure_columns(connection, "report_exports", REPORT_EXPORT_ADDITIVE_COLUMNS)
+
+
+def _ensure_columns(
+    connection: sqlite3.Connection,
+    table_name: str,
+    columns: dict[str, str],
+) -> None:
+    existing = {
+        str(row["name"])
+        for row in connection.execute(f"PRAGMA table_info({table_name})")
+    }
+    for column_name, column_type in columns.items():
+        if column_name not in existing:
+            connection.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+            )
 
 
 def _migrate_legacy_history() -> None:
@@ -183,6 +232,45 @@ def _normalise_flags(value: object) -> list[str]:
     return [_string(value)]
 
 
+def _json_text(value: object) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, str):
+        try:
+            json.loads(value)
+            return value
+        except json.JSONDecodeError:
+            return json.dumps(value, ensure_ascii=True)
+    return json.dumps(value, ensure_ascii=True, default=str)
+
+
+def _explicit_bool(value: object) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        lowered = value.strip().casefold()
+        if lowered in {"true", "yes", "1"}:
+            return True
+        if lowered in {"false", "no", "0"}:
+            return False
+    return bool(value)
+
+
+def _phone_snapshot_fields(raw_input: object) -> tuple[float | None, bool | None]:
+    data = decode_json_object(raw_input)
+    assessment = data.get("assessment", {})
+    coverage = data.get("coverage", {})
+    score = assessment.get("score") if isinstance(assessment, dict) else None
+    score_value = _normalise_confidence(score) if isinstance(score, (int, float)) else None
+    complete = None
+    if isinstance(coverage, dict) and coverage:
+        complete = (
+            coverage.get("veriphone") == "success"
+            and coverage.get("penipumy") in {"success", "no_match"}
+        )
+    return score_value, complete
+
+
 def normalise_history_item(item: dict[str, object], session_id: str = DEFAULT_SESSION_ID) -> dict[str, object]:
     """Convert a loose Streamlit history entry into the database schema."""
 
@@ -191,20 +279,70 @@ def normalise_history_item(item: dict[str, object], session_id: str = DEFAULT_SE
     preview = _string(item.get("preview") or item.get("source_name"), "")[:800]
     model_name = _string(item.get("model_name") or item.get("model"), "")
     flags = _normalise_flags(item.get("flags") or item.get("findings"))
+    native_prediction = _string(
+        item.get("native_prediction") or item.get("source_verdict") or item.get("prediction") or item.get("label_name"),
+        "Unknown",
+    )
+    scan_family = scan_type.casefold()
+    concern_value = item.get("concern_score")
+    if concern_value is None:
+        concern_value = item.get("risk_score")
+    evidence_complete = _explicit_bool(item.get("evidence_complete"))
+    if concern_value is None and "phone" in scan_family:
+        concern_value, phone_complete = _phone_snapshot_fields(item.get("raw_input"))
+        if evidence_complete is None:
+            evidence_complete = phone_complete
+    concern_score = _normalise_confidence(concern_value) if concern_value is not None else None
+    score_available = _explicit_bool(item.get("score_available"))
+    if score_available is None:
+        score_available = concern_score is not None
+        if concern_score is None and "transcript" in scan_family:
+            concern_score = _normalise_confidence(item.get("confidence"))
+            score_available = True
+    action_status = _string(item.get("action_status"), "")
+    if not action_status:
+        action_status = derive_action_status(
+            native_prediction=native_prediction,
+            evidence_type=scan_type,
+            concern_score=concern_score,
+            score_available=score_available,
+            model_agreement=item.get("model_agreement"),
+            evidence_complete=evidence_complete,
+            direct_exposure=bool(item.get("direct_exposure")),
+        )
+    evidence_bundle = _json_text(item.get("evidence_bundle"))
+    provenance = _json_text(item.get("provenance"))
+    raw_input = _string(item.get("raw_input") or item.get("input_text") or item.get("text"), "")
+    if not provenance and raw_input:
+        provenance = _json_text(
+            provenance_record(
+                raw_input,
+                source_name=_string(item.get("source_name") or item.get("filename") or preview[:80], ""),
+                source_kind=scan_type,
+                captured_at=scanned_at,
+            )
+        )
 
     row = {
         "session_id": _string(item.get("session_id"), session_id),
         "scanned_at": scanned_at,
         "scan_type": scan_type,
         "source_name": _string(item.get("source_name") or item.get("filename") or preview[:80], ""),
-        "prediction": _string(item.get("prediction") or item.get("label_name"), "Unknown"),
+        "prediction": _string(item.get("prediction") or item.get("label_name"), native_prediction),
         "confidence": _normalise_confidence(item.get("confidence")),
         "model_name": model_name,
         "preview": preview,
         "flags": flags,
         "explanation": _string(item.get("explanation") or item.get("summary"), ""),
-        "raw_input": _string(item.get("raw_input") or item.get("input_text") or item.get("text"), ""),
+        "raw_input": raw_input,
         "report_note": _string(item.get("report_note"), ""),
+        "native_prediction": native_prediction,
+        "action_status": action_status,
+        "concern_score": concern_score,
+        "score_label": _string(item.get("score_label"), "Concern score"),
+        "score_available": bool(score_available),
+        "evidence_bundle": evidence_bundle,
+        "provenance": provenance,
     }
     row["source_fingerprint"] = _string(item.get("source_fingerprint")) or history_fingerprint(row)
     return row
@@ -221,6 +359,10 @@ def history_fingerprint(item: dict[str, object]) -> str:
         "model_name": _string(item.get("model_name") or item.get("model")),
         "preview": _string(item.get("preview")),
         "chunks": _string(item.get("chunks")),
+        "raw_input_sha256": hashlib.sha256(
+            _string(item.get("raw_input") or item.get("input_text") or item.get("text")).encode("utf-8")
+        ).hexdigest(),
+        "evidence_bundle": _string(item.get("evidence_bundle")),
     }
     packed = json.dumps(payload, sort_keys=True, ensure_ascii=True)
     return hashlib.sha256(packed.encode("utf-8")).hexdigest()
@@ -241,6 +383,13 @@ def insert_scan(
     raw_input: str = "",
     report_note: str = "",
     source_fingerprint: str | None = None,
+    native_prediction: str = "",
+    action_status: str = "",
+    concern_score: float | None = None,
+    score_label: str = "Concern score",
+    score_available: bool | None = None,
+    evidence_bundle: dict[str, object] | str | None = None,
+    provenance: dict[str, object] | str | None = None,
 ) -> int:
     """Insert one scan result and return its row id."""
 
@@ -258,7 +407,15 @@ def insert_scan(
         "explanation": explanation,
         "raw_input": raw_input,
         "report_note": report_note,
+        "native_prediction": native_prediction or prediction,
+        "action_status": action_status,
+        "concern_score": concern_score,
+        "score_label": score_label,
+        "score_available": score_available,
+        "evidence_bundle": evidence_bundle or "",
+        "provenance": provenance or "",
     }
+    row = normalise_history_item(row, session_id=session_id)
     fingerprint = source_fingerprint or history_fingerprint(row)
 
     with _connect() as connection:
@@ -267,9 +424,10 @@ def insert_scan(
             INSERT OR IGNORE INTO scan_history (
                 session_id, scanned_at, scan_type, source_name, prediction,
                 confidence, model_name, preview, flags, explanation, raw_input,
-                report_note, source_fingerprint
+                report_note, source_fingerprint, native_prediction, action_status,
+                concern_score, score_label, score_available, evidence_bundle, provenance
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row["session_id"],
@@ -285,6 +443,13 @@ def insert_scan(
                 row["raw_input"],
                 row["report_note"],
                 fingerprint,
+                row["native_prediction"],
+                row["action_status"],
+                row["concern_score"],
+                row["score_label"],
+                1 if row["score_available"] else 0,
+                row["evidence_bundle"],
+                row["provenance"],
             ),
         )
         if cursor.rowcount:
@@ -320,6 +485,13 @@ def sync_session_history(history: list[dict[str, object]], session_id: str = DEF
             raw_input=str(row["raw_input"]),
             report_note=str(row["report_note"]),
             source_fingerprint=str(row["source_fingerprint"]),
+            native_prediction=str(row["native_prediction"]),
+            action_status=str(row["action_status"]),
+            concern_score=float(row["concern_score"]) if row["concern_score"] is not None else None,
+            score_label=str(row["score_label"]),
+            score_available=bool(row["score_available"]),
+            evidence_bundle=str(row["evidence_bundle"]),
+            provenance=str(row["provenance"]),
         )
         if before is None:
             inserted += 1
@@ -350,6 +522,13 @@ def record_history_item(
         raw_input=str(row["raw_input"]),
         report_note=str(row["report_note"]),
         source_fingerprint=str(row["source_fingerprint"]),
+        native_prediction=str(row["native_prediction"]),
+        action_status=str(row["action_status"]),
+        concern_score=float(row["concern_score"]) if row["concern_score"] is not None else None,
+        score_label=str(row["score_label"]),
+        score_available=bool(row["score_available"]),
+        evidence_bundle=str(row["evidence_bundle"]),
+        provenance=str(row["provenance"]),
     )
 
 
@@ -370,6 +549,8 @@ def query_history(
     date_to: str | None = None,
     scan_types: list[str] | None = None,
     predictions: list[str] | None = None,
+    action_statuses: list[str] | None = None,
+    native_predictions: list[str] | None = None,
     limit: int | None = None,
 ) -> list[dict[str, object]]:
     """Return filtered report history rows."""
@@ -391,15 +572,50 @@ def query_history(
         placeholders = ",".join("?" for _ in predictions)
         clauses.append(f"prediction IN ({placeholders})")
         params.extend(predictions)
+    if native_predictions:
+        placeholders = ",".join("?" for _ in native_predictions)
+        clauses.append(f"COALESCE(native_prediction, prediction) IN ({placeholders})")
+        params.extend(native_predictions)
 
     sql = f"SELECT * FROM scan_history WHERE {' AND '.join(clauses)} ORDER BY scanned_at DESC, id DESC"
-    if limit:
+    if limit and not action_statuses:
         sql += " LIMIT ?"
         params.append(limit)
 
     with _connect() as connection:
         rows = connection.execute(sql, params).fetchall()
-    return [dict(row) for row in rows]
+    hydrated = [_hydrate_query_row(dict(row)) for row in rows]
+    if action_statuses:
+        allowed = set(action_statuses)
+        hydrated = [row for row in hydrated if str(row.get("action_status")) in allowed]
+    return hydrated[:limit] if limit else hydrated
+
+
+def _hydrate_query_row(row: dict[str, object]) -> dict[str, object]:
+    native_prediction = _string(row.get("native_prediction") or row.get("prediction"), "Unknown")
+    row["native_prediction"] = native_prediction
+    score_available = _explicit_bool(row.get("score_available"))
+    concern_score = row.get("concern_score")
+    evidence_complete = None
+    if concern_score is None and "phone" in _string(row.get("scan_type")).casefold():
+        concern_score, evidence_complete = _phone_snapshot_fields(row.get("raw_input"))
+    if score_available is None:
+        score_available = concern_score is not None
+        if concern_score is None and "transcript" in _string(row.get("scan_type")).casefold():
+            concern_score = _normalise_confidence(row.get("confidence"))
+            score_available = True
+    row["concern_score"] = concern_score
+    row["score_available"] = bool(score_available)
+    row["score_label"] = _string(row.get("score_label"), "Concern score")
+    if not _string(row.get("action_status"), ""):
+        row["action_status"] = derive_action_status(
+            native_prediction=native_prediction,
+            evidence_type=row.get("scan_type"),
+            concern_score=concern_score,
+            score_available=score_available,
+            evidence_complete=evidence_complete,
+        )
+    return row
 
 
 def delete_selected(scan_ids: list[int]) -> int:
@@ -433,6 +649,8 @@ def log_export(
     scan_ids: list[int],
     filename: str,
     session_id: str = DEFAULT_SESSION_ID,
+    report_sha256: str = "",
+    manifest: dict[str, object] | None = None,
 ) -> int:
     """Record that a report export was generated."""
 
@@ -440,8 +658,10 @@ def log_export(
     with _connect() as connection:
         cursor = connection.execute(
             """
-            INSERT INTO report_exports (exported_at, session_id, format, scan_ids, filename)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO report_exports (
+                exported_at, session_id, format, scan_ids, filename, report_sha256, manifest
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 now_for_app().replace(microsecond=0).isoformat(),
@@ -449,6 +669,8 @@ def log_export(
                 report_format.upper(),
                 json.dumps(scan_ids, ensure_ascii=True),
                 filename,
+                report_sha256,
+                json.dumps(manifest or {}, ensure_ascii=True, default=str),
             ),
         )
         return int(cursor.lastrowid)
