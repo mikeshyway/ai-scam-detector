@@ -31,19 +31,24 @@ from src.reporting.history_db import (
 from src.reporting.report_builder import (
     DEFAULT_RECOMMENDATION,
     DEFAULT_SECTIONS,
-    REPORT_PROFILES,
     REPORT_SCHEMA_VERSION,
     STUDENT_PROFILE,
     build_preview,
     build_report,
 )
 from src.reporting.evidence_snapshot import (
-    ACTION_STATUSES,
     IMMEDIATE_ACTION,
     NO_IMMEDIATE_ACTION,
     REVIEW_REQUIRED,
 )
 from src.utils.time_utils import now_for_app
+
+
+REPORT_VERDICT_OPTIONS = [
+    NO_IMMEDIATE_ACTION,
+    IMMEDIATE_ACTION,
+    REVIEW_REQUIRED,
+]
 
 
 def _parse_date(value: object) -> date | None:
@@ -58,6 +63,14 @@ def _parse_date(value: object) -> date | None:
 def _unique(rows: list[dict[str, object]], key: str) -> list[str]:
     values = {str(row.get(key, "")).strip() for row in rows if str(row.get(key, "")).strip()}
     return sorted(values)
+
+
+def _reportable_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        row
+        for row in rows
+        if str(row.get("scan_type", "")).strip().casefold() != "simulation"
+    ]
 
 
 def _confidence(value: object) -> float:
@@ -96,8 +109,7 @@ def _history_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
                 "ID": int(row.get("id", 0)),
                 "Time": str(row.get("scanned_at", "")).replace("T", " ")[:19],
                 "Type": row.get("scan_type", "-"),
-                "Native Verdict": row.get("native_prediction") or row.get("prediction", "-"),
-                "Action Status": row.get("action_status", REVIEW_REQUIRED),
+                "Native Verdict": row.get("action_status", REVIEW_REQUIRED),
                 "Concern Score": (
                     f"{_confidence(row.get('concern_score')):.1f}%"
                     if bool(row.get("score_available")) and row.get("concern_score") is not None
@@ -140,8 +152,7 @@ def _no_result_message(
     date_from: date,
     date_to: date,
     selected_types: list[str],
-    selected_action_statuses: list[str],
-    selected_native_predictions: list[str],
+    selected_verdicts: list[str],
 ) -> str:
     if date_from > date_to:
         return "No result: the start date is after the end date. Choose a valid date range."
@@ -149,9 +160,7 @@ def _no_result_message(
         return "No result: no scan evidence has been saved yet. Run a scan first, then return to this page."
     if not selected_types:
         return "No result: no scan type is selected."
-    if not selected_action_statuses:
-        return "No result: no action status is selected."
-    if not selected_native_predictions:
+    if not selected_verdicts:
         return "No result: no native verdict is selected."
 
     date_rows = query_history(
@@ -171,7 +180,7 @@ def _no_result_message(
     if not type_rows:
         return "No result: the selected scan type has no saved scans in this date range."
 
-    return "No result: the selected action status or native verdict has no saved scans for the current filters."
+    return "No result: the selected native verdict has no saved scans for the current filters."
 
 
 def _render_risk_chart(rows: list[dict[str, object]]) -> None:
@@ -192,7 +201,7 @@ def _render_risk_chart(rows: list[dict[str, object]]) -> None:
                     else "N/A - no comparable concern score"
                 ),
                 "Action Status": row.get("action_status", REVIEW_REQUIRED),
-                "Native Verdict": row.get("native_prediction") or row.get("prediction", "Unknown"),
+                "Source Result": row.get("native_prediction") or row.get("prediction", "Unknown"),
                 "Native Confidence": _confidence(row.get("confidence")),
             }
             for index, row in enumerate(rows, 1)
@@ -207,7 +216,7 @@ def _render_risk_chart(rows: list[dict[str, object]]) -> None:
         title="Selected evidence action overview",
         labels={"Concern": "Source-native concern score (%)"},
         hover_data={
-            "Native Verdict": True,
+            "Source Result": True,
             "Native Confidence": ":.1f",
             "Score Availability": True,
         },
@@ -318,7 +327,7 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
     if notice:
         render_analysis_ready(str(notice))
 
-    all_rows = query_history(session_id=DEFAULT_SESSION_ID)
+    all_rows = _reportable_rows(query_history(session_id=DEFAULT_SESSION_ID))
     render_metric_row(_summary_metrics(all_rows))
 
     with st.container(border=True):
@@ -336,48 +345,35 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
             date_to = st.date_input("To", value=default_to)
 
         type_options = _unique(all_rows, "scan_type")
-        action_options = [
-            status for status in ACTION_STATUSES if status in _unique(all_rows, "action_status")
-        ]
-        native_prediction_options = _unique(all_rows, "native_prediction")
-        col_d, col_e, col_f = st.columns(3)
+        col_d, col_f = st.columns(2)
         with col_d:
             selected_types = st.multiselect("Scan types", type_options, default=type_options)
-        with col_e:
-            selected_action_statuses = st.multiselect(
-                "Action status",
-                action_options,
-                default=action_options,
-                help="Unified triage label. The source's original verdict remains available separately.",
-            )
         with col_f:
-            selected_native_predictions = st.multiselect(
+            selected_verdicts = st.multiselect(
                 "Native verdict",
-                native_prediction_options,
-                default=native_prediction_options,
-                help="Original result produced by the Email, Transcript/Audio, or Phone investigation.",
+                REPORT_VERDICT_OPTIONS,
+                default=REPORT_VERDICT_OPTIONS,
+                help="Student-facing attention level used consistently throughout the report.",
             )
 
     if (
         date_from <= date_to
         and selected_types
-        and selected_action_statuses
-        and selected_native_predictions
+        and selected_verdicts
     ):
         filtered_rows = query_history(
             session_id=DEFAULT_SESSION_ID,
             date_from=str(date_from),
             date_to=str(date_to),
             scan_types=selected_types,
-            action_statuses=selected_action_statuses,
-            native_predictions=selected_native_predictions,
+            action_statuses=selected_verdicts,
         )
     else:
         filtered_rows = []
 
     render_section_header(
         "Saved scan evidence",
-        "Choose specific rows for the report, or leave everything unselected to include the filtered evidence set.",
+        "Select one or more evidence records to include in the report.",
         "Report input",
     )
 
@@ -388,8 +384,7 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
                 date_from=date_from,
                 date_to=date_to,
                 selected_types=selected_types,
-                selected_action_statuses=selected_action_statuses,
-                selected_native_predictions=selected_native_predictions,
+                selected_verdicts=selected_verdicts,
             ),
             kind="warning",
             code="NO RESULT",
@@ -406,7 +401,6 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
                 "Time",
                 "Type",
                 "Native Verdict",
-                "Action Status",
                 "Concern Score",
                 "Native Confidence",
                 "Model",
@@ -422,11 +416,14 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
         )
         selected_ids = _selected_ids_from_editor(edited_frame)
         selected_rows = _rows_by_id(filtered_rows, selected_ids)
-        report_rows = selected_rows or filtered_rows
+        report_rows = selected_rows
 
         action_a, action_b, action_c = st.columns([0.42, 0.29, 0.29])
         with action_a:
-            st.caption(f"{len(report_rows)} record(s) will be included.")
+            if report_rows:
+                st.caption(f"{len(report_rows)} selected record(s) will be included.")
+            else:
+                st.caption("No evidence selected.")
         with action_b:
             if st.button("Delete selected evidence", disabled=not selected_ids, use_container_width=True):
                 deleted_rows = _rows_by_id(filtered_rows, selected_ids)
@@ -441,25 +438,6 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
     if st.session_state.get("show_clear_all_dialog"):
         _render_clear_all_confirmation(history)
 
-    with st.expander("Inspect selected evidence details", expanded=False):
-        for index, row in enumerate(report_rows, 1):
-            st.markdown(
-                f"**{index}. {row.get('scan_type', 'Unknown')} - "
-                f"{row.get('native_prediction') or row.get('prediction', 'Unknown')}**"
-            )
-            st.caption(
-                f"{str(row.get('scanned_at', '')).replace('T', ' ')[:19]} | "
-                f"{row.get('action_status', REVIEW_REQUIRED)} | "
-                f"{row.get('score_label', 'Concern score')}: "
-                f"{f'{_confidence(row.get('concern_score')):.1f}%' if row.get('score_available') else 'N/A'} | "
-                f"{row.get('model_name', '-')}"
-            )
-            if row.get("preview"):
-                st.write(str(row["preview"]))
-            if row.get("explanation"):
-                st.info(str(row["explanation"]))
-            st.divider()
-
     render_section_header(
         "Report configuration",
         "Pick the file type and sections your examiner or reviewer should see.",
@@ -468,95 +446,39 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
     with st.container(border=True):
         config_a, config_b = st.columns([0.34, 0.66])
         with config_a:
-            report_profile = st.radio(
-                "Report profile",
-                options=REPORT_PROFILES,
-                index=0,
-                help=(
-                    "Student Brief prioritizes decisions and learning. "
-                    "Technical Report preserves the full forensic-style export."
-                ),
-            )
+            report_profile = STUDENT_PROFILE
+            st.caption("Report profile")
+            st.markdown("**Student Brief**")
             report_format = st.radio(
                 "Report format",
                 options=["PDF", "DOCX", "TXT"],
                 index=0,
                 horizontal=True,
             )
-            student_mode = report_profile == STUDENT_PROFILE
-            section_labels = (
-                {
-                    "summary": "Investigation summary",
-                    "evidence": "Evidence review",
-                    "explanations": "Key findings",
-                    "risk": "Attention chart",
-                    "recommendations": "Next actions",
-                    "appendix": "Technical appendix (all saved visuals)",
-                }
-                if student_mode
-                else {
-                    "summary": "Executive summary",
-                    "evidence": "Evidence table",
-                    "explanations": "AI explanations and flags",
-                    "risk": "Risk interpretation",
-                    "recommendations": "Recommendations",
-                    "appendix": "Appendix and scope",
-                }
-            )
+            section_labels = {
+                "summary": "Investigation summary",
+                "evidence": "Evidence review",
+                "explanations": "Key findings",
+                "risk": "Attention chart",
+                "recommendations": "Next actions",
+                "appendix": "Technical appendix (all saved visuals)",
+            }
             section_values: dict[str, bool] = {}
             st.write("Sections")
             for section_name, section_label in section_labels.items():
                 section_values[section_name] = st.checkbox(
                     section_label,
                     value=DEFAULT_SECTIONS[section_name],
-                    key=f"report_section_{section_name}_{report_profile}",
+                    key=f"report_section_{section_name}_student",
                 )
         with config_b:
             _render_risk_chart(report_rows)
-            with st.expander("Incident context for precise remediation", expanded=False):
-                st.caption(
-                    "Select only events that actually occurred. These details add trigger-specific response steps; "
-                    "unchecked items are not assumed."
-                )
-                context_a, context_b = st.columns(2)
-                with context_a:
-                    link_clicked = st.checkbox("Suspicious link opened")
-                    credentials_shared = st.checkbox("Password or credentials shared")
-                    otp_shared = st.checkbox("OTP or verification code shared")
-                with context_b:
-                    software_installed = st.checkbox("Software or remote access installed")
-                    funds_transferred = st.checkbox("Money or cryptocurrency transferred")
-                    interaction_ongoing = st.checkbox("Contact is still ongoing")
-            incident_context = {
-                "link_clicked": link_clicked,
-                "credentials_shared": credentials_shared,
-                "otp_shared": otp_shared,
-                "software_installed": software_installed,
-                "funds_transferred": funds_transferred,
-                "interaction_ongoing": interaction_ongoing,
-            }
-            report_note = st.text_area(
-                "Reviewer note and recommendations",
-                value=DEFAULT_RECOMMENDATION,
-                height=130,
-            )
-        with st.expander("Case and documentation details", expanded=False):
-            st.caption(
-                "These fields provide report identity, purpose, accountability, and evidence disposition."
-            )
+        with st.expander("Case File Remarks", expanded=False):
             metadata_a, metadata_b = st.columns(2)
             with metadata_a:
                 case_identifier = st.text_input(
                     "Case identifier",
                     key="report_case_identifier",
-                )
-                requester = st.text_input(
-                    "Requester or course",
-                    placeholder="e.g., CEH capstone review",
-                )
-                report_author = st.text_input(
-                    "Report author",
-                    placeholder="Student or investigator name",
                 )
             with metadata_b:
                 purpose_scope = st.text_area(
@@ -564,26 +486,22 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
                     value="Educational review of selected scam-detection evidence and recommended response.",
                     height=92,
                 )
-                evidence_disposition = st.text_area(
-                    "Evidence disposition",
-                    value=(
-                        "Original inputs remain in local investigation history; "
-                        "this report is a derivative educational export."
-                    ),
-                    height=92,
-                )
-        incident_context.update(
-            {
-                "report_profile": report_profile,
-                "case_identifier": case_identifier,
-                "requester": requester,
-                "report_author": report_author,
-                "purpose_scope": purpose_scope,
-                "evidence_disposition": evidence_disposition,
-            }
-        )
+            report_note = st.text_area(
+                "Reviewer note and recommendations",
+                value=DEFAULT_RECOMMENDATION,
+                height=130,
+            )
+        incident_context = {
+            "report_profile": report_profile,
+            "case_identifier": case_identifier,
+            "purpose_scope": purpose_scope,
+        }
 
-    preview = build_preview(report_rows, report_note, section_values, incident_context)
+    preview = (
+        build_preview(report_rows, report_note, section_values, incident_context)
+        if report_rows
+        else ""
+    )
     rows_json = _report_rows_json(report_rows)
     sections_json = _sections_json(section_values)
     incident_context_json = _context_json(incident_context)
@@ -604,9 +522,10 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
         )
 
         if st.button(
-            f"Generate {report_profile} {report_format} ({len(report_rows)} record(s))",
+            f"Generate Report {report_format}",
             type="primary",
             use_container_width=True,
+            disabled=not report_rows,
         ):
             try:
                 with st.spinner(f"Building {report_format} report and rendering saved artifacts..."):
@@ -669,7 +588,9 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
                 st.session_state["last_report_download_token"] = download_token
                 render_analysis_ready(f"{report_format} report download recorded")
         else:
-            st.caption(
-                "The text preview updates immediately. Generate the file when the configuration is ready; "
-                "PDF and DOCX chart rendering runs only on that command."
-            )
+            if report_rows:
+                st.caption(
+                    f"Generate the selected evidence as a downloadable {report_format} report."
+                )
+            else:
+                st.caption("Select at least one saved evidence record to generate a report.")
