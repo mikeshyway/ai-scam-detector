@@ -1287,6 +1287,9 @@ def _render_recording_carousel(
         for item in clip_results
     )
     content_peak = max(float(item.get("transcript_risk", 0)) for item in clip_results)
+    supporting_only = "supporting" in title.casefold()
+    score_label = "Supporting chunk score" if supporting_only else "Decision score"
+    peak_label = "Peak supporting chunk" if supporting_only else "Peak chunk"
     flags = sorted(
         {
             str(flag)
@@ -1300,7 +1303,7 @@ def _render_recording_carousel(
         title,
         (
             f"Recording {current_index + 1} of {len(groups)} | Clip {clip_number} | "
-            f"Decision score {peak:.1f}% | Peak chunk {peak_chunk:.1f}% | "
+            f"{score_label} {peak:.1f}% | {peak_label} {peak_chunk:.1f}% | "
             f"Voice evidence {voice_peak:.1f}% | Behavioral evidence {behavioral_peak:.1f}% | "
             f"Content {content_peak:.1f}%"
         ),
@@ -2732,17 +2735,6 @@ def _render_analysis_outputs(
     has_uploaded_audio_text = bool(uploaded_audio_text.strip())
     has_transcript_text = bool(transcript_text.strip())
 
-    if use_uploaded_audio and has_uploaded_audio_results:
-        _render_recording_carousel(
-            uploaded_audio_results,
-            risk_threshold,
-            state_key="transcript_uploaded_audio_carousel_index",
-            title="Uploaded audio analysis",
-            transcript_heading="Uploaded audio transcript and chunks",
-            frequency_heading="Uploaded audio frequency spectrum",
-            latest_title="Latest uploaded audio chunk {chunk}",
-        )
-
     if use_uploaded_audio and not has_uploaded_audio_results:
         st.warning("Uploaded audio was selected, but no analysed audio file is available yet.")
 
@@ -2758,6 +2750,15 @@ def _render_analysis_outputs(
 
     if not combined_text:
         if use_uploaded_audio and has_uploaded_audio_results:
+            _render_recording_carousel(
+                uploaded_audio_results,
+                risk_threshold,
+                state_key="transcript_uploaded_audio_carousel_index",
+                title="Uploaded audio analysis",
+                transcript_heading="Uploaded audio transcript and chunks",
+                frequency_heading="Uploaded audio frequency spectrum",
+                latest_title="Latest uploaded audio chunk {chunk}",
+            )
             st.info(
                 "Audio was analysed for voice authenticity and behavioral signals, but no speech transcript was available. "
                 "Whisper may be unavailable, the sample may be too quiet, or no speech was detected."
@@ -2816,7 +2817,10 @@ def _render_analysis_outputs(
 
     render_section_header(
         "Combined transcript analysis",
-        "Transcript scam detection uses the available voice transcript, uploaded text, or both together.",
+        (
+            "This is the primary verdict when uploaded audio has usable transcript text. "
+            "Voice authenticity and Behavioral RF are supporting evidence below."
+        ),
         "Unified result",
     )
 
@@ -2885,6 +2889,21 @@ def _render_analysis_outputs(
         model_agreement=agreement,
     )
     _display_result(root, result, combined_text, classifier)
+
+    if use_uploaded_audio and has_uploaded_audio_results:
+        st.info(
+            "The primary verdict above uses the full transcript extracted from the uploaded audio. "
+            "The section below is supporting chunk-level audio evidence for voice authenticity, quality, MFCC, and Behavioral RF."
+        )
+        _render_recording_carousel(
+            uploaded_audio_results,
+            risk_threshold,
+            state_key="transcript_uploaded_audio_carousel_index",
+            title="Supporting audio analysis",
+            transcript_heading="Supporting audio transcript and chunks",
+            frequency_heading="Supporting audio frequency spectrum",
+            latest_title="Supporting uploaded audio chunk {chunk}",
+        )
 
 
 def _inject_transcript_input_css() -> None:
