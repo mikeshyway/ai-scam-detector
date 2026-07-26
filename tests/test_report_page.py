@@ -1,8 +1,11 @@
 import inspect
+from unittest.mock import patch
 
 from app.report_page import (
     REPORT_VERDICT_OPTIONS,
+    _auto_download_markup,
     _history_frame,
+    _render_risk_chart,
     _reportable_rows,
     _rows_by_id,
     render_report_page,
@@ -68,3 +71,30 @@ def test_report_generator_ui_omits_removed_controls() -> None:
     assert "Evidence disposition" not in source
     assert "Case File Remarks" in source
     assert "Generate Report {report_format}" in source
+    assert "st.download_button" not in source
+
+
+def test_empty_selection_keeps_an_empty_action_overview_chart() -> None:
+    with (
+        patch("app.report_page.apply_chart_theme", side_effect=lambda fig: fig),
+        patch("app.report_page.st.plotly_chart") as plotly_chart,
+    ):
+        _render_risk_chart([])
+
+    figure = plotly_chart.call_args.args[0]
+    assert len(figure.data) == 0
+    assert figure.layout.title.text == "Selected evidence action overview"
+    assert list(figure.layout.xaxis.range) == [0, 100]
+    assert figure.layout.yaxis.title.text == "Evidence"
+
+
+def test_auto_download_markup_clicks_a_named_browser_download() -> None:
+    markup = _auto_download_markup(
+        "Automatic report download 3",
+        3,
+    )
+
+    assert 'const buttonLabel = "Automatic report download 3"' in markup
+    assert 'const triggerKey = "aifds-report-download-3"' in markup
+    assert 'window.parent.document.querySelectorAll("button")' in markup
+    assert "target.click()" in markup

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 from app.ui_components import (
     apply_chart_theme,
@@ -185,6 +187,22 @@ def _no_result_message(
 
 def _render_risk_chart(rows: list[dict[str, object]]) -> None:
     if not rows:
+        fig = go.Figure()
+        fig.update_layout(
+            title="Selected evidence action overview",
+            height=280,
+            margin=dict(l=10, r=10, t=40, b=35),
+            showlegend=False,
+            xaxis=dict(
+                range=[0, 100],
+                title="Source-native concern score (%)",
+            ),
+            yaxis=dict(
+                title="Evidence",
+                showticklabels=False,
+            ),
+        )
+        st.plotly_chart(apply_chart_theme(fig), use_container_width=True)
         return
     chart_rows = pd.DataFrame(
         [
@@ -247,6 +265,67 @@ def _context_json(context: dict[str, object]) -> str:
     return json.dumps(context, sort_keys=True, ensure_ascii=True)
 
 
+def _auto_download_markup(
+    button_label: str,
+    nonce: int,
+) -> str:
+    return f"""
+    <script>
+    (() => {{
+      const buttonLabel = {json.dumps(button_label)};
+      const triggerKey = {json.dumps(f"aifds-report-download-{nonce}")};
+      let attempts = 0;
+      const clickDownload = () => {{
+        const buttons = Array.from(
+          window.parent.document.querySelectorAll("button")
+        );
+        const target = buttons.find(
+          (button) => button.textContent.trim() === buttonLabel
+        );
+        if (target) {{
+          target.dataset.aifdsAutoDownload = triggerKey;
+          target.click();
+          return;
+        }}
+        attempts += 1;
+        if (attempts < 20) {{
+          window.setTimeout(clickDownload, 100);
+        }}
+      }};
+      clickDownload();
+    }})();
+    </script>
+    """
+
+
+def _trigger_browser_download(
+    payload: bytes,
+    filename: str,
+    mime_type: str,
+    nonce: int,
+) -> None:
+    button_label = f"Automatic report download {nonce}"
+    container_key = f"aifds_auto_download_{nonce}"
+    with st.container(key=container_key):
+        st.download_button(
+            button_label,
+            data=payload,
+            file_name=filename,
+            mime=mime_type,
+            key=f"{container_key}_button",
+            on_click="ignore",
+        )
+    st.markdown(
+        f"<style>.st-key-{container_key}{{display:none!important;}}</style>",
+        unsafe_allow_html=True,
+    )
+    components.html(
+        _auto_download_markup(button_label, nonce),
+        height=0,
+        scrolling=False,
+    )
+
+
 @st.cache_data(show_spinner=False, ttl=900, max_entries=16)
 def _build_cached_report(
     report_format: str,
@@ -306,6 +385,8 @@ def _render_clear_all_confirmation(history: list[dict[str, object]]) -> None:
 def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
     del root
     init_db()
+    st.session_state.pop("generated_report", None)
+    st.session_state.pop("last_report_download_token", None)
     if "report_case_identifier" not in st.session_state:
         st.session_state["report_case_identifier"] = now_for_app().strftime("AI-FDS-%Y%m%d-%H%M")
     synced = sync_session_history(history, session_id=DEFAULT_SESSION_ID)
@@ -509,24 +590,13 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
         st.subheader("Report preview")
         st.text_area("Preview text", value=preview, height=250, disabled=True, label_visibility="collapsed")
 
-        report_token = hashlib.sha256(
-            (
-                f"{REPORT_SCHEMA_VERSION}:{report_format}:{rows_json}:{sections_json}:"
-                f"{incident_context_json}:{report_note}"
-            ).encode("utf-8")
-        ).hexdigest()
-        generated_report = st.session_state.get("generated_report")
-        generated_is_current = (
-            isinstance(generated_report, dict)
-            and generated_report.get("token") == report_token
-        )
-
-        if st.button(
+        generate_clicked = st.button(
             f"Generate Report {report_format}",
             type="primary",
             use_container_width=True,
             disabled=not report_rows,
-        ):
+        )
+        if generate_clicked:
             try:
                 with st.spinner(f"Building {report_format} report and rendering saved artifacts..."):
                     payload, filename, mime_type = _build_cached_report(
@@ -538,37 +608,18 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
                         REPORT_SCHEMA_VERSION,
                     )
             except Exception as exc:
-                st.session_state.pop("generated_report", None)
                 st.error(f"Report generation failed: {exc}")
             else:
-                generated_report = {
-                    "token": report_token,
-                    "payload": payload,
-                    "filename": filename,
-                    "mime_type": mime_type,
-                }
-                st.session_state["generated_report"] = generated_report
-                generated_is_current = True
-                render_analysis_ready(f"{report_format} report ready for download")
-
-        if generated_is_current and isinstance(generated_report, dict):
-            payload = bytes(generated_report.get("payload", b""))
-            filename = str(generated_report.get("filename", ""))
-            mime_type = str(
-                generated_report.get("mime_type", "application/octet-stream")
-            )
-            downloaded = st.download_button(
-                f"Download {report_format} report",
-                data=payload,
-                file_name=filename,
-                mime=mime_type,
-                use_container_width=True,
-            )
-            download_token = (
-                f"{filename}:{len(payload)}:{rows_json}:{sections_json}:"
-                f"{incident_context_json}:{report_note}"
-            )
-            if downloaded and st.session_state.get("last_report_download_token") != download_token:
+                download_nonce = int(
+                    st.session_state.get("report_download_nonce", 0)
+                ) + 1
+                st.session_state["report_download_nonce"] = download_nonce
+                _trigger_browser_download(
+                    payload,
+                    filename,
+                    mime_type,
+                    download_nonce,
+                )
                 scan_ids = [int(row.get("id", 0)) for row in report_rows]
                 report_sha256 = hashlib.sha256(payload).hexdigest()
                 log_export(
@@ -585,8 +636,9 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
                         "report_sha256": report_sha256,
                     },
                 )
-                st.session_state["last_report_download_token"] = download_token
-                render_analysis_ready(f"{report_format} report download recorded")
+                render_analysis_ready(
+                    f"{report_format} report generated; download started"
+                )
         else:
             if report_rows:
                 st.caption(
