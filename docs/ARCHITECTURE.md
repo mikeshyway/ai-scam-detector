@@ -13,7 +13,7 @@ main evidence record for reviewers.
 | `src/audio/` | Audio decoding, feature extraction, inference, and recording helpers |
 | `src/text/` | Text preprocessing, classifier loading, rules, and explainability |
 | `src/phone/` | Veriphone.io carrier lookup, PenipuMY reputation lookup, rules, and explanations |
-| `src/reporting/` | Saved history and TXT/PDF/DOCX report generation |
+| `src/reporting/` | Saved history, evidence snapshots, export logging, and TXT/PDF/DOCX report generation |
 | `src/data/` | Synthetic/demo data helpers only |
 | `src/utils/` | Cross-cutting time and system diagnostic helpers |
 | `src/preprocessing/` | Reusable `*_preprocessor.py` dataset workflows |
@@ -52,6 +52,14 @@ Detection Center routes internally to three evidence workflows:
 Detection results can be stored as structured evidence and handed to the AI
 Report Generator for TXT, PDF, or DOCX export.
 
+The report generator uses the existing evidence history rather than producing
+new detections. Detection tabs call the reporting/history helpers to persist
+rows in `data/session_history.db`; `app/report_page.py` then syncs session
+history, filters reportable rows, lets the user select evidence, previews the
+case material, and calls `src/reporting/report_builder.py` for TXT, PDF, or
+DOCX output. Completed exports are logged in the `report_exports` table with
+format, filename, selected row ids, and SHA-256 metadata.
+
 ## Runtime Evidence Flow
 
 ```text
@@ -60,14 +68,25 @@ User evidence
   -> src/ domain logic where applicable
   -> saved model artifact, provider evidence, or deterministic rules
   -> result explanation and history row
-  -> report generator preview/export
+  -> report generator filter/select/preview/export
+  -> export metadata log
 ```
 
 Email and transcript tabs load saved text model artifacts from `models/`.
 Audio analysis uses audio feature/inference helpers and saved audio artifacts
-where available. Phone checks use provider evidence from Veriphone.io and PenipuMY
-where configured, plus transparent rules; they are not a locally trained phone
-ML model.
+where available, including the second-stage voice-evidence calibrator when its
+artifact is present. Phone checks use provider evidence from Veriphone.io and
+PenipuMY where configured, plus transparent rules; they are not a locally
+trained phone ML model.
+
+## Reporting Modules
+
+| File | Responsibility |
+| --- | --- |
+| `src/reporting/history_db.py` | Creates and queries `scan_history`, syncs Streamlit session history, records individual detections, and logs report exports. |
+| `src/reporting/evidence_snapshot.py` | Normalizes dashboard evidence, provenance, action status, remediation, and report-ready evidence bundles. |
+| `src/reporting/report_builder.py` | Builds report previews and TXT/PDF/DOCX Student Brief or technical outputs from selected history rows. |
+| `src/reporting/chart_renderer.py` | Renders saved Plotly chart artifacts into images for document exports when possible. |
 
 ## Python Packages
 

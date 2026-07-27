@@ -13,11 +13,14 @@ not a commercial security, telecom, or forensic product.
   legitimate indicators.
 - **Voice Transcript**: analyses pasted/uploaded transcripts and optional
   `.wav`, `.mp3`, `.m4a`, or `.flac` evidence using Whisper, the transcript
-  classifiers, MFCC + calibrated SVM, and the optional behavioral model.
+  classifiers, MFCC + calibrated SVM, the optional behavioral model, and the
+  trained voice-evidence calibrator when its artifact is available.
 - **Phone Number**: queries Veriphone.io and PenipuMY when configured,
   then explains provider evidence without inventing scam probabilities.
-- **AI Report Generator**: builds downloadable evidence reports from saved
-  detections.
+- **AI Report Generator**: filters and selects saved evidence rows, previews
+  the selected case material, and builds TXT/PDF/DOCX Student Brief exports.
+  Export metadata is logged so generated reports can be traced back to the
+  evidence rows used.
 
 ## Final Prototype Evidence
 
@@ -131,10 +134,11 @@ py scripts\04_train_email_model.py
 py scripts\05_train_transcript_model.py
 py scripts\06_train_audio_model.py
 py scripts\07_train_audio_behavior_model.py
+py scripts\08_train_audio_voice_evidence_calibrator.py
 ```
 
 The numbered workflow is deliberate: `00` validates the environment, `01-03`
-prepare datasets, and `04-07` train models. Scripts are thin launchers only.
+prepare datasets, and `04-08` train models. Scripts are thin launchers only.
 Reusable functions and classes belong under `src/`; do not place heavy logic
 directly in `scripts/`. See
 [docs/MODEL_TRAINING.md](docs/MODEL_TRAINING.md) for inputs and outputs.
@@ -188,7 +192,8 @@ workflows. The full behavior is documented in
 - Evaluation JSON: `reports/metrics/`
 - Local diagnostics: `logs/`
 - Report/history database: `data/session_history.db` is deployable when saved
-  evidence should be available in the AI Report Generator
+  evidence should be available in the AI Report Generator; it stores scan
+  history and report-export metadata, not retraining data
 - Reviewer evidence: `notebooks/00_final_prototype_evidence_notebook.ipynb`
   and any exported HTML/PDF version of that notebook
 

@@ -33,7 +33,7 @@ the AI Report Generator to build TXT, PDF, or DOCX reports.
 | --- | --- | --- | --- |
 | Email/message | Pasted text or uploaded email/document content | Saved trained text classifiers plus suspicious-content indicators | Label, confidence, highlighted evidence, history row |
 | Transcript | Pasted/uploaded transcript or transcribed speech | Saved transcript classifiers or optional transformer artifact | Scam-risk result, confidence, explanation, history row |
-| Audio | Uploaded or recorded voice evidence | MFCC/statistical audio features, calibrated SVM, optional behavior model, and transcript-risk signals where available | Voice/audio concern signals and explanation |
+| Audio | Uploaded or recorded voice evidence | MFCC/statistical audio features, calibrated SVM, optional behavior model, trained voice-evidence calibrator when available, and transcript-risk signals where available | Voice/audio concern signals and explanation |
 | Phone number | Caller number and optional claimed identity | Veriphone.io metadata, PenipuMY reputation/report fields where configured, and transparent evidence rules | Concern priority, provider status, evidence score, recommended verification action |
 
 Phone evidence is not a locally trained phone-risk model. It is provider-pulled
@@ -52,6 +52,30 @@ The dashboard does not retrain models when it opens. Training scripts prepare
 datasets, train candidate models, save model artifacts under `models/`, and
 write metric JSON files under `reports/metrics/`. The app loads those saved
 artifacts for runtime detection.
+
+For audio, the final runtime result is not just the raw MFCC/SVM output. The
+upstream MFCC model and behavior model produce raw signals, then
+`scripts/08_train_audio_voice_evidence_calibrator.py` trains the second-stage
+voice-evidence calibrator that converts raw voice, behavior, and quality fields
+into the dashboard-facing voice evidence risk.
+
+## AI Report Generator Workflow
+
+The report generator packages evidence that has already been produced by the
+Detection Center. It does not rerun classifiers, create new phone-provider
+lookups, or train a model.
+
+| Step | Purpose | Reviewer-facing output |
+| --- | --- | --- |
+| Save detection evidence | Email, transcript/audio, and phone tabs write structured rows to local history, including prediction, concern score, explanation, provenance, and dashboard artifacts when available. | A traceable scan-history row. |
+| Filter and select rows | The report page loads `data/session_history.db`, excludes simulation rows, and lets the user filter by date, evidence type, and action status. | A clean selected-evidence list for the case. |
+| Preview the report | `build_preview()` converts selected rows into a readable text preview before export. | Early check that the report matches what the reviewer intends to share. |
+| Export the Student Brief | `build_report()` dispatches TXT, PDF, or DOCX output. | Downloadable report with summary, evidence, explanations, visuals/data where available, risk notes, recommendations, and appendix. |
+| Log export metadata | `log_export()` records format, filename, selected row ids, SHA-256, and report manifest. | Evidence that the exported file can be traced back to selected history rows. |
+
+The important presentation boundary is simple: the report generator is an
+evidence packaging tool. It makes results shareable and easier to review, but
+it does not convert the prototype into legal proof.
 
 ## Reviewer Explanation
 

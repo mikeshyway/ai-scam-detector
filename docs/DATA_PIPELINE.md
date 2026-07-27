@@ -13,6 +13,7 @@ Raw dataset
   -> processed channel dataset
   -> training script
   -> model artifact
+  -> optional calibration artifact
   -> evaluation metrics
   -> Streamlit inference
 ```
@@ -26,7 +27,7 @@ can be regenerated.
 | --- | --- | --- |
 | Email/message | Train phishing/legitimate text classifiers from email/message examples. | Metrics describe the available dataset mix, not universal accuracy. |
 | Transcript | Train scam-intent classifiers from labeled call or conversation text. | Scam-only transcript sources are useful for demos, not as the only binary training source. |
-| Audio | Train bonafide/spoof voice classifiers using ASVspoof-style audio evidence. | Audio uses train/dev style validation rather than the text 80/20 split. |
+| Audio | Train bonafide/spoof voice classifiers and calibrate voice evidence risk using ASVspoof-style audio evidence. | Audio uses train/dev style validation rather than the text 80/20 split, and voice evidence risk is a review signal rather than forensic proof. |
 | Phone | Provide traceable fallback/provider-style evidence fields for lookup demonstration. | Phone evidence is not local ML training data. |
 
 ## Email
@@ -66,11 +67,14 @@ data/raw/asvspoof_2019_dataset_subset/
   -> data/processed/audio/{train,dev,labels.csv}
   -> scripts/06_train_audio_model.py
   -> scripts/07_train_audio_behavior_model.py
+  -> scripts/08_train_audio_voice_evidence_calibrator.py
 ```
 
 The preparation workflow creates a balanced capstone-sized ASVspoof subset.
 MFCC features are used for the calibrated SVM. Behavioral features are used
-for the optional Random Forest layer.
+for the optional Random Forest layer. The final calibrator converts those raw
+voice and behavior signals, plus speech-quality fields, into the
+dashboard-facing voice evidence risk.
 
 ## Phone
 

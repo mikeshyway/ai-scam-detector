@@ -63,6 +63,7 @@ Then run:
 py scripts\03_prepare_audio_dataset.py
 py scripts\06_train_audio_model.py
 py scripts\07_train_audio_behavior_model.py
+py scripts\08_train_audio_voice_evidence_calibrator.py
 ```
 
 The preparation command creates:
@@ -73,7 +74,8 @@ data/processed/audio/train/
 data/processed/audio/dev/
 ```
 
-Purpose: train and validate bonafide/spoof voice models. Audio uses an
+Purpose: train and validate bonafide/spoof voice models, then train the
+second-stage voice-evidence calibrator used by the dashboard. Audio uses an
 ASVspoof train/dev style workflow rather than the text 80/20 split.
 
 ## Phone Fallback
