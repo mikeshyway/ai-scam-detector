@@ -1267,6 +1267,8 @@ def _render_recording_carousel(
     transcript_heading: str,
     frequency_heading: str,
     latest_title: str,
+    show_navigation: bool = True,
+    show_description: bool = True,
 ) -> None:
     groups = _recording_groups(results)
     if not groups:
@@ -1299,30 +1301,42 @@ def _render_recording_carousel(
         }
     )
 
-    render_section_header(
-        title,
+    summary = (
         (
             f"Recording {current_index + 1} of {len(groups)} | Clip {clip_number} | "
             f"{score_label} {peak:.1f}% | {peak_label} {peak_chunk:.1f}% | "
             f"Voice evidence {voice_peak:.1f}% | Behavioral evidence {behavioral_peak:.1f}% | "
             f"Content {content_peak:.1f}%"
-        ),
+        )
+        if show_description
+        else ""
+    )
+    render_section_header(
+        title,
+        summary,
         "Recording carousel",
     )
-    nav_left, nav_mid, nav_right = st.columns([0.2, 0.6, 0.2])
-    with nav_left:
-        if st.button("Previous", use_container_width=True, disabled=current_index == 0, key=f"{state_key}_prev"):
-            st.session_state[state_key] = current_index - 1
-            st.rerun()
-    with nav_mid:
+    if show_navigation:
+        nav_left, nav_mid, nav_right = st.columns([0.2, 0.6, 0.2])
+        with nav_left:
+            if st.button("Previous", use_container_width=True, disabled=current_index == 0, key=f"{state_key}_prev"):
+                st.session_state[state_key] = current_index - 1
+                st.rerun()
+        with nav_mid:
+            if show_description:
+                st.markdown(
+                    f"**Clip {clip_number}** | {len(clip_results)} chunk(s) | "
+                    f"Flags: {', '.join(flags) if flags else 'none'}"
+                )
+        with nav_right:
+            if st.button("Next", use_container_width=True, disabled=current_index >= len(groups) - 1, key=f"{state_key}_next"):
+                st.session_state[state_key] = current_index + 1
+                st.rerun()
+    elif show_description:
         st.markdown(
             f"**Clip {clip_number}** | {len(clip_results)} chunk(s) | "
             f"Flags: {', '.join(flags) if flags else 'none'}"
         )
-    with nav_right:
-        if st.button("Next", use_container_width=True, disabled=current_index >= len(groups) - 1, key=f"{state_key}_next"):
-            st.session_state[state_key] = current_index + 1
-            st.rerun()
 
     _render_dashboard_section(
         clip_results,
@@ -2758,6 +2772,8 @@ def _render_analysis_outputs(
                 transcript_heading="Uploaded audio transcript and chunks",
                 frequency_heading="Uploaded audio frequency spectrum",
                 latest_title="Latest uploaded audio chunk {chunk}",
+                show_navigation=False,
+                show_description=False,
             )
             st.info(
                 "Audio was analysed for voice authenticity and behavioral signals, but no speech transcript was available. "
@@ -2903,6 +2919,8 @@ def _render_analysis_outputs(
             transcript_heading="Supporting audio transcript and chunks",
             frequency_heading="Supporting audio frequency spectrum",
             latest_title="Supporting uploaded audio chunk {chunk}",
+            show_navigation=False,
+            show_description=False,
         )
 
 
