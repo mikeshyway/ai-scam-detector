@@ -31,6 +31,16 @@ from src.text.explainability import (
     type_intention,
     top_model_terms,
 )
+from src.reporting.evidence_snapshot import (
+    build_evidence_bundle,
+    chart_artifact,
+    derive_action_status,
+    provenance_record,
+    remediation_plan,
+    table_artifact,
+    text_artifact,
+    xai_record,
+)
 try:
     from src.reporting.history_db import record_history_item
 except ImportError:
@@ -1731,17 +1741,257 @@ def _explainability_rows(
     return pd.DataFrame(_dedupe_table_rows(rows))
 
 
-def _record(history: list[dict[str, object]], result: dict[str, object], text: str) -> None:
+def _email_evidence_snapshot(
+    *,
+    root: Path,
+    text: str,
+    final_verdict: str,
+    average_risk: float,
+    suspicious_count: int,
+    total_models: int,
+    recommended_model: str,
+    comparison_rows: list[dict[str, object]],
+    comparison_metrics: pd.DataFrame,
+    metrics_df: pd.DataFrame,
+    metrics: dict[str, object],
+    model_choices: list[str],
+    diagnostic_result: dict[str, object],
+    diagnostic_classifier: Any | None,
+    diagnostic_choice: str,
+    decision_trace_df: pd.DataFrame,
+) -> tuple[dict[str, object], dict[str, object], str]:
+    support_count = max(suspicious_count, total_models - suspicious_count)
+    model_agreement = f"{support_count}/{total_models}"
+    source_name = str(st.session_state.get("email_uploaded_file_name") or "Pasted email or message")
+    findings = list(diagnostic_result.get("findings", []))
+    legitimate_indicators = find_legitimate_indicators(text)
+    terms: list[dict[str, object]] = []
+    if diagnostic_classifier is not None:
+        try:
+            terms = top_model_terms(
+                text,
+                diagnostic_classifier.vectorizer,
+                diagnostic_classifier.model,
+            )
+        except Exception:
+            terms = []
+
+    explanation_df = _explainability_rows(
+        text,
+        findings,
+        legitimate_indicators,
+        terms,
+    )
+    xai_limitations = [
+        "Highlighted rule indicators are deterministic pattern matches and do not prove malicious intent.",
+        "Feature effects explain the recommended diagnostic model; the final verdict is multi-model consensus.",
+    ]
+    xai_method = "Rule indicators plus local TF-IDF feature contributions"
+    if any(not bool(item.get("directional", True)) for item in terms):
+        xai_method = "Rule indicators plus active global tree feature importance"
+        xai_limitations.append(
+            "Tree feature importance is global and non-directional; it is supporting context, not a faithful local attribution."
+        )
+    factors = [
+        {
+            "factor": item.get("phrase", ""),
+            "effect": "raises concern",
+            "method": "deterministic rule",
+            "reason": item.get("intention") or item.get("reason") or item.get("category", ""),
+        }
+        for item in findings
+        if item.get("phrase")
+    ]
+    factors.extend(
+        {
+            "factor": item.get("term", ""),
+            "effect": (
+                "raises concern"
+                if bool(item.get("directional", True)) and float(item.get("score", 0.0)) > 0
+                else "lowers concern"
+                if bool(item.get("directional", True))
+                else "influential, direction unavailable"
+            ),
+            "strength": round(abs(float(item.get("score", 0.0))), 6),
+            "method": item.get("method", "model feature contribution"),
+        }
+        for item in terms
+        if item.get("term")
+    )
+
+    action_status = derive_action_status(
+        native_prediction=final_verdict,
+        evidence_type="Email",
+        concern_score=average_risk,
+        score_available=True,
+        model_agreement=model_agreement,
+        evidence_complete=bool(total_models),
+    )
+    finding_labels = [
+        str(item.get("phrase", ""))
+        for item in findings
+        if str(item.get("phrase", "")).strip()
+    ]
+    remediation = remediation_plan(
+        evidence_type="Email",
+        action_status=action_status,
+        findings=finding_labels,
+    )
+
+    artifacts = [
+        chart_artifact(
+            "Live model comparison",
+            _model_comparison_chart(comparison_rows),
+            description="Suspicious-risk score for every selected email model.",
+            data=comparison_rows,
+        ),
+        table_artifact(
+            "Live model comparison table",
+            comparison_metrics,
+            description="Live model verdicts beside saved training performance.",
+        ),
+    ]
+    if not metrics_df.empty:
+        artifacts.extend(
+            [
+                chart_artifact(
+                    "Performance Metrics",
+                    _training_metrics_chart(metrics_df),
+                    description="Evaluation tab 1 of 3: saved training metrics, separate from the live decision.",
+                    data=metrics_df,
+                ),
+                table_artifact(
+                    "Performance Metrics data",
+                    metrics_df,
+                    description="The exact table displayed beneath evaluation tab 1 of 3.",
+                ),
+            ]
+        )
+    confusion = _confusion_matrix_figure(metrics, recommended_model)
+    artifacts.append(
+        chart_artifact(
+            "Confusion Matrix Heatmap",
+            confusion,
+            description=(
+                "Evaluation tab 2 of 3 for the recommended model."
+                if confusion is not None
+                else "Evaluation tab 2 of 3 was unavailable for the recommended model."
+            ),
+        )
+    )
+    roc = _roc_auc_curve(root, model_choices)
+    artifacts.append(
+        chart_artifact(
+            "ROC-AUC Curve",
+            roc,
+            description=(
+                "Evaluation tab 3 of 3 for all selected models with saved ROC data."
+                if roc is not None
+                else "Evaluation tab 3 of 3 was unavailable in saved training metrics."
+            ),
+        )
+    )
+    artifacts.extend(
+        [
+            chart_artifact(
+                "Recommended model probability",
+                _confidence_chart(dict(diagnostic_result.get("probabilities", {}))),
+                description=f"Probability output from {diagnostic_choice}; this does not replace consensus.",
+                data=diagnostic_result.get("probabilities", {}),
+            ),
+            table_artifact("Model decision trace", decision_trace_df),
+            table_artifact("Explainability evidence", explanation_df),
+            text_artifact(
+                "Original analyzed content",
+                text,
+                description="Exact normalized text submitted to the selected models.",
+                source="Investigation input",
+            ),
+        ]
+    )
+    bundle = build_evidence_bundle(
+        evidence_type="Email",
+        source_input={
+            "source_name": source_name,
+            "input_kind": "uploaded file" if st.session_state.get("email_uploaded_file_name") else "pasted text",
+            "characters": len(text),
+            "words": len(text.split()),
+            "upload_signature": st.session_state.get("email_upload_signature") or "",
+        },
+        dashboard_summary={
+            "final_verdict": final_verdict,
+            "average_suspicious_risk": round(average_risk, 2),
+            "suspicious_votes": f"{suspicious_count}/{total_models}",
+            "final_verdict_support": model_agreement,
+            "recommended_model": recommended_model,
+            "diagnostic_model": diagnostic_choice,
+            "action_status": action_status,
+        },
+        artifacts=artifacts,
+        findings=finding_labels,
+        xai=xai_record(
+            method=xai_method,
+            factors=factors,
+            explanation=(
+                "Direct rules identify observable phishing or social-engineering patterns. "
+                "Model terms show which active words influenced the diagnostic model."
+            ),
+            limitations=xai_limitations,
+        ),
+        limitations=[
+            "The final verdict is a statistical screening result, not proof of sender identity or intent.",
+            "Extracted EML content currently includes selected headers and message body; attachments are not analyzed.",
+        ],
+        remediation=remediation,
+    )
+    provenance = provenance_record(
+        text,
+        source_name=source_name,
+        source_kind="Email/message investigation input",
+        extra={
+            "upload_signature": st.session_state.get("email_upload_signature") or "",
+            "normalization": "Text shown in the evidence preview and submitted to the models",
+        },
+    )
+    return bundle, provenance, action_status
+
+
+def _record(
+    history: list[dict[str, object]],
+    result: dict[str, object],
+    text: str,
+    *,
+    native_prediction: str,
+    concern_score: float,
+    model_agreement: str,
+    evidence_bundle: dict[str, object],
+    provenance: dict[str, object],
+    action_status: str,
+) -> None:
     record_history_item(
         history,
         {
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "type": "Email",
-            "prediction": result["label_name"],
+            "prediction": native_prediction,
+            "native_prediction": native_prediction,
             "confidence": round(float(result["confidence"]) * 100, 2),
+            "concern_score": round(concern_score, 2),
+            "score_label": "Average suspicious risk",
+            "score_available": True,
+            "model_agreement": model_agreement,
+            "action_status": action_status,
             "model": result["model_name"],
+            "source_name": str(st.session_state.get("email_uploaded_file_name") or "Pasted email or message"),
             "preview": text.replace("\n", " ")[:160],
             "raw_input": text,
+            "flags": list(evidence_bundle.get("findings", [])),
+            "explanation": (
+                f"Dashboard consensus verdict: {native_prediction}. "
+                f"Average suspicious risk: {concern_score:.1f}%."
+            ),
+            "evidence_bundle": evidence_bundle,
+            "provenance": provenance,
         },
     )
 
@@ -1972,7 +2222,7 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
             f"{average_risk:.2f}%",
         )
         col3.metric(
-            "Model Agreement",
+            "Suspicious Votes",
             f"{suspicious_count}/{total_models}",
         )
         col4.metric(
@@ -2013,7 +2263,36 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
         _render_evaluation_evidence(root, metrics_df, metrics, recommended_model, model_choices)
 
         if diagnostic_result is not None and diagnostic_choice is not None:
-            _record(history, diagnostic_result, text)
+            support_count = max(suspicious_count, total_models - suspicious_count)
+            bundle, provenance, action_status = _email_evidence_snapshot(
+                root=root,
+                text=text,
+                final_verdict=final_verdict,
+                average_risk=average_risk,
+                suspicious_count=suspicious_count,
+                total_models=total_models,
+                recommended_model=recommended_model,
+                comparison_rows=comparison_rows,
+                comparison_metrics=df_compare_metrics,
+                metrics_df=metrics_df,
+                metrics=metrics,
+                model_choices=model_choices,
+                diagnostic_result=diagnostic_result,
+                diagnostic_classifier=diagnostic_classifier,
+                diagnostic_choice=diagnostic_choice,
+                decision_trace_df=decision_trace_df,
+            )
+            _record(
+                history,
+                diagnostic_result,
+                text,
+                native_prediction=final_verdict,
+                concern_score=average_risk,
+                model_agreement=f"{support_count}/{total_models}",
+                evidence_bundle=bundle,
+                provenance=provenance,
+                action_status=action_status,
+            )
             _display_result(
                 diagnostic_result,
                 text,

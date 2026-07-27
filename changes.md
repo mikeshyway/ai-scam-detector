@@ -1,5 +1,17 @@
 # Changes
 
+## 2026-07-27 - Report generator and voice-evidence documentation sync
+
+- Expanded the AI Report Generator explanation to cover saved history rows,
+  filter/select/preview/export behavior, report-export logging, and the
+  boundary that reports package existing evidence instead of rerunning
+  detection.
+- Synced README, architecture, data pipeline, model training, dataset setup,
+  and audio appendix documentation with the final `08` voice-evidence
+  calibrator workflow.
+- Kept application and source-code behavior unchanged; these updates are
+  documentation and evidence-notebook alignment only.
+
 ## 2026-07-25 - Final prototype evidence documentation sync
 
 - Established `notebooks/00_final_prototype_evidence_notebook.ipynb` as the

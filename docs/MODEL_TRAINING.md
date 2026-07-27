@@ -21,6 +21,7 @@ py scripts\05_train_transcript_model.py
 py scripts\03_prepare_audio_dataset.py
 py scripts\06_train_audio_model.py
 py scripts\07_train_audio_behavior_model.py
+py scripts\08_train_audio_voice_evidence_calibrator.py
 ```
 
 ## Email Models
@@ -65,15 +66,27 @@ folders.
 
 - `scripts/06_train_audio_model.py`: MFCC + calibrated SVM
 - `scripts/07_train_audio_behavior_model.py`: behavioral features + Random Forest
+- `scripts/08_train_audio_voice_evidence_calibrator.py`: second-stage voice-evidence calibration from raw audio, behavior, and quality signals
 
 Outputs:
 
 ```text
 models/audio_svm.pkl
 models/audio_behavior_rf.pkl
+models/audio_voice_evidence_calibrator.pkl
 reports/metrics/audio_model_metrics.json
 reports/metrics/audio_behavior_metrics.json
+reports/metrics/audio_voice_evidence_metrics.json
 ```
+
+Training principle:
+
+- The MFCC/statistical SVM estimates raw bonafide/spoof-style voice risk.
+- The behavior Random Forest estimates secondary speech-behavior risk.
+- The voice-evidence calibrator is trained last so it can convert raw voice,
+  behavior, and quality fields into the user-facing `voice_evidence_risk`.
+- The dashboard should say "voice evidence risk" or "voice authenticity
+  concern", not definitive voice-cloning proof.
 
 ## Validation
 
@@ -93,7 +106,7 @@ resources are reloaded.
 | --- | --- | --- | --- |
 | Email | Stratified 80/20 train/test split | Accuracy, precision, recall, F1, ROC-AUC, confusion matrix where saved | Provides a stronger default classifier for email/message risk evidence. |
 | Transcript | Stratified 80/20 train/test split | Same text-classification metrics, plus transformer metrics when trained | Helps score scam intent in call transcripts or transcribed speech. |
-| Audio | ASVspoof train/dev style split | Audio metric JSON, confusion matrix, ROC where saved, behavior feature importance | Produces voice-authenticity concern signals for uploaded/recorded audio. |
+| Audio | ASVspoof train/dev style split | Audio metric JSON, confusion matrix, ROC where saved, behavior feature importance, voice-evidence calibrator metrics | Produces calibrated voice-authenticity concern signals for uploaded/recorded audio. |
 | Phone | No local training split | Provider response fields and deterministic evidence weights | Keeps caller evidence transparent instead of inventing an ML probability. |
 
 The "best" or "recommended" model means the strongest candidate among the
@@ -115,6 +128,7 @@ without opening the dashboard:
 | `py scripts\05_train_transcript_model.py` | Candidate transcript metrics, optional transformer status, saved artifact paths. |
 | `py scripts\06_train_audio_model.py` | MFCC/SVM metrics and saved audio model/metric paths. |
 | `py scripts\07_train_audio_behavior_model.py` | Behavior RF metrics, feature importance, saved model/metric paths. |
+| `py scripts\08_train_audio_voice_evidence_calibrator.py` | Voice-evidence train/dev row counts, threshold metrics, ROC-AUC, feature importances, saved calibrator path. |
 
 The Streamlit app should then load the saved artifacts from `models/` and saved
 metric summaries from `reports/metrics/`; it should not retrain during normal

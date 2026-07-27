@@ -31,6 +31,16 @@ from src.phone.providers import (
     test_veriphone_connection,
 )
 from src.phone.providers.models import diagnostic_rows
+from src.reporting.evidence_snapshot import (
+    build_evidence_bundle,
+    chart_artifact,
+    derive_action_status,
+    provenance_record,
+    remediation_plan,
+    table_artifact,
+    text_artifact,
+    xai_record,
+)
 try:
     from src.reporting.history_db import record_history_item
 except ImportError:
@@ -2106,19 +2116,166 @@ def _record_phone_investigation(
     if total_reports:
         flags.append(f"{total_reports} total report indicator(s)")
 
+    complete_coverage = (
+        coverage.get("veriphone") == "success"
+        and coverage.get("penipumy") in {"success", "no_match"}
+    )
+    action_status = derive_action_status(
+        native_prediction=assessment.get("priority", "Reputation unknown"),
+        evidence_type="Phone",
+        concern_score=assessment.get("score"),
+        score_available=assessment.get("score") is not None,
+        evidence_complete=complete_coverage,
+    )
+    contributions = [
+        dict(item)
+        for item in assessment.get("contributions", [])
+        if isinstance(item, dict)
+    ]
+    neutral = [
+        dict(item)
+        for item in assessment.get("neutral_information", [])
+        if isinstance(item, dict)
+    ]
+    combined_rows = _combined_evidence_rows(output_view, assessment)
+    record_for_visuals = _combined_record_for_visuals(output_view)
+    identity = dict(output_view.get("reported_identity", {}))
+    artifacts = [
+        chart_artifact(
+            "Evidence Concern Meter",
+            _concern_meter(
+                int(assessment["score"]) if isinstance(assessment.get("score"), (int, float)) else None,
+                str(assessment.get("priority", "Reputation unknown")),
+            ),
+            description="Transparent rule-based concern score; not a trained-model scam probability.",
+            data={
+                "score": assessment.get("score"),
+                "priority": assessment.get("priority"),
+            },
+        ),
+        chart_artifact(
+            "Concern Contributions",
+            _contribution_chart(contributions),
+            description="Each visible bar is a documented rule contribution from provider or investigation evidence.",
+            data=contributions,
+        ),
+        table_artifact("Neutral Phone Metadata", neutral),
+        table_artifact("Phone Line Profile", _profile_rows(profile), source="Veriphone.io"),
+        table_artifact("Scam Reputation and Reports", _reputation_rows(reputation), source="PenipuMY"),
+        table_artifact(
+            "Reported Identity or Business Record",
+            _identity_rows(identity),
+            source="PenipuMY",
+        ),
+        table_artifact("Combined Phone Evidence", combined_rows),
+        chart_artifact(
+            "Evidence Availability",
+            _evidence_coverage_chart(record_for_visuals),
+            description="Provider fields available at investigation time.",
+            data=output_view.get("coverage", {}),
+        ),
+        chart_artifact(
+            "Provider Response Completeness",
+            _response_completeness_chart(record_for_visuals),
+            description="Provider diagnostic completeness shown in the dashboard expander.",
+        ),
+    ]
+    claim_chart = _caller_claim_consistency_chart(record_for_visuals, claimed_identity)
+    if claimed_identity:
+        artifacts.append(
+            chart_artifact(
+                "Caller Claim Consistency",
+                claim_chart,
+                description="Transparent rule comparison; does not change the concern score.",
+            )
+        )
+    artifacts.append(
+        text_artifact(
+            "Recommended Response",
+            assessment.get("recommended_action", ""),
+            description=str(assessment.get("interpretation", "")),
+        )
+    )
+    remediation = remediation_plan(
+        evidence_type="Phone",
+        action_status=action_status,
+        findings=flags,
+    )
+    bundle = build_evidence_bundle(
+        evidence_type="Phone",
+        source_input={
+            "raw_number": input_data.get("raw_number", ""),
+            "normalized_number": input_data.get("normalized_number", ""),
+            "claimed_identity": claimed_identity,
+            "providers": output_view.get("coverage", {}),
+        },
+        dashboard_summary={
+            "native_priority": assessment.get("priority", "Reputation unknown"),
+            "evidence_concern_score": assessment.get("score"),
+            "score_available": assessment.get("score") is not None,
+            "interpretation": assessment.get("interpretation", ""),
+            "report_count": assessment.get("report_count", 0),
+            "categories": assessment.get("categories", []),
+            "action_status": action_status,
+        },
+        artifacts=artifacts,
+        findings=flags,
+        xai=xai_record(
+            method="Transparent provider-evidence contribution rules",
+            factors=[
+                {
+                    "factor": item.get("indicator", ""),
+                    "effect": item.get("effect", "raises concern"),
+                    "points": item.get("points", 0),
+                    "source": item.get("source", ""),
+                }
+                for item in contributions + neutral
+            ],
+            explanation=(
+                "Every concern point is tied to a named provider field or investigation input. "
+                "Carrier profile fields remain neutral unless the provider marks the number invalid."
+            ),
+            scope="rule-based, not AI",
+            limitations=[
+                "Carrier metadata describes the number and network, not the identity of the current caller.",
+                "No matching community report does not prove that a caller is safe.",
+            ],
+        ),
+        limitations=[
+            "Provider coverage and community records can be incomplete, delayed, or unavailable.",
+            "Caller ID can be spoofed, so number ownership and current caller identity require independent verification.",
+        ],
+        remediation=remediation,
+    )
+    provenance = provenance_record(
+        investigation,
+        source_name=number,
+        source_kind="Phone provider investigation object",
+        captured_at=str(investigation.get("created_at") or ""),
+        extra={"provider_coverage": coverage},
+    )
+
     record_history_item(
         history,
         {
             "time": str(investigation.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             "type": "Phone",
             "prediction": assessment.get("priority", "Reputation unknown"),
+            "native_prediction": assessment.get("priority", "Reputation unknown"),
             "confidence": confidence_value,
+            "concern_score": assessment.get("score"),
+            "score_label": "Evidence concern score",
+            "score_available": assessment.get("score") is not None,
+            "evidence_complete": complete_coverage,
+            "action_status": action_status,
             "model": "Phone provider reputation rules",
             "source_name": source_name,
             "preview": preview,
             "flags": flags,
             "explanation": assessment.get("interpretation", ""),
             "raw_input": json.dumps(investigation, ensure_ascii=True, default=str),
+            "evidence_bundle": bundle,
+            "provenance": provenance,
         },
     )
 
