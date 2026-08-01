@@ -1,22 +1,21 @@
 # AI-based Spam and Caller Fraud Detection System
 
-AI-FDS is a local Streamlit capstone application for educational scam
-detection and awareness. It analyses written messages, call transcripts,
-uploaded voice evidence, and phone-number reputation data. Results combine
-trained model predictions with human-readable evidence; the application is
-not a commercial security, telecom, or forensic product.
+AI-FDS is a Streamlit capstone application for educational scam detection and
+awareness. It analyses written messages, call transcripts, uploaded voice
+evidence, and phone-number reputation data, then turns the selected findings
+into report-ready evidence for lecturer review and dashboard demonstrations.
 
 ## Active Features
 
 - **Emails and Messages**: parses pasted text and uploaded email/document
   evidence, compares trained text classifiers, and explains suspicious and
   legitimate indicators.
-- **Voice Transcript**: analyses pasted/uploaded transcripts and optional
-  `.wav`, `.mp3`, `.m4a`, or `.flac` evidence using Whisper, the transcript
-  classifiers, MFCC + calibrated SVM, the optional behavioral model, and the
-  trained voice-evidence calibrator when its artifact is available.
-- **Phone Number**: queries Veriphone.io and PenipuMY when configured,
-  then explains provider evidence without inventing scam probabilities.
+- **Voice Transcript and Audio**: analyses pasted/uploaded transcripts and
+  `.wav`, `.mp3`, `.m4a`, or `.flac` evidence using Whisper transcription,
+  transcript classifiers, MFCC + calibrated SVM, behavioral audio evidence,
+  and the trained voice-evidence calibrator stored under `models/`.
+- **Phone Number**: queries configured Veriphone.io and PenipuMY providers,
+  normalizes provider evidence, and applies transparent concern rules.
 - **AI Report Generator**: filters and selects saved evidence rows, previews
   the selected case material, and builds TXT/PDF/DOCX Student Brief exports.
   Export metadata is logged so generated reports can be traced back to the
@@ -28,7 +27,7 @@ The main evidence record for the final proposal is
 [notebooks/00_final_prototype_evidence_notebook.ipynb](notebooks/00_final_prototype_evidence_notebook.ipynb).
 It documents the current methodology, final dashboard scope, dataset purpose,
 training principles, saved metrics, source traceability, report generator proof,
-and reviewer-facing limitations.
+and reviewer-facing evidence flow.
 
 The final prototype surface is:
 
@@ -72,6 +71,21 @@ ai-scam-detector/
 
 See [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md#architecture) for ownership rules and the
 complete execution flow.
+
+## Current Evidence Snapshot
+
+The repository contains the deployable evidence needed for the final capstone
+prototype:
+
+| Evidence Area | Current Repository Proof |
+| --- | --- |
+| Processed email data | `data/processed/email/email_dataset.csv` with 33,884 rows |
+| Processed transcript data | `data/processed/transcript/transcript_dataset.csv` with 578 rows |
+| Processed audio data | `data/processed/audio/labels.csv` with 2,600 indexed ASVspoof rows |
+| Runtime models | Email, transcript, DistilBERT, audio SVM, behavior RF, and voice calibrator artifacts under `models/` |
+| Saved metrics | Channel metric JSON files under `reports/metrics/` |
+| Curated demos | CSV fixtures and 16 upload-ready files under `data/demo/` |
+| Report evidence | Seeded `data/session_history.db` rows and curated report exports under `output/reports/` |
 
 ## Installation
 
@@ -145,9 +159,9 @@ The Phone Number tab can use configured live providers:
   metadata.
 - PenipuMY for reputation/report fields where a valid provider key is supplied.
 
-Provider evidence is not a locally trained phone-risk model. Veriphone.io metadata
-does not provide police reports or a scam probability by itself, and PenipuMY
-results depend on live provider availability and the submitted number.
+Provider evidence is handled as transparent metadata and reputation evidence.
+Veriphone.io contributes carrier/line profile fields, while PenipuMY contributes
+report-oriented reputation fields for Malaysian scam-awareness demos.
 
 For normal dashboard demos, paste the provider key directly into the Phone
 Number tab. The tab has provider cards for Veriphone.io and PenipuMY, can test each
@@ -171,13 +185,12 @@ websites before a live demo.
 
 The previous Omkar Carrier Lookup experiment is not part of the active
 dashboard package because its current free/demo response requires a paid
-Carrier Lookup plan. Never commit real API keys in `.env`,
-`.streamlit/secrets.toml`, notebooks, screenshots, or report files.
+Carrier Lookup plan. Keep real API keys out of `.env`,
+`.streamlit/secrets.toml`, notebooks, screenshots, and report files.
 
-Phone lookups return an Unknown result when no usable provider evidence is
-available. Reserved-number presentation rows belong in
-`data/demo/phone_demo_dataset.csv` or `data/demo/demo_phone_numbers.csv` and are
-reserved for explicit demo workflows. The full behavior is documented in
+Reserved-number presentation rows belong in `data/demo/phone_demo_dataset.csv`
+or `data/demo/demo_phone_numbers.csv` and are reserved for explicit demo
+workflows. The full behavior is documented in
 [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md#phone-module).
 
 ## Demo Evidence And Seeded History
@@ -204,25 +217,19 @@ and leaves future user-created scans to start from database ID `1`.
 - Local diagnostics: `logs/`
 - Report/history database: `data/session_history.db` is deployable when saved
   evidence should be available in the AI Report Generator; it stores scan
-  history and report-export metadata, not retraining data
+  history and report-export metadata for selected evidence rows
 - Curated report exports:
   `output/reports/AIFDS_Student_Brief_Curated_Demo_Evidence.*`
 - Reviewer evidence: `notebooks/00_final_prototype_evidence_notebook.ipynb`
   and any exported HTML/PDF version of that notebook
 
 Raw datasets, transient SQLite sidecar files, logs, caches, and secrets are
-ignored. Keep only the artifacts required for the final offline or hosted
-demonstration when packaging the capstone submission.
+kept outside the public Git package. Keep the processed/runtime evidence above
+with the final offline or hosted capstone demonstration.
 
-## Detection Scope and Limitations
+## Evidence Use
 
-- Predictions can be wrong and require human verification.
-- Explainability indicators describe evidence; they do not override trained
-  model predictions.
-- Uploaded audio is analysed after recording/upload, not intercepted from live
-  calls or meetings.
-- Phone results represent API/local reputation evidence, not telecom identity
-  verification.
-- Whisper transcription quality depends on language, noise, and FFmpeg.
-- Do not use AI-FDS as the sole basis for financial, legal, security, or
-  disciplinary action.
+AI-FDS is designed for student-facing awareness, lecturer demonstration, and
+structured review. The dashboard shows the source of each result, preserves
+selected findings in SQLite history, and exports the same selected evidence as
+TXT, PDF, or DOCX Student Brief reports.

@@ -1,8 +1,9 @@
 # Dataset Setup
 
-This file is a quick placement reference. The maintained pipeline explanation
-is in `docs/DATA_PIPELINE.md`. The final reviewer evidence is in
-`notebooks/00_final_prototype_evidence_notebook.ipynb`.
+This file is a quick placement reference for raw and processed dataset folders.
+The maintained pipeline explanation is in
+`../PROJECT_DOCUMENTATION.md#data-pipeline`. The final reviewer evidence is in
+`../notebooks/00_final_prototype_evidence_notebook.ipynb`.
 
 ## Email
 
@@ -33,9 +34,9 @@ data/raw/voice_transcript/
 `-- youtube_scam_phone_call_transcripts/
 ```
 
-CSV and TXT sources are supported by the preprocessing workflow. The YouTube
-dataset is demo/scam-only evidence and must not be the sole source for binary
-model training.
+CSV and TXT sources are supported by the preprocessing workflow. The labeled
+call-transcript dataset supplies the binary training labels, while the YouTube
+transcript source supports scam-language examples and demonstrations.
 
 ```powershell
 py scripts\02_prepare_transcript_dataset.py
@@ -43,8 +44,6 @@ py scripts\05_train_transcript_model.py
 ```
 
 Purpose: train scam-intent classifiers for call or meeting transcript text.
-Scam-only transcript sources are useful for examples but should not be the only
-binary training source.
 
 ## ASVspoof Audio
 
@@ -86,23 +85,23 @@ Real, traceable fallback records belong at:
 data/processed/phone/phone_dataset.csv
 ```
 
-Do not place synthetic demo rows in the normal fallback file. Fictional
-presentation rows belong at:
+Presentation rows belong in the dedicated demo files:
 
 ```text
 data/demo/phone_demo_dataset.csv
 data/demo/demo_phone_numbers.csv
 ```
 
-Demo records are used only when the Phone Number tab's Demo Mode is explicitly
-enabled. See `docs/PHONE_MODULE.md` for the required schemas.
+Demo records are used when the Phone Number tab's Demo Mode is explicitly
+enabled. See `../PROJECT_DOCUMENTATION.md#phone-module` for the required
+schemas.
 
 Purpose: phone records support provider-style evidence and repeatable
-demonstrations. They are not local ML training data.
+demonstrations.
 
 ## Repository Policy
 
-Raw and processed datasets are ignored by Git because they are large,
-generated, or subject to dataset licenses. Preserve `.gitkeep` placeholders
-when sharing the repository, and document the official download sources in the
-capstone report.
+Raw source datasets remain in the local project tree as dataset-acquisition
+proof. The GitHub package keeps code, curated demos, processed/runtime evidence,
+model artifacts, metric summaries, and documentation for the final capstone
+demonstration.

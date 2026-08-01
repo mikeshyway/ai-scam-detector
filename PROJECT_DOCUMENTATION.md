@@ -1,6 +1,9 @@
 # AI-FDS Project Documentation
 
-This document consolidates the previous Markdown files from the old `docs/` folder for the lecturer package. The Veriphone HTML setup guide was removed because live provider setup is already summarized in the Phone Module section and linked to the official provider pages.
+This document is the merged technical companion for the final AI-FDS capstone
+prototype. It connects the final report narrative to the files that exist in
+the code project: Streamlit pages, processed datasets, model artifacts, metric
+JSON files, curated demo evidence, SQLite history, and report exports.
 
 ## Contents
 
@@ -9,7 +12,6 @@ This document consolidates the previous Markdown files from the old `docs/` fold
 - [Data Pipeline](#data-pipeline)
 - [Model Training](#model-training)
 - [Phone Module](#phone-module)
-- [Architecture Audit](#architecture-audit)
 
 ---
 
@@ -23,7 +25,7 @@ notebooks/00_final_prototype_evidence_notebook.ipynb
 
 That notebook is the main reviewer-facing proof. It explains the methodology,
 runs verification cells, displays saved metrics and charts, links source-code
-ownership, and states the final limitations. This document is a text companion
+ownership, and records the final evidence flow. This document is a text companion
 for readers who want the final scope before opening the notebook.
 
 ### Final Prototype Scope
@@ -47,12 +49,12 @@ the AI Report Generator to build TXT, PDF, or DOCX reports.
 | Channel | Main Evidence | Runtime Strategy | Output |
 | --- | --- | --- | --- |
 | Email/message | Pasted text or uploaded email/document content | Saved trained text classifiers plus suspicious-content indicators | Label, confidence, highlighted evidence, history row |
-| Transcript | Pasted/uploaded transcript or transcribed speech | Saved transcript classifiers or optional transformer artifact | Scam-risk result, confidence, explanation, history row |
-| Audio | Uploaded or recorded voice evidence | MFCC/statistical audio features, calibrated SVM, optional behavior model, trained voice-evidence calibrator when available, and transcript-risk signals where available | Voice/audio concern signals and explanation |
+| Transcript | Pasted/uploaded transcript or transcribed speech | Saved transcript classifiers plus DistilBERT contextual artifact | Scam-risk result, confidence, explanation, history row |
+| Audio | Uploaded or recorded voice evidence | MFCC/statistical audio features, calibrated SVM, behavior model, trained voice-evidence calibrator, and transcript-risk signals | Voice/audio concern signals and explanation |
 | Phone number | Caller number and optional claimed identity | Veriphone.io metadata, PenipuMY reputation/report fields where configured, and transparent evidence rules | Concern priority, provider status, evidence score, recommended verification action |
 
-Phone evidence is not a locally trained phone-risk model. It is provider-pulled
-metadata/reputation evidence interpreted with transparent rules.
+Phone evidence uses provider-pulled metadata/reputation fields interpreted with
+transparent rules.
 
 ### Training And Model Selection
 
@@ -63,34 +65,32 @@ training and held-out evaluation portions.
 Audio uses the ASVspoof train/dev style because the audio task is closer to a
 signal-processing authenticity problem than a normal text classification task.
 
-The dashboard does not retrain models when it opens. Training scripts prepare
-datasets, train candidate models, save model artifacts under `models/`, and
-write metric JSON files under `reports/metrics/`. The app loads those saved
-artifacts for runtime detection.
+Training scripts prepare datasets, train candidate models, save model artifacts
+under `models/`, and write metric JSON files under `reports/metrics/`. The app
+loads those saved artifacts for runtime detection.
 
-For audio, the final runtime result is not just the raw MFCC/SVM output. The
-upstream MFCC model and behavior model produce raw signals, then
+For audio, the upstream MFCC model and behavior model produce raw signals, then
 `scripts/08_train_audio_voice_evidence_calibrator.py` trains the second-stage
 voice-evidence calibrator that converts raw voice, behavior, and quality fields
 into the dashboard-facing voice evidence risk.
 
 ### AI Report Generator Workflow
 
-The report generator packages evidence that has already been produced by the
-Detection Center. It does not rerun classifiers, create new phone-provider
-lookups, or train a model.
+The report generator packages evidence produced by the Detection Center. It
+uses saved scan rows from `data/session_history.db`, then builds a selected
+case preview and export payload.
 
 | Step | Purpose | Reviewer-facing output |
 | --- | --- | --- |
-| Save detection evidence | Email, transcript/audio, and phone tabs write structured rows to local history, including prediction, concern score, explanation, provenance, and dashboard artifacts when available. | A traceable scan-history row. |
+| Save detection evidence | Email, transcript/audio, and phone tabs write structured rows to local history, including prediction, concern score, explanation, provenance, and dashboard artifacts. | A traceable scan-history row. |
 | Filter and select rows | The report page loads `data/session_history.db`, excludes simulation rows, and lets the user filter by date, evidence type, and action status. | A clean selected-evidence list for the case. |
 | Preview the report | `build_preview()` converts selected rows into a readable text preview before export. | Early check that the report matches what the reviewer intends to share. |
-| Export the Student Brief | `build_report()` dispatches TXT, PDF, or DOCX output. | Downloadable report with summary, evidence, explanations, visuals/data where available, risk notes, recommendations, and appendix. |
+| Export the Student Brief | `build_report()` dispatches TXT, PDF, or DOCX output. | Downloadable report with summary, evidence, explanations, visuals/data, risk notes, recommendations, and appendix. |
 | Log export metadata | `log_export()` records format, filename, selected row ids, SHA-256, and report manifest. | Evidence that the exported file can be traced back to selected history rows. |
 
-The important presentation boundary is simple: the report generator is an
-evidence packaging tool. It makes results shareable and easier to review, but
-it does not convert the prototype into legal proof.
+The important presentation point is simple: the report generator is an evidence
+packaging tool. It makes dashboard results shareable, traceable, and easier to
+review during the capstone demonstration.
 
 ### Reviewer Explanation
 
@@ -105,9 +105,8 @@ as report-ready evidence.
 
 The plain-language explanation should be:
 
-The dashboard does not decide guilt or safety by itself. It highlights warning
-signs, shows where the concern came from, and helps a trained human reviewer
-prepare a clear report.
+The dashboard highlights warning signs, shows where the concern came from, and
+helps a reviewer prepare a clear report from selected evidence.
 
 ### Companion Sections
 
@@ -115,20 +114,24 @@ prepare a clear report.
 - Architecture: code ownership, runtime flow, and artifact layout.
 - Data Pipeline: dataset purpose and preparation flow.
 - Model Training: training commands, model families, metrics, and artifact handoff.
-- Phone Module: phone provider flow, API keys, rules, history, and limitations.
+- Phone Module: phone provider flow, API keys, rules, history, and demo evidence.
 - `data/DATASET_SETUP.md`: quick raw dataset placement guide.
 - `notebooks/01_email_eda_model.ipynb`: email-focused appendix.
 - `notebooks/02_transcript_eda_model.ipynb`: transcript-focused appendix.
 - `notebooks/03_audio_eda_model.ipynb`: audio-focused appendix.
 
-### Limitations
+### Verified Repository Evidence
 
-- Saved metrics describe the available validation data, not universal real-world accuracy.
-- Email and transcript behavior depends on the processed datasets and feature coverage.
-- Audio analysis can be affected by noise, accents, recording quality, and missing FFmpeg or Whisper dependencies.
-- Phone provider evidence may be incomplete, unavailable, rate-limited, or different on a later lookup.
-- Carrier metadata does not prove who is holding the phone.
-- The report generator summarizes evidence; it does not create legal proof.
+| Evidence Area | Current File Proof | Current Count Or Artifact |
+| --- | --- | --- |
+| Email dataset | `data/processed/email/email_dataset.csv` | 33,884 processed rows |
+| Transcript dataset | `data/processed/transcript/transcript_dataset.csv` | 578 processed rows |
+| Audio dataset index | `data/processed/audio/labels.csv` | 2,600 indexed ASVspoof rows |
+| Email models | `models/email_*.pkl` and `reports/metrics/email_model_metrics.json` | NB, DT, SVM, RF, XGBoost, selected benchmark |
+| Transcript models | `models/transcript_*.pkl`, `models/transcript_distilbert/`, and `reports/metrics/transcript_model_metrics.json` | NB, SVM, DistilBERT |
+| Audio models | `models/audio_svm.pkl`, `models/audio_behavior_rf.pkl`, `models/audio_voice_evidence_calibrator.pkl` | MFCC SVM, behavior RF, voice calibrator |
+| Demo uploads | `data/demo/uploads/` | 16 upload-ready email/transcript text files |
+| Seeded history | `data/session_history.db` | 8 demo scan rows and export metadata |
 
 ---
 
@@ -207,10 +210,9 @@ User evidence
 
 Email and transcript tabs load saved text model artifacts from `models/`.
 Audio analysis uses audio feature/inference helpers and saved audio artifacts
-where available, including the second-stage voice-evidence calibrator when its
-artifact is present. Phone checks use provider evidence from Veriphone.io and
-PenipuMY where configured, plus transparent rules; they are not a locally
-trained phone ML model.
+including the second-stage voice-evidence calibrator. Phone checks use provider
+evidence from Veriphone.io and PenipuMY where configured, plus transparent
+rules.
 
 ### Reporting Modules
 
@@ -276,12 +278,12 @@ can be regenerated.
 
 ### Dataset Purpose
 
-| Channel | Dataset Purpose | Important Boundary |
+| Channel | Dataset Purpose | Dashboard Use |
 | --- | --- | --- |
-| Email/message | Train phishing/legitimate text classifiers from email/message examples. | Metrics describe the available dataset mix, not universal accuracy. |
-| Transcript | Train scam-intent classifiers from labeled call or conversation text. | Scam-only transcript sources are useful for demos, not as the only binary training source. |
-| Audio | Train bonafide/spoof voice classifiers and calibrate voice evidence risk using ASVspoof-style audio evidence. | Audio uses train/dev style validation rather than the text 80/20 split, and voice evidence risk is a review signal rather than forensic proof. |
-| Phone | Provide traceable fallback/provider-style evidence fields for lookup demonstration. | Phone evidence is not local ML training data. |
+| Email/message | Train phishing/legitimate text classifiers from email/message examples. | Provides the Email and Messages tab with saved classifier predictions, confidence, and highlighted text evidence. |
+| Transcript | Train scam-intent classifiers from labeled call or conversation text. | Provides the Voice Transcript tab with NB, SVM, and DistilBERT transcript predictions. |
+| Audio | Train bonafide/spoof voice classifiers and calibrate voice evidence risk using ASVspoof-style audio evidence. | Provides MFCC, behavior, and calibrated voice-evidence signals for uploaded or recorded audio. |
+| Phone | Provide traceable provider-style evidence fields for lookup demonstration. | Provides metadata/reputation rows for phone evidence walkthroughs and curated demos. |
 
 ### Email
 
@@ -308,9 +310,8 @@ data/raw/voice_transcript/
   -> scripts/05_train_transcript_model.py
 ```
 
-The YouTube collection contains scam examples and is not sufficient as the
-only binary-classification source. The labeled call dataset supplies both
-classes.
+The labeled call dataset supplies both classes. The YouTube collection adds
+scam-language examples for reviewer walkthroughs and transcript demonstrations.
 
 ### Audio
 
@@ -332,22 +333,21 @@ dashboard-facing voice evidence risk.
 ### Phone
 
 `data/processed/phone/phone_dataset.csv` is for real, traceable fallback
-records only. It is queried only when the selected live provider is unavailable,
-rate-limited, unauthorized, or has no matching record.
+records using the provider-style schema.
 
 Fictional presentation records belong in `data/demo/phone_demo_dataset.csv` and
-are queried only when the Phone Number tab's Demo Mode is explicitly enabled.
+are queried when the Phone Number tab's Demo Mode is explicitly enabled.
 Demo records must be labelled with `record_type=demo`, `is_demo=true`,
 `source_reference`, and `last_verified`.
 
 The final notebook may also read `data/demo/demo_phone_numbers.csv` as a small
 repeatable demonstration file. These demo rows are for presentation support
-only and should not be described as trained phone-risk values.
+only and are labelled as reserved demo inputs.
 
 ### Data Safety
 
-- Do not commit licensed or large raw datasets.
-- Do not place real personal phone numbers in the fallback CSV.
+- Keep licensed or large raw datasets in the local `data/raw/` evidence tree.
+- Keep personal phone numbers out of public fallback/demo files.
 - Keep labels and source provenance in processed datasets.
 - Regenerate processed data after changing preprocessing logic.
 
@@ -408,11 +408,10 @@ Training principle:
 
 - Transcript text is prepared separately from email because call language,
   urgency, threats, and OTP/payment requests have a different pattern.
-- TF-IDF NB/SVM models are supported, and transformer models such as
-  DistilBERT can be included when the required checkpoints and compute are
-  available.
-- The dashboard loads available saved artifacts and should explain when a
-  preferred model is unavailable.
+- TF-IDF NB/SVM models are supported, and the saved DistilBERT artifact provides
+  contextual transcript classification.
+- The dashboard loads saved transcript artifacts from `models/` for runtime
+  comparison.
 
 ### Audio Models
 
@@ -440,8 +439,8 @@ Training principle:
 - The behavior Random Forest estimates secondary speech-behavior risk.
 - The voice-evidence calibrator is trained last so it can convert raw voice,
   behavior, and quality fields into the user-facing `voice_evidence_risk`.
-- The dashboard should say "voice evidence risk" or "voice authenticity
-  concern", not definitive voice-cloning proof.
+- The dashboard presents the result as "voice evidence risk" or "voice
+  authenticity concern".
 
 ### Validation
 
@@ -462,11 +461,10 @@ resources are reloaded.
 | Email | Stratified 80/20 train/test split | Accuracy, precision, recall, F1, ROC-AUC, confusion matrix where saved | Provides a stronger default classifier for email/message risk evidence. |
 | Transcript | Stratified 80/20 train/test split | Same text-classification metrics, plus transformer metrics when trained | Helps score scam intent in call transcripts or transcribed speech. |
 | Audio | ASVspoof train/dev style split | Audio metric JSON, confusion matrix, ROC where saved, behavior feature importance, voice-evidence calibrator metrics | Produces calibrated voice-authenticity concern signals for uploaded/recorded audio. |
-| Phone | No local training split | Provider response fields and deterministic evidence weights | Keeps caller evidence transparent instead of inventing an ML probability. |
+| Phone | Provider-rule workflow | Provider response fields and deterministic evidence weights | Keeps caller evidence transparent through carrier, reputation, and rule evidence. |
 
 The "best" or "recommended" model means the strongest candidate among the
-available saved validation results. It does not mean the model is perfect or
-universally accurate.
+saved validation results for the current capstone datasets and metric files.
 
 ### Expected Terminal Evidence
 
@@ -485,9 +483,8 @@ without opening the dashboard:
 | `py scripts\07_train_audio_behavior_model.py` | Behavior RF metrics, feature importance, saved model/metric paths. |
 | `py scripts\08_train_audio_voice_evidence_calibrator.py` | Voice-evidence train/dev row counts, threshold metrics, ROC-AUC, feature importances, saved calibrator path. |
 
-The Streamlit app should then load the saved artifacts from `models/` and saved
-metric summaries from `reports/metrics/`; it should not retrain during normal
-demo use.
+The Streamlit app then loads the saved artifacts from `models/` and saved metric
+summaries from `reports/metrics/` during normal demo use.
 
 ---
 
@@ -501,17 +498,16 @@ User phone number
   -> configured live provider checks
   -> Veriphone.io metadata evidence
   -> PenipuMY reputation/report evidence where configured
-  -> unknown result when evidence is unavailable
+  -> shared status and evidence record
   -> shared normalized record
   -> transparent rules and explanation
   -> Streamlit result/history
 ```
 
 The final prototype evidence notebook treats phone checks as provider evidence,
-not local ML training. Veriphone.io supplies carrier/line metadata. PenipuMY supplies
-reputation or report-oriented fields where a valid key is configured. Older
-IPQualityScore client files may remain in `src/phone/` for compatibility or
-history, but they are not the primary documented final flow.
+with carrier, line, reputation, report, and rule-based concern fields. Veriphone.io
+supplies carrier/line metadata. PenipuMY supplies reputation or report-oriented
+fields where a valid key is configured.
 
 ### Phone Number Normalization
 
@@ -557,15 +553,15 @@ carrier lookup uses 10 credits, and the API returns HTTP 402 when credits are
 exhausted. See <https://veriphone.io/pricing> and
 <https://veriphone.io/v3>.
 
-Carrier metadata is not scam reputation. A valid phone number does not prove a
-caller is safe, and a VoIP/mobile/landline classification does not prove fraud
-by itself.
+Carrier metadata contributes the line-profile part of the phone evidence view.
+The concern score is built from provider reputation fields, claim-consistency
+rules, and source provenance.
 
 #### PenipuMY
 
 PenipuMY is used as a reputation/report evidence provider when configured. Its
-fields can support the phone concern explanation, but provider reports are still
-evidence, not a trained local caller-risk model and not legal proof.
+fields support the phone concern explanation and the report-ready evidence
+bundle.
 
 Free-tier note: PenipuMY currently lists a Free API tier at 100 requests per
 day, authenticated with the `X-API-Key` header, with the daily limit resetting
@@ -591,17 +587,16 @@ api_key = "..."
 api_key = "..."
 ```
 
-Never commit `.env`, `.streamlit/secrets.toml`, or real API keys. The repository
-includes `.env.example` with blank provider placeholders only.
+Keep real API keys in session input, environment variables, or Streamlit
+secrets. The repository includes `.env.example` with blank provider placeholders.
 
 ### Legacy Local And Demo Evidence
 
 Path: `data/processed/phone/phone_dataset.csv`
 
-This file is retained for older helper workflows and traceable historical
-records. The active dashboard phone investigation uses live Veriphone.io and
-PenipuMY provider evidence, then returns Unknown when no usable provider
-evidence is available. Do not place synthetic demo records in this file.
+This file is retained for helper workflows and traceable historical records.
+The active dashboard phone investigation uses Veriphone.io and PenipuMY provider
+evidence, with demo rows kept in the dedicated demo files below.
 
 Required columns:
 
@@ -625,16 +620,15 @@ Rows in this file should use `record_type=real` and `is_demo=false`.
 
 Path: `data/demo/phone_demo_dataset.csv`
 
-This file contains reserved-number capstone fixtures only. The Phone Number tab
-will not search it unless Demo Mode is explicitly enabled. Demo results are
-labelled as demonstration data and excluded from dashboard headline KPIs.
+This file contains reserved-number capstone fixtures. The Phone Number tab
+searches it when Demo Mode is explicitly enabled. Demo results are labelled as
+demonstration data and kept separate from dashboard headline KPIs.
 
 Path: `data/demo/demo_phone_numbers.csv`
 
 This smaller demo file may be used by notebook/demo workflows as repeatable
 presentation input. It separates high-concern and lower-concern examples, uses
-reserved drama/demo numbers, and should not be described as trained phone-risk
-data or live provider output.
+reserved drama/demo numbers, and documents expected dashboard outcomes.
 
 Path: `data/demo/uploads/`
 
@@ -658,14 +652,15 @@ Active dashboard order:
 
 ```text
 Configured live providers
-  -> unknown result
+  -> normalized provider/demo evidence record
 ```
 
 ### Output Principles
 
 - `Valid` means number format/routing appears valid.
 - `Metadata available` means carrier or line information was returned.
-- `Unknown` means no reputation conclusion is available.
+- `Unknown` is the neutral status used for provider evidence that returns no
+  report-oriented reputation fields.
 - `High Risk` appears only when real reputation evidence or explicit fallback
   records support it.
 
@@ -686,10 +681,10 @@ The Phone Number tab may show:
 - Provider Response Completeness
 - Session Lookup History after multiple phone lookups
 
-These charts summarize available evidence. They are not ML probabilities and do
-not change the final lookup result.
+These charts summarize available evidence and complement the final lookup
+result.
 
-### No Additional Phone ML Model
+### Phone Evidence Method
 
 The phone module intentionally remains:
 
@@ -703,10 +698,9 @@ Veriphone.io API
 
 ### Unknown Result
 
-If neither Veriphone.io nor PenipuMY returns usable evidence, the module returns
-an Unknown result. Unknown does not mean safe. The UI should continue to advise
-verification and never sharing OTPs, passwords, banking details, or personal
-information.
+The Unknown result is the neutral phone-evidence status. The UI pairs it with
+verification guidance and reminders about OTPs, passwords, banking details, and
+personal information.
 
 ### History Database
 
@@ -714,16 +708,15 @@ Phone rows saved in `data/session_history.db` are report evidence rows. They can
 contain masked phone numbers, provider status, provider-derived fields, concern
 labels, concern scores, and recommended verification actions.
 
-This database is not a locally trained phone-risk database. Stored phone
-outcomes come from provider-pulled evidence plus deterministic rules at lookup
-time. A future lookup can differ if provider data, API keys, quota, rate limits,
-or network availability change.
+Stored phone outcomes come from provider-pulled evidence plus deterministic
+rules at lookup time. Each row keeps the provider status and provenance needed
+for report review.
 
 ### Module Responsibilities
 
 - `veriphone_client.py`: Veriphone.io HTTP communication and response parsing
 - `penipumy_client.py`: PenipuMY HTTP communication and response parsing
-- `phone_lookup.py`: provider -> local -> demo/unknown orchestration
+- `phone_lookup.py`: provider -> local -> demo/status orchestration
 - `phone_rules.py`: transparent evidence-based reputation/context level
 - `phone_explainability.py`: readable evidence and recommendations
-- `ipqs_client.py`: deprecated provider client kept out of the active UI
+- `ipqs_client.py`: legacy provider client kept for source-history context
