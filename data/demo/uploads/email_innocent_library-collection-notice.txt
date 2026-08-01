@@ -1,0 +1,18 @@
+From: Library Services <library.services@example.edu>
+To: Student <student@example.edu>
+Subject: Requested book is ready for collection
+Date: Tue, 9 Jun 2026 09:14:00 +0800
+
+Hello,
+
+The book you requested through the library reservation system is now available at the circulation desk. Please collect it within five working days and bring your student card so the library team can confirm the reservation.
+
+Title: Digital Forensics and Incident Response
+Pickup location: Main Library, Level 2 service counter
+Collection window: 9:00 AM to 5:30 PM, Monday to Friday
+
+There is no payment required for this collection notice. If you no longer need the item, you can cancel the reservation through the normal library portal or reply to this message with your student ID only.
+
+Regards,
+Library Services
+Campus Learning Resources

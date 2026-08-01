@@ -208,6 +208,24 @@ def _transcript_model_path(root: Path, model_key: str) -> Path:
     return candidates[0]
 
 
+def _is_lfs_pointer(path: Path) -> bool:
+    try:
+        prefix = path.read_bytes()[:40]
+    except OSError:
+        return False
+    return prefix == b"version https://git-lfs.github.com/spec/"
+
+
+def _is_transcript_model_available(root: Path, model_key: str) -> bool:
+    model_path = _transcript_model_path(root, model_key)
+    if not model_path.exists():
+        return False
+    if model_key in TRANSCRIPT_TRANSFORMER_MODEL_KEYS:
+        weights_path = model_path / "model.safetensors"
+        return weights_path.exists() and not _is_lfs_pointer(weights_path)
+    return True
+
+
 def _transcript_model_label(root: Path, model_key: str) -> str:
     label, _filename = TRANSCRIPT_MODEL_FILES.get(
         model_key,
@@ -224,12 +242,12 @@ def _transcript_model_artifact(root: Path, model_key: str = "nb") -> tuple[Path,
         TRANSCRIPT_MODEL_FILES["nb"],
     )
     model_path = _transcript_model_path(root, model_key)
-    if model_path.exists():
+    if _is_transcript_model_available(root, model_key):
         return model_path, f"Transcript {label}"
 
     for fallback_key, (fallback_label, fallback_filename) in TRANSCRIPT_MODEL_FILES.items():
         fallback_path = _transcript_model_path(root, fallback_key)
-        if fallback_path.exists():
+        if _is_transcript_model_available(root, fallback_key):
             return fallback_path, f"Transcript {fallback_label}"
 
     return root / "models" / "transcript_nb.pkl", "Transcript Naive Bayes"
@@ -239,7 +257,7 @@ def _available_transcript_models(root: Path) -> list[str]:
     options = [
         key
         for key, (_label, filename) in TRANSCRIPT_MODEL_FILES.items()
-        if _transcript_model_path(root, key).exists()
+        if _is_transcript_model_available(root, key)
     ]
     return options or ["nb"]
 
@@ -1126,7 +1144,7 @@ def _render_live_dashboard(
             st.info(empty_message)
 
     with timeline_placeholder.container():
-        st.plotly_chart(_timeline_figure(results, threshold), use_container_width=True)
+        st.plotly_chart(_timeline_figure(results, threshold), width="stretch")
 
     with transcript_placeholder.container():
         if results:
@@ -1137,7 +1155,7 @@ def _render_live_dashboard(
                 height=145,
                 disabled=True,
             )
-            st.dataframe(_result_table(results), hide_index=True, use_container_width=True)
+            st.dataframe(_result_table(results), hide_index=True, width="stretch")
             transcript = str(latest.get("transcript", "")).strip() if latest else ""
             findings = latest.get("findings", []) if latest else []
             if transcript and isinstance(findings, list):
@@ -1149,7 +1167,7 @@ def _render_live_dashboard(
     with mfcc_placeholder.container():
         figure = _mfcc_figure(results)
         if figure is not None:
-            st.plotly_chart(figure, use_container_width=True)
+            st.plotly_chart(figure, width="stretch")
             st.caption(_mfcc_explanation(results, latest))
         else:
             st.caption("MFCC heatmap appears after the first processed chunk.")
@@ -1157,7 +1175,7 @@ def _render_live_dashboard(
     with frequency_placeholder.container():
         frequency_figure = _frequency_figure(latest)
         if frequency_figure is not None:
-            st.plotly_chart(frequency_figure, use_container_width=True)
+            st.plotly_chart(frequency_figure, width="stretch")
         else:
             st.caption("Frequency spectrum appears after the first processed chunk.")
 
@@ -1167,7 +1185,7 @@ def _render_live_dashboard(
         else:
             figure = _voice_evidence_metric_figure(latest)
             if figure is not None:
-                st.plotly_chart(figure, use_container_width=True)
+                st.plotly_chart(figure, width="stretch")
                 st.caption(_voice_evidence_explanation(latest))
             else:
                 st.caption("Voice evidence metrics appear after the first processed chunk.")
@@ -1178,7 +1196,7 @@ def _render_live_dashboard(
         else:
             figure = _behavioral_signal_metric_figure(latest)
             if figure is not None:
-                st.plotly_chart(figure, use_container_width=True)
+                st.plotly_chart(figure, width="stretch")
                 st.caption(_behavioral_signal_explanation(latest))
             else:
                 st.caption("Behavioral RF metrics are unavailable for this chunk.")
@@ -1319,7 +1337,7 @@ def _render_recording_carousel(
     if show_navigation:
         nav_left, nav_mid, nav_right = st.columns([0.2, 0.6, 0.2])
         with nav_left:
-            if st.button("Previous", use_container_width=True, disabled=current_index == 0, key=f"{state_key}_prev"):
+            if st.button("Previous", width="stretch", disabled=current_index == 0, key=f"{state_key}_prev"):
                 st.session_state[state_key] = current_index - 1
                 st.rerun()
         with nav_mid:
@@ -1329,7 +1347,7 @@ def _render_recording_carousel(
                     f"Flags: {', '.join(flags) if flags else 'none'}"
                 )
         with nav_right:
-            if st.button("Next", use_container_width=True, disabled=current_index >= len(groups) - 1, key=f"{state_key}_next"):
+            if st.button("Next", width="stretch", disabled=current_index >= len(groups) - 1, key=f"{state_key}_next"):
                 st.session_state[state_key] = current_index + 1
                 st.rerun()
     elif show_description:
@@ -2084,8 +2102,8 @@ def _render_transcript_evaluation_evidence(
         if metrics_df.empty:
             st.warning("No saved transcript training metrics found. Run the transcript training script first.")
         else:
-            st.plotly_chart(_training_metrics_chart(metrics_df), use_container_width=True)
-            st.dataframe(metrics_df, hide_index=True, use_container_width=True)
+            st.plotly_chart(_training_metrics_chart(metrics_df), width="stretch")
+            st.dataframe(metrics_df, hide_index=True, width="stretch")
 
     with confusion_tab:
         figure = _confusion_matrix_figure(metrics, recommended_model)
@@ -2093,14 +2111,14 @@ def _render_transcript_evaluation_evidence(
             st.info("No confusion matrix is saved for the recommended transcript model yet.")
         else:
             st.caption(f"Confusion matrix shown for recommended model: {recommended_model}")
-            st.plotly_chart(figure, use_container_width=True)
+            st.plotly_chart(figure, width="stretch")
 
     with roc_tab:
         figure = _roc_auc_curve(root, model_keys)
         if figure is None:
             st.warning("ROC-AUC data is not available yet. Retrain the transcript models to refresh metrics.")
         else:
-            st.plotly_chart(figure, use_container_width=True)
+            st.plotly_chart(figure, width="stretch")
             st.caption(
                 "ROC-AUC shows how well each transcript model separates legitimate and suspicious transcripts. "
                 "A curve closer to the top-left corner indicates stronger classification performance."
@@ -2191,8 +2209,8 @@ def _render_transcript_model_comparison(
         "Risk score is suspicious probability; confidence is the selected model's predicted-class confidence.",
         "Model evidence",
     )
-    st.plotly_chart(_comparison_chart(comparison_rows), use_container_width=True)
-    st.dataframe(display_df, hide_index=True, use_container_width=True)
+    st.plotly_chart(_comparison_chart(comparison_rows), width="stretch")
+    st.dataframe(display_df, hide_index=True, width="stretch")
     st.caption(
         "Higher agreement between independent models generally increases confidence. "
         "If models disagree, use the transcript, rule evidence, and source context before acting."
@@ -2626,7 +2644,9 @@ def _render_transcript_evidence_breakdown(root: Path, text: str, findings: list[
     if evidence_df.empty:
         st.info("No direct rules, lower-risk context indicators, or baseline vocabulary signals were found.")
     else:
-        st.dataframe(evidence_df, hide_index=True, use_container_width=True)
+        display_evidence_df = evidence_df.copy()
+        display_evidence_df["Model Weight"] = display_evidence_df["Model Weight"].fillna("-").astype(str)
+        st.dataframe(display_evidence_df, hide_index=True, width="stretch")
     st.caption(
         "Rule indicators are direct pattern evidence. Baseline vocabulary rows are supporting SVM/Naive Bayes signals and do not override the final verdict."
     )
@@ -2650,7 +2670,7 @@ def _display_result(
         _transcript_result_summary(result, label, confidence, findings),
     )
 
-    st.plotly_chart(_confidence_chart(result["probabilities"]), use_container_width=True)
+    st.plotly_chart(_confidence_chart(result["probabilities"]), width="stretch")
 
     _render_transcript_evidence_breakdown(root, text, findings)
 
@@ -2701,7 +2721,7 @@ def _render_combined_input_summary(
                 "Source": "Uploaded audio recording",
                 "Status": "Ready" if uploaded_audio_results else "Waiting for upload analysis",
                 "Usable text": f"{upload_words} word(s)" if uploaded_audio_text else "No transcript text yet",
-                "Audio chunks": upload_chunks,
+                "Audio chunks": str(upload_chunks),
                 "Peak decision risk": f"{upload_decision_peak:.1f}%" if uploaded_audio_results else "-",
                 "Peak voice evidence": f"{upload_voice_peak:.1f}%" if uploaded_audio_results else "-",
                 "Peak behavioral evidence": f"{upload_behavioral_peak:.1f}%" if uploaded_audio_results else "-",
@@ -2721,7 +2741,7 @@ def _render_combined_input_summary(
         )
 
     if rows:
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
     if use_uploaded_audio and use_text and uploaded_audio_text.strip() and transcript_text.strip():
         similarity = _similarity_percent(uploaded_audio_text, transcript_text)
@@ -3742,7 +3762,7 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
             analyze_button = st.form_submit_button(
                 "* Analyze Selected Evidence",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 disabled=not (uploaded_audio_ready or text_ready),
             )
 
@@ -3751,7 +3771,7 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
         render_content_card_open("violet")
         text_column = st.selectbox("Transcript column", uploaded.columns)
 
-        if st.button("Analyze transcript CSV rows", use_container_width=True):
+        if st.button("Analyze transcript CSV rows", width="stretch"):
             texts = uploaded[text_column].fillna("").astype(str).tolist()
             rows = []
             try:
@@ -3782,7 +3802,7 @@ def render_transcript_tab(root: Path, history: list[dict[str, object]]) -> None:
                     "Transcript model artifacts were not found, so batch results use demo rules."
                 )
 
-            st.dataframe(results, hide_index=True, use_container_width=True)
+            st.dataframe(results, hide_index=True, width="stretch")
 
         render_content_card_close()
 

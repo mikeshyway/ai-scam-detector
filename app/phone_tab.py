@@ -190,23 +190,13 @@ def _render_api_setup(provider: str, root: Path) -> dict[str, object]:
         st.link_button(
             "Open Veriphone.io API Documentation",
             docs_url,
-            use_container_width=True,
+            width="stretch",
         )
         st.link_button(
             "Open Veriphone.io API Key Portal",
             "https://veriphone.io/app",
-            use_container_width=True,
+            width="stretch",
         )
-
-        guide_path = root / "docs" / "veriphone_api_setup_guide.html"
-        if guide_path.exists():
-            st.download_button(
-                "Download Veriphone.io API Setup Guide",
-                data=guide_path.read_bytes(),
-                file_name="veriphone_api_setup_guide.html",
-                mime="text/html",
-                use_container_width=True,
-            )
 
         manual_key = st.text_input(
             "Session API key",
@@ -725,18 +715,18 @@ def _render_provider_connection_check(provider: str, key_meta: dict[str, object]
             ]
         ),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
 
     default_number = "016-240 4384"
+    st.session_state.setdefault("phone_connection_test_number", default_number)
     test_number = st.text_input(
         "Connection test phone number",
-        value=st.session_state.get("phone_connection_test_number", default_number),
         key="phone_connection_test_number",
         help="Use a number you are comfortable sending to Veriphone.io Carrier Lookup for testing.",
     )
 
-    if st.button("Test Provider Connection", use_container_width=True, key="phone_test_provider_connection"):
+    if st.button("Test Provider Connection", width="stretch", key="phone_test_provider_connection"):
         with st.spinner("Testing provider connection..."):
             diagnostic = _run_provider_connection_test(provider, test_number, key_meta)
         st.session_state["phone_provider_diagnostic"] = diagnostic
@@ -759,19 +749,19 @@ def _render_provider_connection_check(provider: str, key_meta: dict[str, object]
                 code="MISSING KEY",
             )
 
-        st.dataframe(_diagnostic_rows(diagnostic), hide_index=True, use_container_width=True)
+        st.dataframe(_diagnostic_rows(diagnostic), hide_index=True, width="stretch")
 
         payload = dict(diagnostic.get("payload", {}))
         evidence = _provider_evidence_rows(provider, payload)
         if not evidence.empty:
             st.markdown("**Provider response summary**")
-            st.dataframe(evidence, hide_index=True, use_container_width=True)
+            st.dataframe(evidence, hide_index=True, width="stretch")
 
             st.markdown("**Current response statistics**")
             st.dataframe(
                 _provider_response_statistics(provider, payload),
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
             )
         elif diagnostic.get("error"):
             st.caption("Provider response fields are unavailable because the live test did not return usable data.")
@@ -941,18 +931,18 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
             ]
         ),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
 
     chart_cols = st.columns(2)
     with chart_cols[0]:
-        st.plotly_chart(_evidence_coverage_chart(record), use_container_width=True)
+        st.plotly_chart(_evidence_coverage_chart(record), width="stretch")
     with chart_cols[1]:
-        st.plotly_chart(_response_completeness_chart(record), use_container_width=True)
+        st.plotly_chart(_response_completeness_chart(record), width="stretch")
 
     claim_chart = _caller_claim_consistency_chart(record, claimed_identity)
     if claim_chart is not None:
-        st.plotly_chart(claim_chart, use_container_width=True)
+        st.plotly_chart(claim_chart, width="stretch")
         st.caption("Caller Claim Consistency uses transparent rules only. It is not an AI probability and does not modify the final lookup result.")
 
     chart_history = [
@@ -961,7 +951,7 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
     ]
     history_chart = _session_lookup_history_chart(chart_history)
     if history_chart is not None:
-        st.plotly_chart(history_chart, use_container_width=True)
+        st.plotly_chart(history_chart, width="stretch")
 
     st.markdown("**Explanation**")
     st.write(explanation.get("summary", "No explanation returned."))
@@ -970,7 +960,7 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
 
     indicators = explanation.get("indicators", [])
     if indicators:
-        st.dataframe(pd.DataFrame(indicators), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(indicators), hide_index=True, width="stretch")
     else:
         st.info("No caller reputation indicators were returned.")
 
@@ -991,7 +981,7 @@ def _render_result(root: Path, lookup_result: dict[str, Any], claimed_identity: 
             "Business status",
         )
         render_content_card_open("green")
-        st.dataframe(business_df, hide_index=True, use_container_width=True)
+        st.dataframe(business_df, hide_index=True, width="stretch")
         render_content_card_close()
 
     with st.expander("Normalized lookup object", expanded=False):
@@ -1267,7 +1257,7 @@ def _render_diagnostics_expander(title: str, diagnostic_key: str) -> None:
         st.dataframe(
             pd.DataFrame(diagnostic_rows(diagnostic)),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
         )
         fields = diagnostic.get("raw_field_names") or []
         if fields:
@@ -1297,7 +1287,7 @@ def _render_diagnostics_expander(title: str, diagnostic_key: str) -> None:
             st.info(f"Paste a {provider_name} API key, then press Enter before testing the connection.")
 
         if portal_url and error_code in {"timeout", "authentication_failed", "insufficient_credits", "missing_key"}:
-            st.link_button(f"Open {provider_name} Website", portal_url, use_container_width=True)
+            st.link_button(f"Open {provider_name} Website", portal_url, width="stretch")
 
 
 def _render_live_provider_card(
@@ -1362,9 +1352,9 @@ def _render_live_provider_card(
         key_meta = _resolve_phone_provider_key(provider_id, session_value)
         st.caption(f"Key source: {key_meta.get('source', 'Not configured')}")
 
+        st.session_state.setdefault(test_number_key, "016-240 4384")
         test_number = st.text_input(
             "Test number (optional)",
-            value=str(st.session_state.get(test_number_key, "016-240 4384")),
             key=test_number_key,
             disabled=not enabled,
         )
@@ -1372,7 +1362,7 @@ def _render_live_provider_card(
         if st.button(
             f"Test {title} Connection",
             key=f"{provider_id}_connection_test",
-            use_container_width=True,
+            width="stretch",
             disabled=not enabled,
         ):
             with st.spinner(f"Testing {title}..."):
@@ -1423,7 +1413,7 @@ def _render_status_row(
             "Status": "Ready" if penipu_enabled and penipu_key.get("configured") else "Not configured" if penipu_enabled else "Disabled",
         },
     ]
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 
 def _provider_result_block(result: dict[str, Any], *, default_provider: str, enabled: bool) -> dict[str, Any]:
@@ -2451,7 +2441,7 @@ def _render_phone_line_profile(output_view: dict[str, Any]) -> None:
     with st.container(border=True):
         st.caption("Source: Veriphone.io")
         if rows:
-            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         else:
             st.info("Phone line profile metadata is unavailable.")
         st.caption(
@@ -2480,7 +2470,7 @@ def _render_scam_reputation(output_view: dict[str, Any]) -> None:
         if total_reports:
             st.metric("Total report indicators", total_reports)
         if rows:
-            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         else:
             st.info("No matching reputation record found. This does not confirm that the caller is safe.")
 
@@ -2501,7 +2491,7 @@ def _render_reported_identity(output_view: dict[str, Any]) -> None:
     )
     with st.container(border=True):
         st.caption("Source: PenipuMY")
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         st.caption(
             "This record indicates an association reported by the provider. "
             "It does not verify that the current caller represents the organization."
@@ -2582,7 +2572,7 @@ def _render_combined_evidence(output_view: dict[str, Any], assessment: dict[str,
     )
     with st.container(border=True):
         if rows:
-            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         else:
             st.info("No combined evidence rows are available yet.")
 
@@ -2595,9 +2585,9 @@ def _render_evidence_availability(output_view: dict[str, Any]) -> None:
         "Which metadata and reputation categories are available for this caller investigation.",
     )
     with st.container(border=True):
-        st.plotly_chart(_evidence_coverage_chart(record), use_container_width=True)
+        st.plotly_chart(_evidence_coverage_chart(record), width="stretch")
         with st.expander("View Provider Diagnostics", expanded=False):
-            st.plotly_chart(_response_completeness_chart(record), use_container_width=True)
+            st.plotly_chart(_response_completeness_chart(record), width="stretch")
 
 
 def _render_claim_consistency(output_view: dict[str, Any]) -> None:
@@ -2617,7 +2607,7 @@ def _render_claim_consistency(output_view: dict[str, Any]) -> None:
         "Transparent rule-based checks against the claimed identity, not an AI probability.",
     )
     with st.container(border=True):
-        st.plotly_chart(claim_chart, use_container_width=True)
+        st.plotly_chart(claim_chart, width="stretch")
         st.caption("Caller Claim Consistency uses transparent rules only and does not modify the concern score.")
 
 
@@ -2660,7 +2650,7 @@ def _render_caller_investigation_summary(investigation: dict[str, Any]) -> None:
     summary_col, action_col = st.columns([0.42, 0.58], gap="medium", vertical_alignment="top")
     with summary_col:
         with st.container(border=True):
-            st.plotly_chart(_concern_meter(score_value, priority), use_container_width=True)
+            st.plotly_chart(_concern_meter(score_value, priority), width="stretch")
             st.caption(
                 "This is an evidence concern score, not a trained-model scam probability. "
                 "Carrier validity is treated as neutral information."
@@ -2712,11 +2702,11 @@ def _render_caller_investigation_summary(investigation: dict[str, Any]) -> None:
     chart = _contribution_chart(contributions)
     if chart is not None:
         st.markdown("**What raised the concern level?**")
-        st.plotly_chart(chart, use_container_width=True)
+        st.plotly_chart(chart, width="stretch")
 
     if neutral:
         st.markdown("**Neutral information**")
-        st.dataframe(pd.DataFrame(neutral), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(neutral), hide_index=True, width="stretch")
 
     _render_phone_line_profile(output_view)
     _render_scam_reputation(output_view)
@@ -2852,7 +2842,7 @@ def render_phone_risk_page(root: Path, history: list[dict[str, object]]) -> None
         with st.form("phone_investigation_form", clear_on_submit=False):
             investigate = st.form_submit_button(
                 "Investigate Phone Number",
-                use_container_width=True,
+                width="stretch",
                 disabled=bool(disabled_reason),
             )
 

@@ -103,12 +103,23 @@ def _summary_metrics(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     ]
 
 
+def _record_scope_label(row: dict[str, object]) -> str:
+    scope = str(row.get("record_scope") or "user_scan").strip().casefold()
+    return "Demo" if scope == "seed_demo" else "User"
+
+
+def _visible_history_id(row: dict[str, object]) -> int:
+    return 0 if _record_scope_label(row) == "Demo" else int(row.get("id", 0))
+
+
 def _history_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
                 "Select": False,
-                "ID": int(row.get("id", 0)),
+                "Record ID": int(row.get("id", 0)),
+                "ID": _visible_history_id(row),
+                "Scope": _record_scope_label(row),
                 "Time": str(row.get("scanned_at", "")).replace("T", " ")[:19],
                 "Type": row.get("scan_type", "-"),
                 "Native Verdict": row.get("action_status", REVIEW_REQUIRED),
@@ -131,7 +142,8 @@ def _selected_ids_from_editor(frame: pd.DataFrame) -> list[int]:
     if frame.empty or "Select" not in frame.columns:
         return []
     selected = frame[frame["Select"] == True]  # noqa: E712 - Streamlit returns bool-like values.
-    return [int(value) for value in selected["ID"].tolist()]
+    id_column = "Record ID" if "Record ID" in selected.columns else "ID"
+    return [int(value) for value in selected[id_column].tolist()]
 
 
 def _rows_by_id(rows: list[dict[str, object]], selected_ids: list[int]) -> list[dict[str, object]]:
@@ -202,7 +214,7 @@ def _render_risk_chart(rows: list[dict[str, object]]) -> None:
                 showticklabels=False,
             ),
         )
-        st.plotly_chart(apply_chart_theme(fig), use_container_width=True)
+        st.plotly_chart(apply_chart_theme(fig), width="stretch")
         return
     chart_rows = pd.DataFrame(
         [
@@ -250,7 +262,7 @@ def _render_risk_chart(rows: list[dict[str, object]]) -> None:
         xaxis=dict(range=[0, 100]),
         yaxis=dict(categoryorder="array", categoryarray=list(reversed(chart_rows["Evidence"].tolist()))),
     )
-    st.plotly_chart(apply_chart_theme(fig), use_container_width=True)
+    st.plotly_chart(apply_chart_theme(fig), width="stretch")
 
 
 def _report_rows_json(rows: list[dict[str, object]]) -> str:
@@ -345,7 +357,7 @@ def _build_cached_report(
 def _clear_all_evidence(history: list[dict[str, object]]) -> None:
     deleted_count = delete_all_history(DEFAULT_SESSION_ID)
     history.clear()
-    st.session_state["report_notice"] = f"Cleared {deleted_count} evidence record(s)."
+    st.session_state["report_notice"] = f"Cleared {deleted_count} user-created evidence record(s)."
     st.session_state["show_clear_all_dialog"] = False
     st.rerun()
 
@@ -356,29 +368,29 @@ def _render_clear_all_confirmation(history: list[dict[str, object]]) -> None:
         @dialog_factory("Clear all evidence?")
         def confirm_clear_all() -> None:
             st.warning(
-                "This will permanently remove every saved scan evidence record from the local report history."
+                "This will permanently remove user-created scan evidence from the local report history. Seeded demo evidence is preserved."
             )
             cancel_col, delete_col = st.columns(2)
             with cancel_col:
-                if st.button("Cancel", use_container_width=True):
+                if st.button("Cancel", width="stretch"):
                     st.session_state["show_clear_all_dialog"] = False
                     st.rerun()
             with delete_col:
-                if st.button("Delete all evidence", type="primary", use_container_width=True):
+                if st.button("Delete all evidence", type="primary", width="stretch"):
                     _clear_all_evidence(history)
 
         confirm_clear_all()
         return
 
     with st.container(border=True):
-        st.warning("Confirm clear all: this will permanently remove every saved scan evidence record.")
+        st.warning("Confirm clear all: this will permanently remove user-created scan evidence. Seeded demo evidence is preserved.")
         cancel_col, delete_col = st.columns(2)
         with cancel_col:
-            if st.button("Cancel clear all", use_container_width=True):
+            if st.button("Cancel clear all", width="stretch"):
                 st.session_state["show_clear_all_dialog"] = False
                 st.rerun()
         with delete_col:
-            if st.button("Confirm delete all evidence", type="primary", use_container_width=True):
+            if st.button("Confirm delete all evidence", type="primary", width="stretch"):
                 _clear_all_evidence(history)
 
 
@@ -476,9 +488,11 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
         edited_frame = st.data_editor(
             _history_frame(filtered_rows),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             disabled=[
+                "Record ID",
                 "ID",
+                "Scope",
                 "Time",
                 "Type",
                 "Native Verdict",
@@ -490,7 +504,9 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
             ],
             column_config={
                 "Select": st.column_config.CheckboxColumn("Use", help="Include this evidence item in the next report."),
+                "Record ID": None,
                 "ID": st.column_config.NumberColumn("ID", width="small"),
+                "Scope": st.column_config.TextColumn("Scope", width="small"),
                 "Preview": st.column_config.TextColumn("Preview", width="large"),
             },
             key="report_history_editor",
@@ -506,14 +522,14 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
             else:
                 st.caption("No evidence selected.")
         with action_b:
-            if st.button("Delete selected evidence", disabled=not selected_ids, use_container_width=True):
+            if st.button("Delete selected evidence", disabled=not selected_ids, width="stretch"):
                 deleted_rows = _rows_by_id(filtered_rows, selected_ids)
                 deleted_count = delete_selected(selected_ids)
                 _remove_deleted_from_session(history, deleted_rows)
                 st.success(f"Deleted {deleted_count} selected evidence record(s).")
                 st.rerun()
         with action_c:
-            if st.button("Clear all evidence", use_container_width=True):
+            if st.button("Clear all evidence", width="stretch"):
                 st.session_state["show_clear_all_dialog"] = True
 
     if st.session_state.get("show_clear_all_dialog"):
@@ -593,7 +609,7 @@ def render_report_page(root: Path, history: list[dict[str, object]]) -> None:
         generate_clicked = st.button(
             f"Generate Report {report_format}",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=not report_rows,
         )
         if generate_clicked:

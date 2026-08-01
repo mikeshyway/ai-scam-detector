@@ -1,6 +1,7 @@
--r requirements-local.txt
+-r requirements.txt
 
-# Training, notebooks, and local experimentation.
+# Training, notebooks, and local verification.
 nltk>=3.8
 seaborn>=0.13
 jupyter>=1.0
+pytest>=8.0

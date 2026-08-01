@@ -12,6 +12,9 @@ import pandas as pd
 from .text_classifier import TEXT_LABEL_NAMES, TextPrediction
 
 
+LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/"
+
+
 class TransformerTextScamClassifier:
     """Small wrapper that matches the TextScamClassifier runtime interface."""
 
@@ -119,6 +122,20 @@ def load_transformer_text_artifacts(
     model_path = Path(model_dir)
     if not model_path.exists():
         raise FileNotFoundError(f"Missing transformer model artifact: {model_path}")
+
+    safetensors_path = model_path / "model.safetensors"
+    if not safetensors_path.exists():
+        raise FileNotFoundError(f"Missing transformer model weights: {safetensors_path}")
+    try:
+        header_probe = safetensors_path.read_bytes()[: len(LFS_POINTER_PREFIX)]
+    except OSError as exc:
+        raise FileNotFoundError(f"Transformer model weights could not be read: {safetensors_path}") from exc
+    if header_probe == LFS_POINTER_PREFIX:
+        raise FileNotFoundError(
+            "Transformer model weights are a Git LFS pointer, not the downloaded "
+            f"model file: {safetensors_path}. Run `git lfs pull` or use the NB/SVM "
+            "transcript model."
+        )
 
     metadata_path = model_path / "training_metadata.json"
     metadata: dict[str, object] = {}

@@ -1,6 +1,11 @@
-phone_number,reports,risk_score,tag,source
-+60 11 2088 4431,31,82,bank impersonation,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
-+60 12 9012 3390,2,18,campus office,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
-+60 13 7721 4550,25,73,parcel scam,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
-+60 16 6002 1848,4,26,delivery,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
-+65 8 4412 7740,19,64,unknown recruiter,TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION
+sample_id,phone_number,demo_group,reports,risk_score,tag,expected_native_prediction,expected_action_status,seeded_report_row,source,notes
+DEMO-PHONE-SCAM-001,+447700900101,scam,31,86,bank impersonation,High concern,Immediate Action Required,yes,CURATED_DEMO_EVIDENCE_RESERVED_OR_FICTIONAL,Reserved drama/demo number; seeded SQL report fixture
+DEMO-PHONE-SCAM-002,+447700900103,scam,27,78,parcel scam,High concern,Immediate Action Required,no,CURATED_DEMO_EVIDENCE_RESERVED_OR_FICTIONAL,Reserved drama/demo number
+DEMO-PHONE-SCAM-003,+447700900105,scam,24,76,authority impersonation,High concern,Immediate Action Required,no,CURATED_DEMO_EVIDENCE_RESERVED_OR_FICTIONAL,Reserved drama/demo number
+DEMO-PHONE-SCAM-004,+447700900107,scam,19,72,remote access pressure,High concern,Immediate Action Required,no,CURATED_DEMO_EVIDENCE_RESERVED_OR_FICTIONAL,Reserved drama/demo number
+DEMO-PHONE-SCAM-005,+447700900109,scam,16,70,investment pitch,High concern,Immediate Action Required,no,CURATED_DEMO_EVIDENCE_RESERVED_OR_FICTIONAL,Reserved drama/demo number
+DEMO-PHONE-LEGIT-001,+447700900102,innocent,0,8,campus office,Lower concern,No Immediate Action,yes,CURATED_DEMO_EVIDENCE_RESERVED_OR_FICTIONAL,Reserved drama/demo number; seeded SQL report fixture
+DEMO-PHONE-LEGIT-002,+447700900104,innocent,1,12,library desk,Lower concern,No Immediate Action,no,CURATED_DEMO_EVIDENCE_RESERVED_OR_FICTIONAL,Reserved drama/demo number
+DEMO-PHONE-LEGIT-003,+447700900106,innocent,0,6,course advisor,Lower concern,No Immediate Action,no,CURATED_DEMO_EVIDENCE_RESERVED_OR_FICTIONAL,Reserved drama/demo number
+DEMO-PHONE-LEGIT-004,+447700900108,innocent,1,14,delivery reminder,Lower concern,No Immediate Action,no,CURATED_DEMO_EVIDENCE_RESERVED_OR_FICTIONAL,Reserved drama/demo number
+DEMO-PHONE-LEGIT-005,+447700900110,innocent,0,7,student services,Lower concern,No Immediate Action,no,CURATED_DEMO_EVIDENCE_RESERVED_OR_FICTIONAL,Reserved drama/demo number

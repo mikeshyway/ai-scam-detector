@@ -837,7 +837,7 @@ def _render_email_uploaded_file_card(
                 "X",
                 key="email_remove_upload",
                 help="Remove uploaded file",
-                use_container_width=True,
+                width="stretch",
             )
 
 
@@ -1032,7 +1032,7 @@ def _render_email_input_container(
             analyze_button = st.form_submit_button(
                 "\u2726  Analyze Evidence",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 disabled=not text.strip() or not model_choices,
             )
 
@@ -1490,8 +1490,8 @@ def _render_evaluation_evidence(
         if metrics_df.empty:
             st.warning("No saved training metrics found. Run the email training script first.")
         else:
-            st.plotly_chart(_training_metrics_chart(metrics_df), use_container_width=True)
-            st.dataframe(metrics_df, hide_index=True, use_container_width=True)
+            st.plotly_chart(_training_metrics_chart(metrics_df), width="stretch")
+            st.dataframe(metrics_df, hide_index=True, width="stretch")
 
     with confusion_tab:
         figure = _confusion_matrix_figure(metrics, recommended_model)
@@ -1499,7 +1499,7 @@ def _render_evaluation_evidence(
             st.info("No confusion matrix is saved for the recommended model yet.")
         else:
             st.caption(f"Confusion matrix shown for recommended model: {recommended_model}")
-            st.plotly_chart(figure, use_container_width=True)
+            st.plotly_chart(figure, width="stretch")
 
     with roc_tab:
         figure = _roc_auc_curve(root, model_choices)
@@ -1509,7 +1509,7 @@ def _render_evaluation_evidence(
                 "updating `src/training/train_email_model.py`."
             )
         else:
-            st.plotly_chart(figure, use_container_width=True)
+            st.plotly_chart(figure, width="stretch")
             st.caption(
                 "ROC-AUC shows how well each model separates safe and suspicious emails. "
                 "A curve closer to the top-left corner indicates stronger classification performance."
@@ -2051,7 +2051,9 @@ def _display_result(
         if evidence_df.empty:
             st.info("No rule indicators, legitimate context indicators, or model-influential terms were detected.")
         else:
-            st.dataframe(evidence_df, hide_index=True, use_container_width=True)
+            display_evidence_df = evidence_df.copy()
+            display_evidence_df["Model Weight"] = display_evidence_df["Model Weight"].fillna("-").astype(str)
+            st.dataframe(display_evidence_df, hide_index=True, width="stretch")
 
     render_section_header(
         "Technical details",
@@ -2068,12 +2070,12 @@ def _display_result(
         f"Probability chart shown for recommended diagnostic model: {model_label}. "
         "The final verdict above still comes from multi-model consensus."
     )
-    st.plotly_chart(_confidence_chart(dict(result["probabilities"])), use_container_width=True)
+    st.plotly_chart(_confidence_chart(dict(result["probabilities"])), width="stretch")
     st.markdown("**Model decision trace**")
     st.dataframe(
         decision_trace_df,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -2119,7 +2121,7 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
 
         text_column = st.selectbox("Text column", uploaded.columns)
 
-        if st.button("Analyze CSV rows", use_container_width=True):
+        if st.button("Analyze CSV rows", width="stretch"):
             texts = uploaded[text_column].fillna("").astype(str).tolist()
             rows = []
 
@@ -2141,7 +2143,7 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
                         }
                     )
 
-            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
     if analyze_button:
         if not text.strip():
@@ -2246,13 +2248,13 @@ def render_email_tab(root: Path, history: list[dict[str, object]]) -> None:
 
         st.plotly_chart(
             _model_comparison_chart(comparison_rows),
-            use_container_width=True,
+            width="stretch",
         )
 
         st.dataframe(
             df_compare_metrics,
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
         )
 
         st.caption(

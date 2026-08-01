@@ -52,7 +52,7 @@ def test_old_schema_is_migrated_without_losing_rows(monkeypatch) -> None:
     assert rows[0]["action_status"] == REVIEW_REQUIRED
     with sqlite3.connect(db_path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(scan_history)")}
-    assert {"native_prediction", "action_status", "evidence_bundle", "provenance"} <= columns
+    assert {"native_prediction", "action_status", "evidence_bundle", "provenance", "record_scope"} <= columns
 
 
 def test_new_snapshot_round_trips_through_sqlite(monkeypatch) -> None:
@@ -76,10 +76,44 @@ def test_new_snapshot_round_trips_through_sqlite(monkeypatch) -> None:
         action_status="Immediate Action Required",
         raw_input="urgent transfer",
         evidence_bundle=bundle,
+        record_scope="seed_demo",
     )
     row = history_db.query_history()[0]
 
     assert scan_id > 0
     assert row["concern_score"] == 76
     assert row["action_status"] == "Immediate Action Required"
+    assert row["record_scope"] == "seed_demo"
     assert '"schema_version": "1.0"' in row["evidence_bundle"]
+
+
+def test_clear_all_preserves_seed_demo_rows(monkeypatch) -> None:
+    db_path = _test_db("reporting_seed_scope.db")
+    monkeypatch.setattr(history_db, "DB_PATH", db_path)
+    monkeypatch.setattr(history_db, "_LEGACY_MIGRATED", True)
+
+    seed_id = history_db.insert_scan(
+        scan_type="Email",
+        prediction="Suspicious",
+        confidence=91,
+        raw_input="seed demo phishing",
+        record_scope="seed_demo",
+        source_fingerprint="seed-demo-test",
+    )
+    user_id = history_db.insert_scan(
+        scan_type="Email",
+        prediction="Legitimate",
+        confidence=82,
+        raw_input="user normal message",
+        record_scope="user_scan",
+        source_fingerprint="user-scan-test",
+    )
+
+    assert history_db.delete_selected([seed_id, user_id]) == 1
+    rows = history_db.query_history()
+    assert [row["id"] for row in rows] == [seed_id]
+
+    assert history_db.delete_all_history() == 0
+    rows = history_db.query_history()
+    assert len(rows) == 1
+    assert rows[0]["record_scope"] == "seed_demo"

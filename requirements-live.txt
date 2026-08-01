@@ -1,4 +1,0 @@
--r requirements-local.txt
-
-# Kept for compatibility with older setup notes.
-# Local live audio dependencies are now kept out of hosted requirements.txt.

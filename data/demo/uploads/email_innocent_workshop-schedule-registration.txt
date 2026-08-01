@@ -1,0 +1,20 @@
+From: Career Services <career.services@example.edu>
+To: Students <students@example.edu>
+Subject: Employability workshop schedule for next week
+Date: Mon, 15 Jun 2026 11:05:00 +0800
+
+Dear students,
+
+Career Services has published the workshop schedule for next week. The sessions are optional and are designed to help students prepare for internship interviews, portfolio reviews, and graduate recruitment events.
+
+Available sessions:
+- Resume clinic, Tuesday, 2:00 PM
+- Technical interview practice, Wednesday, 10:00 AM
+- LinkedIn profile review, Thursday, 3:30 PM
+
+Registration is through the official student portal under Career Services. The portal will show the room number and any preparation materials after your registration is confirmed.
+
+No payment or password verification is required. If you have questions, contact Career Services through the helpdesk address listed on the student portal.
+
+Regards,
+Career Services Office

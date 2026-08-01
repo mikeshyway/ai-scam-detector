@@ -1,0 +1,13 @@
+Advisor: Hi, this is Dr. Lim from the School Office. I am calling about your course registration form for next semester.
+
+Student: Hi Dr. Lim, yes, I saw the reminder but I have not submitted it yet.
+
+Advisor: No problem. The deadline is this Friday at 5 PM. Please submit the form through the official student portal. If any module shows a clash, send me an email from your student account and I will check it with the programme coordinator.
+
+Student: Do I need to pay anything today?
+
+Advisor: No. This call is only a reminder about the form. Fees and invoices are handled separately by the Finance Office through the portal. I will not ask for your password, OTP, or payment details over the phone.
+
+Student: Understood. I will submit it tonight.
+
+Advisor: Great. Have a good day.

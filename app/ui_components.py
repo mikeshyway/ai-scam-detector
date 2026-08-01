@@ -1499,7 +1499,7 @@ def render_sidebar_navigation(
                 if st.button(
                     f"Open {page_name}",
                     key=f"sidebar_nav_button_{page_name}",
-                    use_container_width=True,
+                    width="stretch",
                     type="secondary",
                 ):
                     on_select(page_name)
@@ -1593,7 +1593,7 @@ def render_detection_tab_selector(active_tab: str) -> str:
                     if st.button(
                         tab_title,
                         key=f"detection_tab_button_{tab_key}",
-                        use_container_width=True,
+                        width="stretch",
                         type="secondary",
                         disabled=is_active,
                     ):

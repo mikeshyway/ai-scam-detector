@@ -43,13 +43,12 @@ AI Report Generator
 ```
 
 For a text companion to the notebook, see
-[docs/FINAL_PROTOTYPE_EVIDENCE_SUMMARY.md](docs/FINAL_PROTOTYPE_EVIDENCE_SUMMARY.md).
+[PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md#final-prototype-evidence-summary).
 
 ## Directory Structure
 
 ```text
 ai-scam-detector/
-|-- main.py                  Optional root Streamlit entry point
 |-- app/                     Active Streamlit pages and UI components
 |-- src/
 |   |-- audio/               Audio loading, features, inference, recording helpers
@@ -68,11 +67,10 @@ ai-scam-detector/
 |-- reports/metrics/         Saved evaluation metrics
 |-- notebooks/               Final evidence notebook and focused EDA appendices
 |-- tests/                   Automated unit tests
-|-- docs/                    Architecture and setup documentation
-`-- archive/deprecated/      Superseded files kept for reference
+`-- PROJECT_DOCUMENTATION.md  Merged architecture, data, training, and phone documentation
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for ownership rules and the
+See [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md#architecture) for ownership rules and the
 complete execution flow.
 
 ## Installation
@@ -93,22 +91,18 @@ compressed audio formats such as MP3/M4A.
 
 ## Run the App
 
-Use either entry point:
+Use the canonical Streamlit entry point:
 
 ```powershell
 py -m streamlit run app\main.py
 ```
 
-```powershell
-py -m streamlit run main.py
-```
-
-`app/main.py` remains the canonical Streamlit Cloud entry point.
+`app/main.py` is also the Streamlit Cloud entry point.
 
 ## Prepare Datasets
 
 Place datasets under the channel folders described in
-[docs/DATA_PIPELINE.md](docs/DATA_PIPELINE.md), then run:
+[PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md#data-pipeline), then run:
 
 ```powershell
 py scripts\01_prepare_email_dataset.py
@@ -141,7 +135,7 @@ The numbered workflow is deliberate: `00` validates the environment, `01-03`
 prepare datasets, and `04-08` train models. Scripts are thin launchers only.
 Reusable functions and classes belong under `src/`; do not place heavy logic
 directly in `scripts/`. See
-[docs/MODEL_TRAINING.md](docs/MODEL_TRAINING.md) for inputs and outputs.
+[PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md#model-training) for inputs and outputs.
 
 ## Phone API Configuration
 
@@ -175,16 +169,33 @@ credit and current carrier lookup costs 10 credits. PenipuMY currently lists a
 Free API tier at 100 requests per day. Confirm the latest limits on the provider
 websites before a live demo.
 
-Omkar is archived under `archive/deprecated/phone_providers/omkar/` because its
-current free/demo response requires a paid Carrier Lookup plan. Never commit
-real API keys in `.env`, `.streamlit/secrets.toml`, notebooks, screenshots, or
-report files.
+The previous Omkar Carrier Lookup experiment is not part of the active
+dashboard package because its current free/demo response requires a paid
+Carrier Lookup plan. Never commit real API keys in `.env`,
+`.streamlit/secrets.toml`, notebooks, screenshots, or report files.
 
 Phone lookups return an Unknown result when no usable provider evidence is
-available. Fictional presentation rows belong in `data/demo/phone_demo_dataset.csv`
-or `data/demo/demo_phone_numbers.csv` and are reserved for explicit demo
-workflows. The full behavior is documented in
-[docs/PHONE_MODULE.md](docs/PHONE_MODULE.md).
+available. Reserved-number presentation rows belong in
+`data/demo/phone_demo_dataset.csv` or `data/demo/demo_phone_numbers.csv` and are
+reserved for explicit demo workflows. The full behavior is documented in
+[PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md#phone-module).
+
+## Demo Evidence And Seeded History
+
+Curated, non-personal upload examples are kept in `data/demo/`. The email and
+transcript CSVs include expected dashboard outcomes and the `data/demo/uploads/`
+folder contains individual `.txt` files that can be uploaded directly.
+
+The deployable report-history database can be reset to the lecturer demo state
+with:
+
+```powershell
+py scripts\seed_demo_history.py
+```
+
+That command replaces old local scan history with seed evidence rows, preserves
+the report workflow, shows seeded examples as demo ID `0` in the report table,
+and leaves future user-created scans to start from database ID `1`.
 
 ## Generated Artifacts
 
@@ -194,6 +205,8 @@ workflows. The full behavior is documented in
 - Report/history database: `data/session_history.db` is deployable when saved
   evidence should be available in the AI Report Generator; it stores scan
   history and report-export metadata, not retraining data
+- Curated report exports:
+  `output/reports/AIFDS_Student_Brief_Curated_Demo_Evidence.*`
 - Reviewer evidence: `notebooks/00_final_prototype_evidence_notebook.ipynb`
   and any exported HTML/PDF version of that notebook
 
@@ -213,6 +226,3 @@ demonstration when packaging the capstone submission.
 - Whisper transcription quality depends on language, noise, and FFmpeg.
 - Do not use AI-FDS as the sole basis for financial, legal, security, or
   disciplinary action.
-
-Implementation history and scope changes are recorded in
-[changes.md](changes.md).

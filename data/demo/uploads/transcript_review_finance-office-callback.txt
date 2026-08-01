@@ -1,0 +1,13 @@
+Caller: Good afternoon, I am calling from the finance support desk about a billing record under your student account.
+
+Recipient: I am not sure if I have any balance. Can I check the portal?
+
+Caller: Yes, you should check the official portal. The reason for this call is that one payment record may not have matched correctly because the reference number was incomplete.
+
+Recipient: What information do you need?
+
+Caller: I can only tell you the last two digits of the reference number. Please do not share your password or OTP. If you want us to investigate, send the receipt through the official finance ticketing system.
+
+Recipient: That sounds fine. I will open a ticket from the portal.
+
+Caller: Thank you. This case is review required in the dashboard because it involves billing and identity context, but the caller directs the student back to official channels instead of demanding payment on the call.

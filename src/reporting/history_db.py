@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS scan_history (
     score_label TEXT,
     score_available INTEGER,
     evidence_bundle TEXT,
-    provenance TEXT
+    provenance TEXT,
+    record_scope TEXT DEFAULT 'user_scan'
 );
 
 CREATE INDEX IF NOT EXISTS idx_scan_history_session_time
@@ -79,6 +80,7 @@ SCAN_HISTORY_ADDITIVE_COLUMNS = {
     "score_available": "INTEGER",
     "evidence_bundle": "TEXT",
     "provenance": "TEXT",
+    "record_scope": "TEXT DEFAULT 'user_scan'",
 }
 
 REPORT_EXPORT_ADDITIVE_COLUMNS = {
@@ -343,6 +345,7 @@ def normalise_history_item(item: dict[str, object], session_id: str = DEFAULT_SE
         "score_available": bool(score_available),
         "evidence_bundle": evidence_bundle,
         "provenance": provenance,
+        "record_scope": _string(item.get("record_scope"), "user_scan"),
     }
     row["source_fingerprint"] = _string(item.get("source_fingerprint")) or history_fingerprint(row)
     return row
@@ -390,6 +393,7 @@ def insert_scan(
     score_available: bool | None = None,
     evidence_bundle: dict[str, object] | str | None = None,
     provenance: dict[str, object] | str | None = None,
+    record_scope: str = "user_scan",
 ) -> int:
     """Insert one scan result and return its row id."""
 
@@ -414,6 +418,7 @@ def insert_scan(
         "score_available": score_available,
         "evidence_bundle": evidence_bundle or "",
         "provenance": provenance or "",
+        "record_scope": record_scope,
     }
     row = normalise_history_item(row, session_id=session_id)
     fingerprint = source_fingerprint or history_fingerprint(row)
@@ -425,9 +430,10 @@ def insert_scan(
                 session_id, scanned_at, scan_type, source_name, prediction,
                 confidence, model_name, preview, flags, explanation, raw_input,
                 report_note, source_fingerprint, native_prediction, action_status,
-                concern_score, score_label, score_available, evidence_bundle, provenance
+                concern_score, score_label, score_available, evidence_bundle,
+                provenance, record_scope
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row["session_id"],
@@ -450,6 +456,7 @@ def insert_scan(
                 1 if row["score_available"] else 0,
                 row["evidence_bundle"],
                 row["provenance"],
+                row["record_scope"],
             ),
         )
         if cursor.rowcount:
@@ -492,6 +499,7 @@ def sync_session_history(history: list[dict[str, object]], session_id: str = DEF
             score_available=bool(row["score_available"]),
             evidence_bundle=str(row["evidence_bundle"]),
             provenance=str(row["provenance"]),
+            record_scope=str(row["record_scope"]),
         )
         if before is None:
             inserted += 1
@@ -529,6 +537,7 @@ def record_history_item(
         score_available=bool(row["score_available"]),
         evidence_bundle=str(row["evidence_bundle"]),
         provenance=str(row["provenance"]),
+        record_scope=str(row["record_scope"]),
     )
 
 
@@ -627,18 +636,29 @@ def delete_selected(scan_ids: list[int]) -> int:
     placeholders = ",".join("?" for _ in scan_ids)
     with _connect() as connection:
         cursor = connection.execute(
-            f"DELETE FROM scan_history WHERE id IN ({placeholders})",
+            f"""
+            DELETE FROM scan_history
+            WHERE id IN ({placeholders})
+              AND COALESCE(record_scope, 'user_scan') <> 'seed_demo'
+            """,
             [int(scan_id) for scan_id in scan_ids],
         )
         return int(cursor.rowcount)
 
 
 def delete_all_history(session_id: str = DEFAULT_SESSION_ID) -> int:
-    """Delete all scan and export rows for the current local capstone session."""
+    """Delete user scan/export rows for the current local capstone session."""
 
     init_db()
     with _connect() as connection:
-        cursor = connection.execute("DELETE FROM scan_history WHERE session_id = ?", (session_id,))
+        cursor = connection.execute(
+            """
+            DELETE FROM scan_history
+            WHERE session_id = ?
+              AND COALESCE(record_scope, 'user_scan') <> 'seed_demo'
+            """,
+            (session_id,),
+        )
         connection.execute("DELETE FROM report_exports WHERE session_id = ?", (session_id,))
         return int(cursor.rowcount)
 

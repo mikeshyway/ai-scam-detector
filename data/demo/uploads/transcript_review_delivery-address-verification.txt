@@ -1,0 +1,13 @@
+Caller: This is courier support. We found suspicious activity on a parcel under your name.
+
+Recipient: I am expecting a textbook delivery. What is the tracking number?
+
+Caller: The parcel is on hold for customs and redelivery payment. Do not hang up. Click the link in the SMS to verify your identity, full address, phone number, ID number, card details, and OTP.
+
+Recipient: I do not want to share an OTP over the phone.
+
+Caller: The verification code is only to release the parcel. If you do not act today, the parcel will be cancelled and reported.
+
+Recipient: I will check the official courier app first.
+
+Caller: This case should be treated as review required because it could begin like a delivery issue, but the caller asks for identity details, card details, OTP verification, and immediate action through an SMS link.

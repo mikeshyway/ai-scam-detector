@@ -1,0 +1,23 @@
+From: Sarah Jenkins <sarah.jenkins@example.edu>
+To: Operations Project Team <operations-team@example.edu>
+Subject: Project Kickoff and Sync Meeting - Q3 Roadmap
+Date: Wed, 3 Jun 2026 15:20:00 +0800
+
+Hi Team,
+
+I hope you are all having a productive week.
+
+As we approach the start of Q3, I would like to schedule our official project kickoff and sync meeting. The goal of this session is to align on our core deliverables, review the updated product roadmap, and assign primary ownership for the upcoming engineering sprints.
+
+Details for the session:
+- Date: Monday, June 8
+- Time: 10:00 AM to 11:30 AM
+- Agenda: roadmap review, resource allocation, open questions, and next steps
+
+I have attached the tentative calendar invite to this email thread. Please review the shared roadmap document in our team portal ahead of time so we can begin with the decisions that need wider discussion.
+
+If you have any agenda items to add, please place them in the shared team channel by Friday afternoon. Looking forward to catching up and starting the next phase together.
+
+Best regards,
+Sarah Jenkins
+Senior Project Manager, Operations Division

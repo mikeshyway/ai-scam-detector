@@ -1,0 +1,275 @@
+AI-FDS Student Investigation Brief
+Generated: 2026-08-01 15:48:00 (Asia/Kuala_Lumpur, GMT+08:00)
+Case: AI-FDS-CURATED-DEMO-20260801
+Purpose: Lecturer walkthrough using curated non-personal email, transcript, and reserved-number phone evidence.
+
+Investigation Summary
+- Evidence reviewed: 8
+- Immediate action: 5
+- Review needed: 0
+- No immediate action: 3
+
+What should I do next?
+1. [Immediate] Pause contact and do not send money, credentials, OTPs, files, or remote access.
+   Why: Stopping the interaction limits further exposure while the evidence is verified.
+2. [Immediate] Stop payment and contact the bank or payment provider through its official fraud channel.
+   Why: Fast reporting may improve the chance of limiting or tracing a transfer.
+3. [Immediate] Do not disclose the code or password; change exposed credentials and contact the account provider.
+   Why: OTPs and passwords can enable account takeover.
+
+Evidence Review
+
+Evidence 1 - Phone - 2026-08-01 09:07:00
+Result: Lower concern
+Attention: No Immediate Action
+Evidence score: 8.0% (Curated expected concern)
+Analysis method: Curated Phone Demo Fixture
+Why: The seeded fixture represents a lower-concern phone scenario and does not identify a real caller.
+Key indicators: Reserved demo number, No curated scam reports, Routine campus contact
+Relevant excerpt: +447700900102 | campus office
+Next action: Call the organization using a number from its official website or trusted statement.
+
+Evidence 2 - Phone - 2026-08-01 09:06:00
+Result: High concern
+Attention: Immediate Action Required
+Evidence score: 86.0% (Curated expected concern)
+Analysis method: Curated Phone Demo Fixture
+Why: The seeded fixture represents a high-concern phone reputation scenario without storing a real person's number.
+Key indicators: Reserved demo number, Bank impersonation tag, 31 curated reports
+Relevant excerpt: +447700900101 | bank impersonation
+Next action: Pause contact and do not send money, credentials, OTPs, files, or remote access.
+
+Evidence 3 - Transcript - 2026-08-01 09:05:00
+Result: Scam
+Attention: Immediate Action Required
+Evidence score: 90.0% (Curated expected concern)
+Analysis method: Transcript DistilBERT/TF-IDF Ensemble
+Why: Authority impersonation, secrecy, and urgent transfer instructions indicate high-risk scam behavior.
+Key indicators: Authority impersonation, Secrecy request, Money transfer pressure
+Relevant excerpt: Keep this confidential.
+Next action: Pause contact and do not send money, credentials, OTPs, files, or remote access.
+
+Evidence 4 - Transcript - 2026-08-01 09:04:00
+Result: Non-scam
+Attention: No Immediate Action
+Evidence score: 14.0% (Curated expected concern)
+Analysis method: Transcript DistilBERT/TF-IDF Ensemble
+Why: The call points to an official portal and contains no money, credential, secrecy, or threat indicators.
+Key indicators: Official portal, Routine academic process, No secrecy request
+Relevant excerpt: Advisor: Your course registration form is due Friday.
+Next action: Retain the earliest available recording, transcript, timestamps, and unedited working copy.
+
+Evidence 5 - Transcript - 2026-08-01 09:03:00
+Result: Scam
+Attention: Immediate Action Required
+Evidence score: 92.0% (Curated expected concern)
+Analysis method: Transcript DistilBERT/TF-IDF Ensemble
+Why: The caller impersonates a bank and requests TAC/OTP codes under immediate pressure.
+Key indicators: Bank impersonation, OTP request, Pressure to stay on call
+Relevant excerpt: Do not end this call.
+Next action: Pause contact and do not send money, credentials, OTPs, files, or remote access.
+
+Evidence 6 - Email - 2026-08-01 09:02:00
+Result: Suspicious
+Attention: Immediate Action Required
+Evidence score: 84.0% (Curated expected concern)
+Analysis method: Email TF-IDF Ensemble
+Why: Unexpected scholarship reward plus urgent processing-fee pressure is a common student-targeted scam pattern.
+Key indicators: Unexpected reward, Processing fee, Same-day pressure
+Relevant excerpt: Pay the RM150 processing fee today by instant transfer or your award will be cancelled.
+Next action: Pause contact and do not send money, credentials, OTPs, files, or remote access.
+
+Evidence 7 - Email - 2026-08-01 09:01:00
+Result: Legitimate
+Attention: No Immediate Action
+Evidence score: 10.0% (Curated expected concern)
+Analysis method: Email TF-IDF Ensemble
+Why: The message is routine and does not ask for money, OTPs, passwords, secrecy, or off-platform verification.
+Key indicators: Routine campus notice, No payment request, No credential request
+Relevant excerpt: Please bring your student card.
+Next action: Do not disclose the code or password; change exposed credentials and contact the account provider.
+
+Evidence 8 - Email - 2026-08-01 09:00:00
+Result: Suspicious
+Attention: Immediate Action Required
+Evidence score: 88.0% (Curated expected concern)
+Analysis method: Email TF-IDF Ensemble
+Why: Urgency, credential collection, OTP request, and a non-official verification URL align with phishing indicators.
+Key indicators: Urgent deadline, Password request, OTP request
+Relevant excerpt: Subject: Action required: mailbox suspension
+Next action: Pause contact and do not send money, credentials, OTPs, files, or remote access.
+
+Combined Investigation Findings
+- OTP request | Email #8, Transcript #5 | High
+- Reserved demo number | Phone #1, Phone #2 | High
+- 31 curated reports | Phone #2 | High
+- Authority impersonation | Transcript #3 | High
+- Bank impersonation | Transcript #5 | High
+
+Visual Evidence Summary
+Attention Overview
+- Immediate Action Required: 5
+- Review Required: 0
+- No Immediate Action: 3
+
+Evidence Type Distribution
+- Transcript: 3
+- Email: 3
+- Phone: 2
+
+Indicator Categories
+- Reserved demo number: 2
+- OTP request: 2
+- No curated scam reports: 1
+- Routine campus contact: 1
+- Bank impersonation tag: 1
+- 31 curated reports: 1
+- Authority impersonation: 1
+- Secrecy request: 1
+
+Source-Native Concern Scores
+- Evidence 1 - Phone: 8.0% (Curated expected concern)
+- Evidence 2 - Phone: 86.0% (Curated expected concern)
+- Evidence 3 - Transcript: 90.0% (Curated expected concern)
+- Evidence 4 - Transcript: 14.0% (Curated expected concern)
+- Evidence 5 - Transcript: 92.0% (Curated expected concern)
+- Evidence 6 - Email: 84.0% (Curated expected concern)
+- Evidence 7 - Email: 10.0% (Curated expected concern)
+- Evidence 8 - Email: 88.0% (Curated expected concern)
+- Interpretation note: scores from email, transcript/audio, and phone evidence use different methods and are not directly comparable.
+
+Reviewer Note
+Verify suspicious contact through official channels, do not share OTP/passwords, preserve the evidence, and report urgent financial or identity-related requests to the relevant campus or organisation support team.
+
+Technical Appendix
+Evidence-Specific Supporting Visuals and Data
+
+Evidence 1 - Phone
+Result: Lower concern
+Attention: No Immediate Action
+Source: +447700900102
+Timestamp: 2026-08-01 09:07:00
+Supporting Visuals and Data
+1. [Table] Phone demo reputation fixture
+   Reserved-number fixture for repeatable lecturer report generation.
+   - sample_id: DEMO-PHONE-LEGIT-001 | phone_number: +447700900102 | reports: 0 | tag: campus office | expected_prediction: Lower concern | expected_action_status: No Immediate Action | expected_concern_score: 8.0
+
+Evidence 2 - Phone
+Result: High concern
+Attention: Immediate Action Required
+Source: +447700900101
+Timestamp: 2026-08-01 09:06:00
+Supporting Visuals and Data
+1. [Table] Phone demo reputation fixture
+   Reserved-number fixture for repeatable lecturer report generation.
+   - sample_id: DEMO-PHONE-SCAM-001 | phone_number: +447700900101 | reports: 31 | tag: bank impersonation | expected_prediction: High concern | expected_action_status: Immediate Action Required | expected_concern_score: 86.0
+
+Evidence 3 - Transcript
+Result: Scam
+Attention: Immediate Action Required
+Source: demo_transcript_police_case.txt
+Timestamp: 2026-08-01 09:05:00
+Supporting Visuals and Data
+1. [Text] Demo call transcript
+   Upload-ready transcript text used for the seeded result.
+   Content: Caller: Your parcel is connected to a police case. Keep this confidential. Transfer RM500 to the secure account today so we can clear your name.
+2. [Table] Expected output
+   Curated expected output for lecturer demo checks.
+   - sample_id: DEMO-TRANSCRIPT-SCAM-002 | expected_prediction: Scam | expected_action_status: Immediate Action Required | expected_concern_score: 90.0
+
+Evidence 4 - Transcript
+Result: Non-scam
+Attention: No Immediate Action
+Source: demo_transcript_advisor_portal.txt
+Timestamp: 2026-08-01 09:04:00
+Supporting Visuals and Data
+1. [Text] Demo call transcript
+   Upload-ready transcript text used for the seeded result.
+   Content: Advisor: Your course registration form is due Friday. Please submit it through the official student portal. Email me if you have questions about the module list.
+2. [Table] Expected output
+   Curated expected output for lecturer demo checks.
+   - sample_id: DEMO-TRANSCRIPT-LEGIT-001 | expected_prediction: Non-scam | expected_action_status: No Immediate Action | expected_concern_score: 14.0
+
+Evidence 5 - Transcript
+Result: Scam
+Attention: Immediate Action Required
+Source: demo_transcript_bank_otp.txt
+Timestamp: 2026-08-01 09:03:00
+Supporting Visuals and Data
+1. [Text] Demo call transcript
+   Upload-ready transcript text used for the seeded result.
+   Content: Caller: I am from the bank fraud team. Your account is frozen. Do not end this call. Read me the TAC and OTP now so I can cancel the suspicious transfer.
+2. [Table] Expected output
+   Curated expected output for lecturer demo checks.
+   - sample_id: DEMO-TRANSCRIPT-SCAM-001 | expected_prediction: Scam | expected_action_status: Immediate Action Required | expected_concern_score: 92.0
+
+Evidence 6 - Email
+Result: Suspicious
+Attention: Immediate Action Required
+Source: demo_email_scholarship_fee.txt
+Timestamp: 2026-08-01 09:02:00
+Supporting Visuals and Data
+1. [Text] Demo email body
+   Upload-ready email text used for the seeded result.
+   Content: Subject: Scholarship selected notice
+
+Congratulations, you were selected for a student grant. Pay the RM150 processing fee today by instant transfer or your award will be cancelled.
+2. [Table] Expected output
+   Curated expected output for lecturer demo checks.
+   - sample_id: DEMO-EMAIL-SCAM-002 | expected_prediction: Suspicious | expected_action_status: Immediate Action Required | expected_concern_score: 84.0
+
+Evidence 7 - Email
+Result: Legitimate
+Attention: No Immediate Action
+Source: demo_email_library_notice.txt
+Timestamp: 2026-08-01 09:01:00
+Supporting Visuals and Data
+1. [Text] Demo email body
+   Upload-ready email text used for the seeded result.
+   Content: From: Library Services <library@example.edu>
+Subject: Requested book is ready
+
+The book you requested is ready for collection at the circulation desk. Please bring your student card.
+2. [Table] Expected output
+   Curated expected output for lecturer demo checks.
+   - sample_id: DEMO-EMAIL-LEGIT-001 | expected_prediction: Legitimate | expected_action_status: No Immediate Action | expected_concern_score: 10.0
+
+Evidence 8 - Email
+Result: Suspicious
+Attention: Immediate Action Required
+Source: demo_email_urgent_mailbox.txt
+Timestamp: 2026-08-01 09:00:00
+Supporting Visuals and Data
+1. [Text] Demo email body
+   Upload-ready email text used for the seeded result.
+   Content: From: University IT Helpdesk <notice@example.edu>
+Subject: Action required: mailbox suspension
+
+Your student mailbox will be suspended in two hours. Confirm your password and OTP at https://student-mail-verify.example.invalid to keep access.
+2. [Table] Expected output
+   Curated expected output for lecturer demo checks.
+   - sample_id: DEMO-EMAIL-SCAM-001 | expected_prediction: Suspicious | expected_action_status: Immediate Action Required | expected_concern_score: 88.0
+
+Shared Model Reference Metrics
+- No shared model evaluation artifacts were captured.
+
+Technical Evidence Register
+- 1 | ID -8 | Phone | 2026-08-01 09:07:00 | SHA-256: 3663765d6908e4e2d47bc8371d83a5da1aac95d981cdc71ee3e09f75f7a957c4 | Curated Phone Demo Fixture
+- 2 | ID -7 | Phone | 2026-08-01 09:06:00 | SHA-256: 26c74270c576f3fef307024bc8f5dc64d98bf240c5dd02ccd10e8f214feb3573 | Curated Phone Demo Fixture
+- 3 | ID -6 | Transcript | 2026-08-01 09:05:00 | SHA-256: 7f452fb4fa13ca23b077602a498f787e4b8454de6ebf6977a936b500f2af9121 | Transcript DistilBERT/TF-IDF Ensemble
+- 4 | ID -5 | Transcript | 2026-08-01 09:04:00 | SHA-256: 6ad7dccb14a243d8e2fbf4a863a75a5a03d7d5e47788712f844f4d8df0ced71a | Transcript DistilBERT/TF-IDF Ensemble
+- 5 | ID -4 | Transcript | 2026-08-01 09:03:00 | SHA-256: b866f2ea9c87e16e189315df202ffeb2110815891725964d3974e51eb43c21e4 | Transcript DistilBERT/TF-IDF Ensemble
+- 6 | ID -3 | Email | 2026-08-01 09:02:00 | SHA-256: 57e7f0f2ce8b7445ff2d4867491f5f9821512468479fb82527b9b4e173cf256c | Email TF-IDF Ensemble
+- 7 | ID -2 | Email | 2026-08-01 09:01:00 | SHA-256: a6d980b805a967a4e05ebe4414fb5a387676dffac1dde1d3e1e3e2d75d49047d | Email TF-IDF Ensemble
+- 8 | ID -1 | Email | 2026-08-01 09:00:00 | SHA-256: 7ae758c076a0994cb1340dedb04b4adde82c42bf5eb256a8571cca78f610acdf | Email TF-IDF Ensemble
+
+Scope and References
+- Educational scam-awareness support only. Results support review and do not prove identity, intent, legal liability, or authenticity.
+- EC-Council CEH - Social Engineering, Phishing, AI Impersonation, and Countermeasures: https://www.eccouncil.org/train-certify/certified-ethical-hacker-ceh/
+- NIST SP 800-61 Rev. 3 - Incident Response Recommendations and Considerations: https://csrc.nist.gov/pubs/sp/800/61/r3/final
+- SWGDE Requirements for Report Writing in Digital and Multimedia Forensics: https://www.swgde.org/documents/published-complete-listing/18-q-002-swgde-requirements-for-report-writing-in-digital-and-multimedia-forensics/
+- SWGDE Best Practices for Digital Evidence Collection: https://www.swgde.org/documents/published-complete-listing/18-f-002-best-practices-for-digital-evidence-collection/
+- NISTIR 8312 - Four Principles of Explainable Artificial Intelligence: https://www.nist.gov/publications/four-principles-explainable-artificial-intelligence
+- CISA Secure Our World - Recognize and Report Phishing: https://www.cisa.gov/secure-our-world
+- FTC Consumer Advice - AI Voice Cloning and Family Emergency Scams: https://consumer.ftc.gov/articles/scammers-use-fake-emergencies-steal-your-money
+- FCC Consumer Complaints - Unwanted Calls, Texts, and Caller ID Spoofing: https://consumercomplaints.fcc.gov/hc/en-us/articles/115002234203-Unwanted-Calls-Texts-Phone

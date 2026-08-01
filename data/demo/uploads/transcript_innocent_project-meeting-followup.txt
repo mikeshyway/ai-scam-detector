@@ -1,0 +1,11 @@
+Team Member: Thanks everyone for joining the project meeting. I want to confirm the tasks before we close.
+
+Coordinator: The dashboard screenshots are due Thursday, the data pipeline notes are due Friday, and the final slides should be uploaded to the shared folder before the rehearsal.
+
+Team Member: I can handle the dashboard screenshots and the explanation for the model comparison charts.
+
+Coordinator: Good. Please use the existing project folder and name the files clearly. Do not upload anything with personal phone numbers or private email addresses.
+
+Team Member: Got it. I will use the curated demo examples only.
+
+Coordinator: Perfect. We will meet again next Monday at 10 AM to check the report flow and presentation timing.

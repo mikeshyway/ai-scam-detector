@@ -1,15 +1,15 @@
-"""Temporary synthetic data for app demonstrations before official datasets are inserted."""
+"""Curated, non-personal demo evidence for app demonstrations."""
 
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass
+from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 
-DEMO_DATA_NOTICE = "TEMPORARY_SYNTHETIC_DEMO_DATA_REMOVE_AFTER_OFFICIAL_DATASET_INSERTION"
+DEMO_DATA_NOTICE = "CURATED_DEMO_EVIDENCE_RESERVED_OR_FICTIONAL"
+DEMO_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "demo"
 
 
 @dataclass(frozen=True)
@@ -20,85 +20,215 @@ class QuizQuestion:
     explanation: str
 
 
-def build_demo_emails(seed: int = 22057764) -> pd.DataFrame:
-    rng = random.Random(seed)
-    scam_templates = [
-        "Urgent: your university email account will be suspended within 24 hours. Verify your account at {url}.",
-        "Scholarship selected notice. Kindly pay RM{amount} processing fee today to release your award.",
-        "Final warning from finance office: tuition payment failed. Send your bank account details immediately.",
-        "Internship offer confirmed. Click here and upload your password and OTP to activate your placement.",
-        "Professor request: do not tell anyone, buy gift card codes worth RM{amount} and reply now.",
-    ]
-    safe_templates = [
-        "Reminder: your lab session starts at 10 AM. Please review the slides before class.",
-        "The library book you requested is ready for collection at the front desk.",
-        "Your assignment feedback has been uploaded to the learning management system.",
-        "Student council meeting notes are attached for your review.",
-        "Career services has shared a public workshop schedule for next week.",
-    ]
+def _load_demo_csv(filename: str) -> pd.DataFrame | None:
+    path = DEMO_DATA_DIR / filename
+    if not path.exists():
+        return None
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        return None
 
-    rows = []
-    for i in range(18):
-        is_scam = i % 2 == 0
-        template = rng.choice(scam_templates if is_scam else safe_templates)
-        rows.append(
+
+def build_demo_emails(seed: int = 22057764) -> pd.DataFrame:
+    del seed
+    loaded = _load_demo_csv("demo_emails.csv")
+    if loaded is not None:
+        return loaded
+    return pd.DataFrame(
+        [
             {
-                "sample_id": f"DEMO-EMAIL-{i + 1:03d}",
-                "text": template.format(url="https://example-login.invalid", amount=rng.choice([80, 150, 300])),
-                "label": "Suspicious" if is_scam else "Legitimate",
+                "sample_id": "DEMO-EMAIL-SCAM-001",
+                "text": "From: University IT Helpdesk <notice@example.edu> Subject: Action required: mailbox suspension Your student mailbox will be suspended in two hours. Confirm your password and OTP at https://student-mail-verify.example.invalid to keep access.",
+                "label": "Suspicious",
+                "expected_native_prediction": "Suspicious",
+                "expected_action_status": "Immediate Action Required",
+                "expected_concern_score": 88,
+                "demo_file_name": "demo_email_urgent_mailbox.txt",
+                "seeded_report_row": "yes",
                 "source": DEMO_DATA_NOTICE,
-            }
-        )
-    return pd.DataFrame(rows)
+            },
+            {
+                "sample_id": "DEMO-EMAIL-LEGIT-001",
+                "text": "From: Library Services <library@example.edu> Subject: Requested book is ready The book you requested is ready for collection at the circulation desk. Please bring your student card.",
+                "label": "Legitimate",
+                "expected_native_prediction": "Legitimate",
+                "expected_action_status": "No Immediate Action",
+                "expected_concern_score": 10,
+                "demo_file_name": "demo_email_library_notice.txt",
+                "seeded_report_row": "yes",
+                "source": DEMO_DATA_NOTICE,
+            },
+            {
+                "sample_id": "DEMO-EMAIL-SCAM-002",
+                "text": "Subject: Scholarship selected notice Congratulations, you were selected for a student grant. Pay the RM150 processing fee today by instant transfer or your award will be cancelled.",
+                "label": "Suspicious",
+                "expected_native_prediction": "Suspicious",
+                "expected_action_status": "Immediate Action Required",
+                "expected_concern_score": 84,
+                "demo_file_name": "demo_email_scholarship_fee.txt",
+                "seeded_report_row": "yes",
+                "source": DEMO_DATA_NOTICE,
+            },
+            {
+                "sample_id": "DEMO-EMAIL-LEGIT-002",
+                "text": "Subject: Workshop schedule Career services has shared the public workshop schedule for next week. Register through the normal student portal if you want to attend.",
+                "label": "Legitimate",
+                "expected_native_prediction": "Legitimate",
+                "expected_action_status": "No Immediate Action",
+                "expected_concern_score": 12,
+                "demo_file_name": "demo_email_workshop_schedule.txt",
+                "seeded_report_row": "no",
+                "source": DEMO_DATA_NOTICE,
+            },
+            {
+                "sample_id": "DEMO-EMAIL-SCAM-003",
+                "text": "Subject: Confidential professor request Do not discuss this with anyone. Buy RM300 gift card codes and reply with the numbers within one hour.",
+                "label": "Suspicious",
+                "expected_native_prediction": "Suspicious",
+                "expected_action_status": "Immediate Action Required",
+                "expected_concern_score": 90,
+                "demo_file_name": "demo_email_gift_card_request.txt",
+                "seeded_report_row": "no",
+                "source": DEMO_DATA_NOTICE,
+            },
+            {
+                "sample_id": "DEMO-EMAIL-LEGIT-003",
+                "text": "Subject: Assignment feedback uploaded Your assignment feedback has been uploaded to the learning management system. Review it when you are free.",
+                "label": "Legitimate",
+                "expected_native_prediction": "Legitimate",
+                "expected_action_status": "No Immediate Action",
+                "expected_concern_score": 9,
+                "demo_file_name": "demo_email_assignment_feedback.txt",
+                "seeded_report_row": "no",
+                "source": DEMO_DATA_NOTICE,
+            },
+        ]
+    )
 
 
 def build_demo_transcripts(seed: int = 22057764) -> pd.DataFrame:
-    rng = random.Random(seed + 7)
-    scam_lines = [
-        "Caller: I am from the bank fraud team. Your account is suspended. Share the OTP immediately.",
-        "Caller: This is confidential. Do not tell anyone. Transfer RM500 to secure your student visa.",
-        "Caller: Your parcel is linked to a police case. Verify your IC and bank account now.",
-        "Caller: The scholarship office selected you, but you must pay a processing fee within 24 hours.",
-    ]
-    safe_lines = [
-        "Lecturer: Tomorrow's class will move online. The official meeting link is in the LMS announcement.",
-        "Advisor: Please submit your course registration form before Friday through the student portal.",
-        "Team member: Let us review the project timeline and divide the documentation tasks.",
-        "Parent: Call me after class when you are free. No rush.",
-    ]
-    rows = []
-    for i in range(16):
-        is_scam = i % 2 == 0
-        text = rng.choice(scam_lines if is_scam else safe_lines)
-        rows.append(
+    del seed
+    loaded = _load_demo_csv("demo_transcripts.csv")
+    if loaded is not None:
+        return loaded
+    return pd.DataFrame(
+        [
             {
-                "sample_id": f"DEMO-CALL-{i + 1:03d}",
-                "transcript": text,
-                "label": "Scam" if is_scam else "Non-scam",
+                "sample_id": "DEMO-TRANSCRIPT-SCAM-001",
+                "transcript": "Caller: I am from the bank fraud team. Your account is frozen. Do not end this call. Read me the TAC and OTP now so I can cancel the suspicious transfer.",
+                "label": "Scam",
+                "expected_native_prediction": "Scam",
+                "expected_action_status": "Immediate Action Required",
+                "expected_concern_score": 92,
+                "demo_file_name": "demo_transcript_bank_otp.txt",
+                "seeded_report_row": "yes",
                 "source": DEMO_DATA_NOTICE,
-            }
-        )
-    return pd.DataFrame(rows)
+            },
+            {
+                "sample_id": "DEMO-TRANSCRIPT-LEGIT-001",
+                "transcript": "Advisor: Your course registration form is due Friday. Please submit it through the official student portal. Email me if you have questions about the module list.",
+                "label": "Non-scam",
+                "expected_native_prediction": "Non-scam",
+                "expected_action_status": "No Immediate Action",
+                "expected_concern_score": 14,
+                "demo_file_name": "demo_transcript_advisor_portal.txt",
+                "seeded_report_row": "yes",
+                "source": DEMO_DATA_NOTICE,
+            },
+            {
+                "sample_id": "DEMO-TRANSCRIPT-SCAM-002",
+                "transcript": "Caller: Your parcel is connected to a police case. Keep this confidential. Transfer RM500 to the secure account today so we can clear your name.",
+                "label": "Scam",
+                "expected_native_prediction": "Scam",
+                "expected_action_status": "Immediate Action Required",
+                "expected_concern_score": 90,
+                "demo_file_name": "demo_transcript_police_case.txt",
+                "seeded_report_row": "yes",
+                "source": DEMO_DATA_NOTICE,
+            },
+            {
+                "sample_id": "DEMO-TRANSCRIPT-LEGIT-002",
+                "transcript": "Lecturer: Tomorrow's class will move online. The official meeting link is in the LMS announcement. There is no fee and no password request.",
+                "label": "Non-scam",
+                "expected_native_prediction": "Non-scam",
+                "expected_action_status": "No Immediate Action",
+                "expected_concern_score": 11,
+                "demo_file_name": "demo_transcript_online_class.txt",
+                "seeded_report_row": "no",
+                "source": DEMO_DATA_NOTICE,
+            },
+            {
+                "sample_id": "DEMO-TRANSCRIPT-SCAM-003",
+                "transcript": "Caller: The scholarship office selected you, but you must pay a processing fee within 24 hours. Do not contact the university office because this is a private offer.",
+                "label": "Scam",
+                "expected_native_prediction": "Scam",
+                "expected_action_status": "Immediate Action Required",
+                "expected_concern_score": 87,
+                "demo_file_name": "demo_transcript_scholarship_fee.txt",
+                "seeded_report_row": "no",
+                "source": DEMO_DATA_NOTICE,
+            },
+            {
+                "sample_id": "DEMO-TRANSCRIPT-LEGIT-003",
+                "transcript": "Team member: Let us review the project timeline, divide the documentation tasks, and upload the final slides before Friday.",
+                "label": "Non-scam",
+                "expected_native_prediction": "Non-scam",
+                "expected_action_status": "No Immediate Action",
+                "expected_concern_score": 8,
+                "demo_file_name": "demo_transcript_project_meeting.txt",
+                "seeded_report_row": "no",
+                "source": DEMO_DATA_NOTICE,
+            },
+        ]
+    )
 
 
 def build_demo_phone_reputation(seed: int = 22057764) -> pd.DataFrame:
-    rng = np.random.default_rng(seed + 17)
-    prefixes = ["+60 11", "+60 12", "+60 13", "+60 16", "+65 8", "+44 20"]
-    tags = ["bank impersonation", "parcel scam", "unknown recruiter", "campus office", "family", "delivery"]
-    rows = []
-    for i in range(20):
-        reports = int(rng.integers(0, 44))
-        risk_score = min(99, reports * 2 + int(rng.integers(0, 25)))
-        rows.append(
+    del seed
+    loaded = _load_demo_csv("demo_phone_numbers.csv")
+    if loaded is not None:
+        return loaded
+    rows = [
+        ("DEMO-PHONE-SCAM-001", "+447700900101", "scam", 31, 86, "bank impersonation", "High concern", "Immediate Action Required", "yes"),
+        ("DEMO-PHONE-SCAM-002", "+447700900103", "scam", 27, 78, "parcel scam", "High concern", "Immediate Action Required", "no"),
+        ("DEMO-PHONE-SCAM-003", "+447700900105", "scam", 24, 76, "authority impersonation", "High concern", "Immediate Action Required", "no"),
+        ("DEMO-PHONE-SCAM-004", "+447700900107", "scam", 19, 72, "remote access pressure", "High concern", "Immediate Action Required", "no"),
+        ("DEMO-PHONE-SCAM-005", "+447700900109", "scam", 16, 70, "investment pitch", "High concern", "Immediate Action Required", "no"),
+        ("DEMO-PHONE-LEGIT-001", "+447700900102", "innocent", 0, 8, "campus office", "Lower concern", "No Immediate Action", "yes"),
+        ("DEMO-PHONE-LEGIT-002", "+447700900104", "innocent", 1, 12, "library desk", "Lower concern", "No Immediate Action", "no"),
+        ("DEMO-PHONE-LEGIT-003", "+447700900106", "innocent", 0, 6, "course advisor", "Lower concern", "No Immediate Action", "no"),
+        ("DEMO-PHONE-LEGIT-004", "+447700900108", "innocent", 1, 14, "delivery reminder", "Lower concern", "No Immediate Action", "no"),
+        ("DEMO-PHONE-LEGIT-005", "+447700900110", "innocent", 0, 7, "student services", "Lower concern", "No Immediate Action", "no"),
+    ]
+    return pd.DataFrame(
+        [
             {
-                "phone_number": f"{prefixes[i % len(prefixes)]} {int(rng.integers(1000, 9999))} {int(rng.integers(1000, 9999))}",
+                "sample_id": sample_id,
+                "phone_number": phone_number,
+                "demo_group": demo_group,
                 "reports": reports,
                 "risk_score": risk_score,
-                "tag": tags[i % len(tags)],
+                "tag": tag,
+                "expected_native_prediction": prediction,
+                "expected_action_status": action_status,
+                "seeded_report_row": seeded,
                 "source": DEMO_DATA_NOTICE,
+                "notes": "Reserved drama/demo number",
             }
-        )
-    return pd.DataFrame(rows)
+            for (
+                sample_id,
+                phone_number,
+                demo_group,
+                reports,
+                risk_score,
+                tag,
+                prediction,
+                action_status,
+                seeded,
+            ) in rows
+        ]
+    )
 
 
 def build_model_comparison() -> pd.DataFrame:
